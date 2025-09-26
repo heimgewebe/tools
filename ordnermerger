@@ -36,6 +36,27 @@ def _script_home() -> Path:
     if h: return Path(h).expanduser().resolve()
     return Path(__file__).resolve().parent
 
+def _is_forbidden_source(src: Path, home: Path) -> bool:
+    # verbiete App-Home selbst und dessen merges/
+    src = src.resolve()
+    home = home.resolve()
+    merges = home / "merges"
+    if src == home or src == merges:
+        return True
+    # verbiete, wenn Quelle *unter* dem App-Home liegt (self-merge vermeiden)
+    try:
+        if src.is_relative_to(home):
+            return True
+    except AttributeError:
+        # Python <3.9 fallback
+        if str(src).startswith(str(home) + os.sep):
+            return True
+    # verbiete offensichtliche System-/Temp-Ordner
+    bad_names = {"merges", ".git", ".cache", ".venv", "__pycache__"}
+    if src.name in bad_names or src.name.startswith(".") or src.name.startswith("_"):
+        return True
+    return False
+
 def _human(n:int)->str:
     u=["B","KB","MB","GB","TB"]; f=float(n); i=0
     while f>=1024 and i<len(u)-1: f/=1024; i+=1
@@ -130,6 +151,10 @@ def main(argv:list[str])->int:
     for src in selected:
         if not src.is_dir():
             print(f"⚠️ Überspringe (kein Ordner): {src}")
+            continue
+        home = _script_home()
+        if _is_forbidden_source(src, home):
+            print(f"⛔ Überspringe geschützte Quelle: {src} (App-Home oder technisch)")
             continue
         out = _out_path(src, merge_dir, args.utc, args.pattern)
         merge_folder(src, out)
