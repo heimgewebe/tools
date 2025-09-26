@@ -152,7 +152,7 @@ def main(argv:list[str])->int:
         if not src.is_dir():
             print(f"⚠️ Überspringe (kein Ordner): {src}")
             continue
-        home = _script_home()
+        # home = _script_home()  # redundant, use value from before loop
         if _is_forbidden_source(src, home):
             print(f"⛔ Überspringe geschützte Quelle: {src} (App-Home oder technisch)")
             continue
