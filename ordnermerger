@@ -49,7 +49,7 @@ def _is_forbidden_source(src: Path, home: Path) -> bool:
             return True
     except AttributeError:
         # Python <3.9 fallback
-        if str(src).startswith(str(home) + os.sep):
+        if str(src).startswith(str(home) + os.sep) or str(src) == str(home):
             return True
     # verbiete offensichtliche System-/Temp-Ordner
     bad_names = {"merges", ".git", ".cache", ".venv", "__pycache__"}
