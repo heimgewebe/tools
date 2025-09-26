@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ordnermerger — Auswahl- oder Here-Merge (non-destructive)
+
+Ohne Argumente:      merge des aktuellen Arbeitsordners (PWD)
+--here:              dito, explizit
+--selected <ORDNER>  (mehrfach möglich): merge genau dieser Ordner
+
+Zielordner: <HOME>/merges, wobei HOME so ermittelt wird:
+  1) ENV ORDNERMERGER_HOME (vom Wrapper/Nautilus gesetzt), sonst
+  2) Ordner der echten Scriptdatei (Symlinks/Wrapper aufgelöst)
+"""
+
+from __future__ import annotations
+import os, sys, hashlib
+from pathlib import Path
+from datetime import datetime, timezone
+
+ENC = "utf-8"
+DEFAULT_NAME_PATTERN = "{name}_merge_%y%m%d%H%M"
+
+BINARY_EXTS = {".png",".jpg",".jpeg",".gif",".webp",".avif",".bmp",".ico",
+    ".pdf",".mp3",".wav",".flac",".ogg",".m4a",".aac",
+    ".mp4",".mkv",".mov",".avi",
+    ".zip",".gz",".bz2",".xz",".7z",".rar",".zst",
+    ".ttf",".otf",".woff",".woff2",
+    ".so",".dylib",".dll",".exe",
+    ".db",".sqlite",".sqlite3",".realm",".mdb",".pack",".idx"}
+LANG_MAP = {"py":"python","js":"javascript","ts":"typescript","html":"html","css":"css",
+            "md":"markdown","json":"json","xml":"xml","yaml":"yaml","yml":"yaml",
+            "sh":"bash","sql":"sql","txt":""}
+
+def _script_home() -> Path:
+    h = os.environ.get("ORDNERMERGER_HOME")
+    if h: return Path(h).expanduser().resolve()
+    return Path(__file__).resolve().parent
+
+def _human(n:int)->str:
+    u=["B","KB","MB","GB","TB"]; f=float(n); i=0
+    while f>=1024 and i<len(u)-1: f/=1024; i+=1
+    return f"{f:.1f} {u[i]}"
+
+def _is_text(p: Path)->bool:
+    if p.suffix.lower() in BINARY_EXTS: return False
+    try:
+        with p.open("rb") as fh: fh.read(2048).decode(ENC)
+        return True
+    except Exception: return False
+
+def _md5(p: Path)->str:
+    h=hashlib.md5()
+    with p.open("rb") as fh:
+        for ch in iter(lambda: fh.read(1<<16), b""): h.update(ch)
+    return h.hexdigest()
+
+def _lang(p: Path)->str:
+    return LANG_MAP.get(p.suffix.lstrip(".").lower(), "")
+
+def _tree(out, root: Path):
+    def rec(cur: Path, depth:int):
+        try: entries=sorted(cur.iterdir(), key=lambda x:(not x.is_dir(), x.name.lower()))
+        except Exception: return
+        for e in entries:
+            rel=e.relative_to(root); mark="📁" if e.is_dir() else "📄"
+            out.write(f"{'  '*depth}- {mark} {rel}\n")
+            if e.is_dir(): rec(e, depth+1)
+    out.write("```tree\n"); out.write(f"{root}\n"); rec(root,0); out.write("```\n")
+
+def _out_path(src: Path, merge_dir: Path, utc: bool, pattern: str) -> Path:
+    now = datetime.now(timezone.utc if utc else None)
+    stem = now.strftime(pattern.replace("{name}", src.name))
+    return merge_dir / f"{stem}.md"
+
+def merge_folder(src: Path, out_file: Path):
+    included=[]; skipped=[]; total=0
+    for dirpath, _, files in os.walk(src):
+        for fn in files:
+            p = Path(dirpath)/fn; rel=p.relative_to(src)
+            if not _is_text(p): skipped.append(f"{rel} (binär)"); continue
+            try: sz=p.stat().st_size; dig=_md5(p)
+            except Exception as e: skipped.append(f"{rel} (err {e})"); continue
+            included.append((p, rel, sz, dig)); total += sz
+    included.sort(key=lambda t: str(t[1]).lower())
+
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    with out_file.open("w", encoding=ENC) as out:
+        out.write(f"# Ordner-Merge: {src.name}\n\n")
+        out.write(f"**Zeitpunkt:** {datetime.now():%Y-%m-%d %H:%M}\n")
+        out.write(f"**Quelle:** `{src}`\n")
+        out.write(f"**Dateien:** {len(included)}\n")
+        out.write(f"**Gesamtgröße:** {_human(total)}\n\n")
+        out.write("## 📁 Struktur\n\n"); _tree(out, src); out.write("\n")
+        out.write("## 📦 Dateien\n\n")
+        for p, rel, sz, dig in included:
+            out.write(f"### 📄 {rel}\n\n**Größe:** {_human(sz)} | **md5:** `{dig}`\n\n```{_lang(p)}\n")
+            try: txt=p.read_text(encoding=ENC, errors="replace")
+            except Exception as e: txt=f"<<Lesefehler: {e}>>"
+            out.write(txt + ("\n" if not txt.endswith("\n") else ""))
+            out.write("```\n\n")
+        if skipped:
+            out.write("## ⏭️ Übersprungen\n\n")
+            for s in skipped: out.write(f"- {s}\n")
+
+def parse_args(argv):
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--selected", action="append", help="Ordnerpfad; Option mehrfach nutzbar")
+    ap.add_argument("--here", action="store_true", help="aktuellen Ordner mergen (PWD)")
+    ap.add_argument("--utc", action="store_true")
+    ap.add_argument("--pattern", default=DEFAULT_NAME_PATTERN)
+    return ap.parse_args(argv)
+
+def main(argv:list[str])->int:
+    args = parse_args(argv)
+
+    # Auswahl bestimmen
+    selected: list[Path] = []
+    if args.selected:
+        selected = [Path(s).expanduser() for s in args.selected]
+    elif args.here or True:  # Default: hier mergen
+        selected = [Path.cwd()]
+
+    # Zielordner: merges neben der Scriptdatei
+    home = _script_home()
+    merge_dir = home / "merges"
+    merge_dir.mkdir(parents=True, exist_ok=True)
+
+    ok = False
+    for src in selected:
+        if not src.is_dir():
+            print(f"⚠️ Überspringe (kein Ordner): {src}")
+            continue
+        out = _out_path(src, merge_dir, args.utc, args.pattern)
+        merge_folder(src, out)
+        print(f"✅ {src.name} → {out}")
+        ok = True
+
+    print(f"📂 Ziel: {merge_dir}")
+    return 0 if ok else 2
+
+if __name__ == "__main__":
+    import os, sys
+    sys.exit(main(sys.argv[1:]))
