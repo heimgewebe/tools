@@ -122,8 +122,16 @@ def merge_one_folder(source: Path, merge_dir: Path) -> Path:
 # ==== Retention (nur letzte N behalten) ====
 def retention_clean(merge_dir: Path, keep: int):
     files = sorted(merge_dir.glob("*_merge_*.md"), key=lambda p: p.stat().st_mtime)
-    if keep < 0: keep = 0
-    to_delete = files[:-keep] if keep and len(files)>keep else (files if keep==0 else [])
+
+    if keep < 0:
+        keep = 0
+
+    to_delete = []
+    if keep == 0:
+        to_delete = files
+    elif len(files) > keep:
+        to_delete = files[:-keep]
+
     for f in to_delete:
         try:
             f.unlink()
@@ -149,18 +157,22 @@ def main():
         print("ℹ️ Keine zu mergen Ordner neben dem Skript gefunden.")
         return 0
 
-    # Mergen & danach Quelle löschen
+    # Mergen
+    successes = []
     for src in candidates:
         try:
-            out_file = merge_one_folder(src, merge_dir)
-            # Quelle löschen (nur wenn Merge erfolgreich geschrieben)
-            try:
-                shutil.rmtree(src)
-                print(f"🗑️ Quelle gelöscht: {src.name}")
-            except Exception as e:
-                print(f"⚠️ Quelle nicht gelöscht ({src.name}): {e}")
+            merge_one_folder(src, merge_dir)
+            successes.append(src)
         except Exception as e:
             print(f"❌ Fehler bei {src.name}: {e}")
+
+    # Quellen löschen (nur wenn Merge erfolgreich geschrieben)
+    for src in successes:
+        try:
+            shutil.rmtree(src)
+            print(f"🗑️ Quelle gelöscht: {src.name}")
+        except Exception as e:
+            print(f"⚠️ Quelle nicht gelöscht ({src.name}): {e}")
 
     # Retention
     retention_clean(merge_dir, RETAIN)
