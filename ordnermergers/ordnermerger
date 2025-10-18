@@ -27,6 +27,7 @@ BINARY_EXTS = {".png",".jpg",".jpeg",".gif",".webp",".avif",".bmp",".ico",
     ".ttf",".otf",".woff",".woff2",
     ".so",".dylib",".dll",".exe",
     ".db",".sqlite",".sqlite3",".realm",".mdb",".pack",".idx"}
+FORBIDDEN_DIR_NAMES = {"merges", ".git", ".cache", ".venv", "__pycache__"}
 LANG_MAP = {"py":"python","js":"javascript","ts":"typescript","html":"html","css":"css",
             "md":"markdown","json":"json","xml":"xml","yaml":"yaml","yml":"yaml",
             "sh":"bash","sql":"sql","txt":""}
@@ -52,9 +53,20 @@ def _is_forbidden_source(src: Path, home: Path) -> bool:
         if str(src).startswith(str(home) + os.sep) or str(src) == str(home):
             return True
     # verbiete offensichtliche System-/Temp-Ordner
-    bad_names = {"merges", ".git", ".cache", ".venv", "__pycache__"}
-    if src.name in bad_names or src.name.startswith(".") or src.name.startswith("_"):
+    if src.name in FORBIDDEN_DIR_NAMES or src.name.startswith(".") or src.name.startswith("_"):
         return True
+    return False
+
+def _should_skip_dir(entry: Path, merge_dir: Path | None) -> bool:
+    name = entry.name
+    if name in FORBIDDEN_DIR_NAMES or name.startswith(".") or name.startswith("_"):
+        return True
+    if merge_dir is not None:
+        try:
+            if entry.resolve() == merge_dir:
+                return True
+        except Exception:
+            return False
     return False
 
 def _human(n:int)->str:
@@ -78,11 +90,13 @@ def _md5(p: Path)->str:
 def _lang(p: Path)->str:
     return LANG_MAP.get(p.suffix.lstrip(".").lower(), "")
 
-def _tree(out, root: Path):
+def _tree(out, root: Path, merge_dir: Path | None):
     def rec(cur: Path, depth:int):
         try: entries=sorted(cur.iterdir(), key=lambda x:(not x.is_dir(), x.name.lower()))
         except Exception: return
         for e in entries:
+            if e.is_dir() and _should_skip_dir(e, merge_dir):
+                continue
             rel=e.relative_to(root); mark="📁" if e.is_dir() else "📄"
             out.write(f"{'  '*depth}- {mark} {rel}\n")
             if e.is_dir(): rec(e, depth+1)
@@ -95,7 +109,11 @@ def _out_path(src: Path, merge_dir: Path, utc: bool, pattern: str) -> Path:
 
 def merge_folder(src: Path, out_file: Path):
     included=[]; skipped=[]; total=0
-    for dirpath, _, files in os.walk(src):
+    merge_dir = out_file.parent.resolve()
+    for dirpath, dirnames, files in os.walk(src):
+        if dirnames:
+            cur = Path(dirpath)
+            dirnames[:] = [d for d in dirnames if not _should_skip_dir(cur / d, merge_dir)]
         for fn in files:
             p = Path(dirpath)/fn; rel=p.relative_to(src)
             if not _is_text(p): skipped.append(f"{rel} (binär)"); continue
@@ -111,7 +129,7 @@ def merge_folder(src: Path, out_file: Path):
         out.write(f"**Quelle:** `{src}`\n")
         out.write(f"**Dateien:** {len(included)}\n")
         out.write(f"**Gesamtgröße:** {_human(total)}\n\n")
-        out.write("## 📁 Struktur\n\n"); _tree(out, src); out.write("\n")
+        out.write("## 📁 Struktur\n\n"); _tree(out, src, merge_dir); out.write("\n")
         out.write("## 📦 Dateien\n\n")
         for p, rel, sz, dig in included:
             out.write(f"### 📄 {rel}\n\n**Größe:** {_human(sz)} | **md5:** `{dig}`\n\n```{_lang(p)}\n")
