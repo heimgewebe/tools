@@ -119,8 +119,9 @@ class RepoMerger:
 
         return None, None
 
-    def _keep_last_n(self, merge_dir: Path, keep: int, keep_new: Path|None=None):
-        merges = sorted(merge_dir.glob(f"{self.merge_prefix}*.md"))
+    def _keep_last_n(self, merge_dir: Path, keep: int, keep_new: Path|None=None, *, merge_prefix: str | None = None):
+        prefix = merge_prefix or self.merge_prefix
+        merges = sorted(merge_dir.glob(f"{prefix}*.md"))
         if keep_new and keep_new not in merges:
             merges.append(keep_new)
             merges.sort(key=lambda p: p.stat().st_mtime)
@@ -130,7 +131,18 @@ class RepoMerger:
                 try: old.unlink()
                 except Exception: pass
 
-    def _do_merge(self, source: Path, out_file: Path, *, encoding:str, keep:int, merge_dir:Path, max_tree_depth:int|None, search_info:str|None):
+    def _do_merge(
+        self,
+        source: Path,
+        out_file: Path,
+        *,
+        encoding:str,
+        keep:int,
+        merge_dir:Path,
+        max_tree_depth:int|None,
+        search_info:str|None,
+        merge_prefix:str,
+    ):
         included, skipped, total = [], [], 0
         for dirpath, _, files in os.walk(source):
             d = Path(dirpath)
@@ -149,7 +161,7 @@ class RepoMerger:
         included.sort(key=lambda t: str(t[1]).lower())
         out_file.parent.mkdir(parents=True, exist_ok=True)
 
-        diffs, add_c, del_c, chg_c = ml.build_diff(included, merge_dir, self.merge_prefix)
+        diffs, add_c, del_c, chg_c = ml.build_diff(included, merge_dir, merge_prefix)
 
         with out_file.open("w", encoding=encoding) as out:
             out.write(f"# {self.title}\n\n")
@@ -180,7 +192,7 @@ class RepoMerger:
                     out.write(f"<<Lesefehler: {e}>>\n")
                 out.write("```\n\n")
 
-        self._keep_last_n(merge_dir, keep, out_file)
+        self._keep_last_n(merge_dir, keep, out_file, merge_prefix=merge_prefix)
         print(f"✅ Merge geschrieben: {out_file} ({ml.human(out_file.stat().st_size)})")
 
     def run(self, argv: list[str]):
@@ -227,5 +239,14 @@ class RepoMerger:
 
         out_file = merge_dir / f"{merge_prefix_final}{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
 
-        self._do_merge(src, out_file, encoding=encoding, keep=keep, merge_dir=merge_dir, max_tree_depth=args.max_tree_depth, search_info=src_info)
+        self._do_merge(
+            src,
+            out_file,
+            encoding=encoding,
+            keep=keep,
+            merge_dir=merge_dir,
+            max_tree_depth=args.max_tree_depth,
+            search_info=src_info,
+            merge_prefix=merge_prefix_final,
+        )
         return 0
