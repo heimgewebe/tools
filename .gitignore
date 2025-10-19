@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.tox/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+*.swp
+*.swo
+*.swn
+.DS_Store
