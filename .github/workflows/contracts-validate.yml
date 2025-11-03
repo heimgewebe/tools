@@ -173,7 +173,7 @@ jobs:
               D)  blocked+=("DELETE: $p1") ;;
               R*) blocked+=("RENAME: $p1 → ${p2:-(unknown destination)}") ;;
             esac
-          done < <(git diff --name-status --diff-filter=DR "${base}...HEAD")
+          done < <(git diff --name-status --diff-filter=DR "${base}...HEAD") # three-dot: only changes unique to this branch/PR
 
           if (( ${#blocked[@]} )); then
             echo "::group::❌ Protected file deletions blocked"
