@@ -117,15 +117,44 @@ def parse_manifest(md: Path)->dict[str, tuple[str,int]]:
                         if s.startswith("## "): break
                         continue
                     row = s[2:]
-                    parts = [p.strip() for p in row.split("|")]
-                    rel = parts[0] if parts else ""
-                    md5_val, size_val = "", 0
-                    for p in parts[1:]:
-                        if p.startswith("md5="): md5_val = p[4:].strip()
-                        elif p.startswith("size="):
-                            try: size_val = int(p[5:].strip())
-                            except ValueError: size_val = 0
-                    if rel: m[rel] = (md5_val, size_val)
+                    parts = row.split("|")
+                    rel, md5_val, size_val = "", "", 0
+
+                    if len(parts) >= 3:
+                        # Parse from right to left to be robust against '|' in filename
+                        size_part = parts[-1].strip()
+                        md5_part = parts[-2].strip()
+
+                        if size_part.startswith("size="):
+                            try:
+                                size_val = int(size_part[5:].strip())
+                            except ValueError:
+                                size_val = 0
+
+                        if md5_part.startswith("md5="):
+                            md5_val = md5_part[4:].strip()
+
+                        rel = "|".join(parts[:-2]).strip()
+
+                    elif len(parts) == 2:
+                        # Handle case where only one of md5 or size is present
+                        p1 = parts[0].strip()
+                        p2 = parts[1].strip()
+                        if p2.startswith("md5="):
+                            md5_val = p2[4:].strip()
+                            rel = p1
+                        elif p2.startswith("size="):
+                            try:
+                                size_val = int(p2[5:].strip())
+                            except ValueError:
+                                size_val = 0
+                            rel = p1
+
+                    elif len(parts) == 1:
+                        rel = parts[0].strip()
+
+                    if rel:
+                        m[rel] = (md5_val, size_val)
     except Exception:
         pass
     return m
