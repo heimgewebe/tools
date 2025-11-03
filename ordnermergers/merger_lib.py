@@ -125,17 +125,20 @@ def parse_manifest(md: Path)->dict[str, tuple[str,int]]:
                         size_part = parts[-1].strip()
                         md5_part = parts[-2].strip()
 
-                        if size_part.startswith("size="):
+                        has_size = size_part.startswith("size=")
+                        has_md5 = md5_part.startswith("md5=")
+
+                        if has_size:
                             try:
                                 size_val = int(size_part[5:].strip())
                             except ValueError:
                                 size_val = 0
 
-                        if md5_part.startswith("md5="):
+                        if has_md5:
                             md5_val = md5_part[4:].strip()
 
-                        rel = "|".join(parts[:-2]).strip()
-
+                        if has_size or has_md5:
+                            rel = "|".join(parts[:-2]).strip()
                     elif len(parts) == 2:
                         # Handle case where only one of md5 or size is present
                         p1 = parts[0].strip()
