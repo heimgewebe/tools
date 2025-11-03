@@ -1,0 +1,248 @@
+# Ordner-Merge: tools
+
+**Zeitpunkt:** 2025-10-26 22:38
+**Quelle:** `/home/alex/repos/tools`
+**Dateien (gefunden):** 15
+**Gesamtgröße (roh):** 42 KB
+
+**Exclude:** ['.gitignore']
+
+## 📁 Struktur
+
+- tools/
+  - .gitignore
+  - .hauski-reports
+  - README.md
+  - repomergers/
+    - hauski-merger.py
+    - weltgewebe-merger.py
+    - wgx-merger.py
+    - heimgewebe-merge/
+      - .gitignore
+      - README.md
+      - merge.py
+      - run.sh
+  - ordnermergers/
+    - merger_lib.py
+    - ordnermerger.py
+    - repomerger_lib.py
+  - .git/
+    - COMMIT_EDITMSG
+    - FETCH_HEAD
+    - HEAD
+    - ORIG_HEAD
+    - config
+    - description
+    - index
+    - packed-refs
+    - hooks/
+      - applypatch-msg.sample
+      - commit-msg.sample
+      - fsmonitor-watchman.sample
+      - post-update.sample
+      - pre-applypatch.sample
+      - pre-commit.sample
+      - pre-merge-commit.sample
+      - pre-push
+      - pre-push.sample
+      - pre-rebase.sample
+      - pre-receive.sample
+      - prepare-commit-msg.sample
+      - push-to-checkout.sample
+      - update.sample
+    - refs/
+      - remotes/
+        - origin/
+          - HEAD
+          - main
+          - refactor-merger-scripts
+          - refactor-ordnermerger
+          - refactor-ordnermerger-1
+          - codex/
+            - add-heimgewebe-merger-with-analysis
+            - add-jsonl-validation-and-tail-scripts
+            - add-non-interactive-npx-for-ajv-validation
+            - add-readme-index-for-tools
+            - check-readme-for-index-examples
+            - fix-pre-merger-to-respect-merge_prefix
+            - locate-errors-in-the-code
+      - tags/
+      - heads/
+        - main
+        - backup/
+          - main-20251017-182440
+          - main-20251018-090523
+          - main-20251021-124251
+    - logs/
+      - HEAD
+      - refs/
+        - remotes/
+          - origin/
+            - HEAD
+            - main
+            - refactor-merger-scripts
+            - refactor-ordnermerger
+            - refactor-ordnermerger-1
+            - codex/
+              - add-heimgewebe-merger-with-analysis
+              - add-jsonl-validation-and-tail-scripts
+              - add-non-interactive-npx-for-ajv-validation
+              - add-readme-index-for-tools
+              - check-readme-for-index-examples
+              - fix-pre-merger-to-respect-merge_prefix
+              - locate-errors-in-the-code
+        - heads/
+          - main
+          - backup/
+            - main-20251017-182440
+            - main-20251018-090523
+            - main-20251021-124251
+    - branches/
+    - info/
+      - exclude
+    - objects/
+      - de/
+        - 96dd6dc24bc499762da2370307a9975a3dc205
+      - 2d/
+        - a475b177f476fbcfdb29ae460dbf1335e03d17
+      - d8/
+        - 11c5cfa8d4cdc895c2e0b4853a91f05660d64b
+      - f5/
+        - 49be93028f9abcd715a8e7e6bb67174415bd8d
+        - 503033daf3202dd25b00250dacd77b82e7774a
+        - cb18573ef5c9db873c42b90a9c80197a2ef6dd
+      - c9/
+        - 12a7bbb71d18cd0a2568dda7afc64929c61592
+      - 89/
+        - ba97d9e5652aeeafba0ad975522230ee8f8db4
+      - ac/
+        - a7aa0724ed68291a90098929e96a978343c684
+      - 78/
+        - 2bb90b69d182553a20f8ec50b58b9e96dc8241
+      - 54/
+        - 7b91bde26dd86e00a46b97de8440887a269be4
+      - bc/
+        - b181f7b56894576365a63b2ab0c854e4fd367e
+      - cc/
+        - bd64ca06e81d5922414b1c268a81191cdc3246
+      - 38/
+        - a0ed1560233d8d9cbc57631894517d38247d83
+      - 14/
+        - c612192582d97c7dcb7190b94e44c986c692c0
+        - ec3bfd535e0f1af79cebcc0a4ef7a2aefb3fcc
+      - 6a/
+        - 762009874beedf6854a5a693b7ef2cbed6af4d
+        - a0d2a6d762c770a25d0a7219526d4bd042ee21
+      - 13/
+        - f694be2b478042b713a695443e9fb8887b782d
+      - 2f/
+        - 3586e25c705491402f856cdab8f654a2a94aaa
+      - pack/
+        - pack-18f0e6fe8557fe12cce1bc72ee8ea13756d71787.idx
+        - pack-18f0e6fe8557fe12cce1bc72ee8ea13756d71787.pack
+      - bd/
+        - 3a57759b6c052106d544c51d32ef399e9261da
+      - a6/
+        - 3b042e361fced7384fae3e53d3d49faaf610ef
+      - a4/
+        - 8334602f647627725a9b577fa8537b10a7ef0e
+      - 3b/
+        - 1b309f19ca0e88d5c61cd2939ec3c2a61fc7c5
+      - 7c/
+        - 24691e1748e02a39178543a1cde0685f79f53b
+      - aa/
+        - dba0863fe075e732883512eddbffde86b8e160
+      - 20/
+        - 4d79ccd6ea4959c34cc875a06cb8306c2d4367
+      - c4/
+        - 44f67c035b828ee63a5e2671a48a996c628893
+        - 69eb40a5c6ee6a0c44dca6df0ec3bdbd12f661
+      - fe/
+        - 0515d25e8cce8a85c2867c2fc238de13d71d34
+      - 46/
+        - 07a3e82ca0ff26bbb63781bc03652c95526859
+        - f36158c9744e1420973d5f665cebfcf1afd495
+      - 6f/
+        - 7e5f077f90b461c3a26bf798d810bdfe55fe5d
+      - 75/
+        - 36fd13cfca09da1cb9cd685b2ed35192db8dc1
+      - 83/
+        - 3752dc7c86b6ce594eff90a6e6b8be4b7a5f4f
+      - 37/
+        - 9a9147c49bc0387fb446b6e959a8d605d9ca2e
+      - 2a/
+        - 25dedc32f62dc9730d658e01fee199f3ea46c1
+      - 31/
+        - 2fac6ad35ec0bb002ea59fc4e219e1cd1aa42a
+      - e2/
+        - c80f242e93ea312820e3cc9d80daf84f6fad6f
+      - ce/
+        - e91a36cbfc7b688911ff64204927fbb2bbb10d
+      - a5/
+        - 71c492e11a07219962441b319d003b9eaec395
+      - 1c/
+        - 6f6ed262f3dc121bde42b57fa87c3cbf36d4e4
+      - 79/
+        - a47d4f8f5b5d6ce51707a60d27599069d8d07d
+      - e1/
+        - 017e25da4d0ed28085703c9c837c2e38fe1c98
+      - 85/
+        - 06b25f1da7f84e341652224d5286b8b2fcc965
+        - e14c88d37713e1f2d7d5dda750888c7c950eb0
+      - 1a/
+        - 7f1272ca54e6e06652a8122ddd13feebafcb6d
+      - f2/
+        - dcc115268e2542e1b6979856d079cfadc499ef
+      - ca/
+        - 3e7e7694dc07080a9ad2538152b2a34e4f8c37
+        - 5dc6cf54da1119f19df69c2766eb0da0adfe91
+      - 8c/
+        - 09edc8185539274849364e1f00bbf5897313b8
+        - 1615365c3d324a52fc69f1937e404d85c47edf
+      - 7f/
+        - 6748009fd6d8d5fe8011e4e6ac3a857e979228
+        - 864aa97039a79b548d9b681bd650fd0424e11e
+      - bf/
+        - 415793e05a8f2da27a6e8d26a953cb4e6deba2
+      - c5/
+        - e6f0191aabc8745374e9aad8a792cd5c22aeb4
+      - 42/
+        - db7ce4d45526e1a63d6ff4a9d7ba608fb52e00
+      - e3/
+        - 57ba18937c656a4f113a70b13ce446f2bb6cfd
+      - ee/
+        - 9513a517a9d57565c07ad48b7dc25e37aa0563
+      - 9f/
+        - cbd7174b4348225069576259bb4dc1976f7c73
+      - info/
+      - 33/
+        - 059e120141886e19bf5b4d19429448a6da9bfe
+        - 35d4dad73a07a8f00b5247b2a657fbc56b787d
+      - a2/
+        - a5c6b25929da34abf5b598d64dae764ef11c7f
+      - 5e/
+        - 81501b557fb9c89f2d9dab39fb540f3c594c6d
+  - merges/
+    - tools_merge_2510262238__index.md
+  - scripts/
+    - README.md
+    - jsonl-tail.sh
+    - jsonl-validate.sh
+
+## 📦 Inhalte (Chunks)
+
+- .gitignore → `tools_merge_2510262238__root.md`
+- README.md → `tools_merge_2510262238__root.md`
+- repomergers/hauski-merger.py → `tools_merge_2510262238__repomergers.md`
+- repomergers/weltgewebe-merger.py → `tools_merge_2510262238__repomergers.md`
+- repomergers/wgx-merger.py → `tools_merge_2510262238__repomergers.md`
+- repomergers/heimgewebe-merge/.gitignore → `tools_merge_2510262238__repomergers_heimgewebe-merge.md`
+- repomergers/heimgewebe-merge/README.md → `tools_merge_2510262238__repomergers_heimgewebe-merge.md`
+- repomergers/heimgewebe-merge/merge.py → `tools_merge_2510262238__repomergers_heimgewebe-merge.md`
+- repomergers/heimgewebe-merge/run.sh → `tools_merge_2510262238__repomergers_heimgewebe-merge.md`
+- ordnermergers/merger_lib.py → `tools_merge_2510262238__ordnermergers.md`
+- ordnermergers/ordnermerger.py → `tools_merge_2510262238__ordnermergers.md`
+- ordnermergers/repomerger_lib.py → `tools_merge_2510262238__ordnermergers.md`
+- scripts/README.md → `tools_merge_2510262238__scripts.md`
+- scripts/jsonl-tail.sh → `tools_merge_2510262238__scripts.md`
+- scripts/jsonl-validate.sh → `tools_merge_2510262238__scripts.md`
