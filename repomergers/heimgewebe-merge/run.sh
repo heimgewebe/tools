@@ -14,7 +14,8 @@ WORK="${WORK:-.git/tmp/heimgewebe-merge}"
 need() { command -v "$1" >/dev/null 2>&1 || {
 	echo "Fehlt: $1" >&2
 	exit 127
-}; }
+}
+}
 need git
 need gh
 need python3
