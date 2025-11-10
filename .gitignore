@@ -18,3 +18,4 @@ build/
 *.swo
 *.swn
 .DS_Store
+metrics.json
