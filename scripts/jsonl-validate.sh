@@ -1,38 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
+usage() {
+ cat <<USAGE
+jsonl-validate.sh
 
-# Ensure non-interactive npx in CI and headless shells (npm>=7) and
-# provide compatibility for older npm versions via the env var.
-export npm_config_yes=${npm_config_yes:-true}
-
-if [[ $# -lt 2 ]]; then
-	cat <<USAGE >&2
-Usage: $(basename "$0") <schema.json> <data.jsonl> [ajv options...]
-
-Validate a JSON Lines file against a JSON Schema using ajv-cli.
+Validates every non-empty line as standalone JSON object against a JSON Schema (draft 2020-12).
+Requires: node + npx (ajv-cli@5)
 USAGE
-	exit 1
-fi
-
-schema=$1
-shift
-data_file=$1
-shift
-
-if [[ ! -f "$schema" ]]; then
-	echo "Schema file not found: $schema" >&2
-	exit 1
-fi
-
-if [[ ! -f "$data_file" ]]; then
-	echo "Data file not found: $data_file" >&2
-	exit 1
-fi
-
-if command -v ajv >/dev/null 2>&1; then
-	ajv validate -s "$schema" -d "$data_file" "$@"
-else
-	# Non-interactive install/run. --yes avoids the "Need to install ..." prompt.
-	# Pin ajv-cli major version for stability.
-	npx --yes ajv-cli@5 validate -s "$schema" -d "$data_file" "$@"
-fi
+}
+[[ $# -ge 2 ]] || { usage >&2; exit 2; }
+PATTERN="$1"; SCHEMA="$2"; shift 2 || true
+STRICT=false; FORMATS=true
+while [[ $# -gt 0 ]]; do
+ case "$1" in
+ --strict) STRICT=true ;;
+ --no-formats) FORMATS=false ;;
+ -h|--help) usage; exit 0 ;;
+ *) echo "Unknown flag: $1" >&2; usage >&2; exit 2 ;;
+ esac
+ shift
+done
+command -v node >/dev/null || { echo "node required" >&2; exit 127; }
+CMD="npx --yes ajv-cli@5 validate --spec=draft2020 --all-errors"
+[[ "$STRICT" == "true" ]] && CMD="$CMD --strict=true" || CMD="$CMD --strict=false"
+[[ "$FORMATS" == "true" ]] && CMD="$CMD --validate-formats=true" || CMD="$CMD --validate-formats=false"
+shopt -s nullglob
+mapfile -t FILES < <(compgen -G "$PATTERN" || true)
+(( ${#FILES[@]} )) || { echo "no files match: $PATTERN" >&2; exit 1; }
+fails=0
+for f in "${FILES[@]}"; do
+ echo "==> $f"
+ line=0
+ while IFS= read -r ln || [[ -n "$ln" ]]; do
+ line=$((line+1))
+ [[ -n "${ln//[[:space:]]/}" ]] || continue
+ tmp="$(mktemp -t ajv-XXXX.json)"; printf '%s\n' "$ln" >"$tmp"
+ if ! bash -c "$CMD -s \"$SCHEMA\" -d \"$tmp\" >/dev/null"; then
+ echo "::error file=$f,line=$line::validation failed"
+ fails=1
+ fi
+ rm -f "$tmp"
+ done < "$f"
+done
+exit $fails
