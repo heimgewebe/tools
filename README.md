@@ -15,3 +15,8 @@ bash scripts/jsonl-tail.sh --help
 ```
 
 Weitere Details zu den einzelnen Werkzeugen findest du in den jeweiligen README-Dateien oder mittels der `--help`-Optionen.
+
+## JSONL Tools
+- `scripts/jsonl-validate.sh` – prüft NDJSON (eine JSON-Entität pro Zeile) gegen ein JSON-Schema (AJV v5).
+- `scripts/jsonl-tail.sh`
+- `scripts/jsonl-compact.sh`
