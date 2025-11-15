@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# wgx - Der Haupt-Dispatcher für WGX-Unterbefehle.
+#
+# USAGE:
+#   wgx <kommando> [argumente...]
+
+# Finde das Verzeichnis, in dem das Skript liegt, um relative Pfade zu nutzen.
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+CMD_DIR="$SCRIPT_DIR/cmd"
+LIB_DIR="$SCRIPT_DIR/lib"
+
+# Lade die Logging-Bibliothek
+# shellcheck source=lib/logging.bash
+source "$LIB_DIR/logging.bash"
+
+# Hilfsfunktion, die die verfügbaren Befehle auflistet.
+list_commands() {
+  log_info "Verfügbare Befehle:"
+  for cmd_path in "$CMD_DIR"/*; do
+    if [[ -x "$cmd_path" ]]; then
+      cmd_name=$(basename "$cmd_path")
+      echo "  - $cmd_name"
+    fi
+  done
+}
+
+# Hauptlogik
+main() {
+  if [[ $# -eq 0 ]]; then
+    log_warn "Kein Befehl angegeben."
+    list_commands
+    exit 1
+  fi
+
+  local command="$1"
+  shift
+  local command_path="$CMD_DIR/$command"
+
+  if [[ ! -f "$command_path" ]]; then
+    log_error "Unbekannter Befehl: '$command'"
+    list_commands
+    exit 1
+  fi
+
+  if [[ ! -x "$command_path" ]]; then
+    log_error "Befehl '$command' ist nicht ausführbar."
+    exit 1
+  fi
+
+  # Führe den Unterbefehl aus und übergebe alle restlichen Argumente
+  exec "$command_path" "$@"
+}
+
+main "$@"

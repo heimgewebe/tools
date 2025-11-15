@@ -1,0 +1,30 @@
+name: WGX Smoke Test
+
+on:
+  workflow_call:
+
+jobs:
+  smoke:
+    name: Run smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout calling repository
+        uses: actions/checkout@v4
+
+      - name: Run local wgx smoke task
+        if: github.repository == 'heimgewebe/tools'
+        run: |
+          ./wgx/wgx smoke
+        shell: bash
+
+      - name: Checkout wgx tools repository and run task
+        if: github.repository != 'heimgewebe/tools'
+        uses: actions/checkout@v4
+        with:
+          repository: heimgewebe/tools
+          path: .wgx-tools
+          ref: main
+      - run: |
+          .wgx-tools/wgx/wgx smoke
+        shell: bash
+        if: github.repository != 'heimgewebe/tools'

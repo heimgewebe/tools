@@ -1,0 +1,30 @@
+name: WGX Guard
+
+on:
+  workflow_call:
+
+jobs:
+  guard:
+    name: Run guard task
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout calling repository
+        uses: actions/checkout@v4
+
+      - name: Run local wgx guard task
+        if: github.repository == 'heimgewebe/tools'
+        run: |
+          ./wgx/wgx guard
+        shell: bash
+
+      - name: Checkout wgx tools repository and run task
+        if: github.repository != 'heimgewebe/tools'
+        uses: actions/checkout@v4
+        with:
+          repository: heimgewebe/tools
+          path: .wgx-tools
+          ref: main
+      - run: |
+          .wgx-tools/wgx/wgx guard
+        shell: bash
+        if: github.repository != 'heimgewebe/tools'
