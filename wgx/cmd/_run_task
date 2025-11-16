@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WGX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/logging.bash
+source "${WGX_DIR}/lib/logging.bash"
+# shellcheck source=lib/parse_yaml.sh
+source "${WGX_DIR}/lib/parse_yaml.sh"
+
+_run_task() {
+  local task_name="$1"
+
+  local target_root="${WGX_TARGET_ROOT:-$PWD}"
+  local profile_file="${WGX_PROFILE:-$target_root/.wgx/profile.yml}"
+
+  if [[ ! -f "$profile_file" ]]; then
+    log_error "Profile file not found: $profile_file"
+    exit 1
+  fi
+
+  eval "$(parse_yaml "$profile_file" "wgx_")"
+
+  local var="wgx_tasks_${task_name}"
+  local task="${!var-}"
+
+  if [[ -z "${task}" ]]; then
+    log_warn "Task '$task_name' nicht in $profile_file definiert – skip."
+    exit 0
+  fi
+
+  log_info "Running task '$task_name' aus $profile_file"
+  bash -c "${task}"
+}

@@ -1,30 +1,33 @@
-name: WGX Guard
+name: WGX Guard (reusable)
 
 on:
-  workflow_call:
+  workflow_call: {}
 
 jobs:
   guard:
-    name: Run guard task
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Checkout calling repository
+      - name: Checkout caller repository
         uses: actions/checkout@v4
 
-      - name: Run local wgx guard task
-        if: github.repository == 'heimgewebe/tools'
+      - name: Ensure .wgx/profile.yml exists
         run: |
-          ./wgx/wgx guard
-        shell: bash
+          if [ ! -f .wgx/profile.yml ]; then
+            echo "::error::.wgx/profile.yml nicht gefunden im Caller-Repo"
+            exit 1
+          fi
 
-      - name: Checkout wgx tools repository and run task
-        if: github.repository != 'heimgewebe/tools'
+      - name: Checkout heimgewebe/tools (WGX)
         uses: actions/checkout@v4
         with:
           repository: heimgewebe/tools
           path: .wgx-tools
+          # TODO: hier eine feste Version/Tag pinnen
           ref: main
-      - run: |
+
+      - name: Run wgx guard
+        run: |
+          export WGX_TARGET_ROOT="$GITHUB_WORKSPACE"
           .wgx-tools/wgx/wgx guard
-        shell: bash
-        if: github.repository != 'heimgewebe/tools'

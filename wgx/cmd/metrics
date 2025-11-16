@@ -1,27 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 WGX_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ROOT_DIR="${WGX_DIR}/.."
-
-source "${WGX_DIR}/lib/logging.bash"
-source "${WGX_DIR}/lib/parse_yaml.sh"
-
-PROFILE_FILE="${ROOT_DIR}/.wgx/profile.yml"
-
-if [[ ! -f "${PROFILE_FILE}" ]]; then
-  log_error "Profile file not found: ${PROFILE_FILE}"
-  exit 1
-fi
-
-eval "$(parse_yaml "${PROFILE_FILE}" "wgx_")"
-
-task="${wgx_tasks_metrics-}"
-
-if [[ -z "${task}" ]]; then
-  log_warn "No metrics task defined in ${PROFILE_FILE}, skipping."
-  exit 0
-fi
-
-log_info "Running metrics task from profile…"
-bash -c "${task}"
+# shellcheck source=cmd/_run_task
+source "${WGX_DIR}/cmd/_run_task"
+_run_task "metrics"
