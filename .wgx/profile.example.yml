@@ -1,16 +1,34 @@
+---
+# Beispiel-WGX-Profil für heimgewebe/tools (WGX v1-Stil)
+profile: tools-example
+description: "Beispielprofil für WGX v1 in heimgewebe/tools"
+
+wgx-version: ">=1.0.0"
+
+class: bash-tooling
+
 wgx:
   apiVersion: v1
-  requiredWgx: "^2.0.0"
-  repoKind: generic
 
-  tooling:
-    shell:
-      default: bash
+lang:
+  - shell
 
-  tasks:
-    up: "echo bootstrap"
-    lint: "bash -n $(git ls-files '*.sh' '*.bash') && echo lint ok"
-    test: "echo test"
-    build: "echo build"
-    smoke: "echo smoke"
-    metrics: "scripts/wgx-metrics-snapshot.sh --output metrics.json"
+meta:
+  org: heimgewebe
+  repo: heimgewebe/tools
+  maintainer: alexdermohr@gmail.com
+  tags:
+    - tools
+    - metrics
+    - wgx
+  ci: true
+
+tasks:
+  smoke: |
+    echo "[wgx.smoke] tools-example – Profil geladen"
+  guard: |
+    echo "[wgx.guard] tools-example – keine echten Checks (nur Beispielprofil)"
+  metrics: |
+    echo "[wgx.metrics] tools-example – Beispiel, bitte im echten Profil anpassen"
+  snapshot: |
+    echo "[wgx.snapshot] tools-example – Beispieltask"
