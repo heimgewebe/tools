@@ -8,7 +8,7 @@
 # - Canonical WGX CLI + Guard/Smoke-Workflows: repo `heimgewebe/wgx`
 # - Metarepo: dünner wgx-Wrapper + Templates
 # - Dieses Repo (`heimgewebe/tools`): Hilfsskripte, Repomerger,
-#   Metriken – kein WGX-Core.
+#   Metriken – kein WGX-Core.
 
 profile: heimgewebe-tools
 description: "Shared helper scripts and repomergers for the Heimgewebe fleet"
@@ -20,55 +20,55 @@ wgx-version: ">=1.0.0"
 class: bash-tooling
 
 wgx:
-  apiVersion: v1
+  apiVersion: v1
 
 lang:
-  - shell
-  - python
+  - shell
+  - python
 
 meta:
-  org: heimgewebe
-  repo: heimgewebe/tools
-  maintainer: alexdermohr@gmail.com
-  tags:
-    - tooling
-    - repomerger
-    - metrics
-  ci: true
+  org: heimgewebe
+  repo: heimgewebe/tools
+  maintainer: alexdermohr@gmail.com
+  tags:
+    - tooling
+    - repomerger
+    - metrics
+  ci: true
 
 # Beispielhafte Umgebungsvariablen (bei Bedarf in ein echtes Profil übernehmen)
 env:
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  PYTHONUNBUFFERED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
 
 tasks:
-  smoke: |
-    echo "[wgx.smoke] tools – schneller Grundcheck"
-    if command -v shellcheck >/dev/null 2>&1; then
-      # Best effort: vorhandene Shell-Skripte kurz linten
-      find scripts -name '*.sh' -print0 | xargs -0 -r shellcheck || true
-    else
-      echo "[wgx.smoke] shellcheck nicht installiert – skip."
-    fi
+  smoke: |
+    echo "[wgx.smoke] tools – schneller Grundcheck"
+    if command -v shellcheck >/dev/null 2>&1; then
+      # Best effort: vorhandene Shell-Skripte kurz linten
+      find scripts -name '*.sh' -print0 | xargs -0 -r shellcheck || true
+    else
+      echo "[wgx.smoke] shellcheck nicht installiert – skip."
+    fi
 
-  guard: |
-    set -euo pipefail
-    echo "[wgx.guard] tools – einfache Shell-Lints"
-    if command -v shellcheck >/dev/null 2>&1; then
-      find scripts -name '*.sh' -print0 | xargs -0 -r shellcheck
-    else
-      echo "[wgx.guard] shellcheck nicht installiert – Guard kann Shell-Skripte nicht prüfen."
-      exit 1
-    fi
+  guard: |
+    set -euo pipefail
+    echo "[wgx.guard] tools – einfache Shell-Lints"
+    if command -v shellcheck >/dev/null 2>&1; then
+      find scripts -name '*.sh' -print0 | xargs -0 -r shellcheck
+    else
+      echo "[wgx.guard] shellcheck nicht installiert – Guard kann Shell-Skripte nicht prüfen."
+      exit 1
+    fi
 
-  metrics: |
-    echo "[wgx.metrics] tools – best effort Metrics-Snapshot"
-    if [ -x scripts/wgx-metrics-snapshot.sh ]; then
-      scripts/wgx-metrics-snapshot.sh --json || true
-    else
-      echo "[wgx.metrics] scripts/wgx-metrics-snapshot.sh fehlt – skip."
-    fi
+  metrics: |
+    echo "[wgx.metrics] tools – best effort Metrics-Snapshot"
+    if [ -x scripts/wgx-metrics-snapshot.sh ]; then
+      scripts/wgx-metrics-snapshot.sh --json || true
+    else
+      echo "[wgx.metrics] scripts/wgx-metrics-snapshot.sh fehlt – skip."
+    fi
 
-  snapshot: |
-    echo "[wgx.snapshot] tools – Platzhalter ohne harte Checks"
-    # Hier könnten später z.B. Backups oder weitere Konsistenzprüfungen folgen.
+  snapshot: |
+    echo "[wgx.snapshot] tools – Platzhalter ohne harte Checks"
+    # Hier könnten später z.B. Backups oder weitere Konsistenzprüfungen folgen.
