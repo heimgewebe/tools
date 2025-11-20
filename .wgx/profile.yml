@@ -1,0 +1,67 @@
+---
+# WGX Profil für heimgewebe/tools
+profile: heimgewebe-tools
+description: "Host- und CI-Hilfsskripte für Heimgewebe"
+
+# Semantische Version des hauski-/WGX-Profils (nicht dasselbe wie wgx CLI-Version)
+wgx-version: ">=1.0.0"
+
+# Fleet-Klasse dieses Repos – dient als Oberflächen-Typ für Tools
+class: bash-tooling
+
+wgx:
+  apiVersion: v1
+
+lang:
+  - shell
+
+meta:
+  org: heimgewebe
+  repo: heimgewebe/tools
+  maintainer: alexdermohr@gmail.com
+  tags:
+    - tools
+    - metrics
+    - host
+    - wgx
+  ci: true
+
+env:
+  WGX_METRICS_OUTPUT: "metrics.json"
+
+tasks:
+  smoke: |
+    echo "[wgx.smoke] tools – schneller Grundcheck"
+    if [ -f scripts/wgx-metrics-snapshot.sh ]; then
+      bash scripts/wgx-metrics-snapshot.sh --json || echo "[wgx.smoke] metrics-snapshot optional fehlgeschlagen"
+    else
+      echo "[wgx.smoke] kein scripts/wgx-metrics-snapshot.sh gefunden – skip."
+    fi
+
+  guard: |
+    set -euo pipefail
+    echo "[wgx.guard] tools – Shell-Skripte prüfen…"
+    if [ -f scripts/wgx-metrics-snapshot.sh ]; then
+      bash -n scripts/wgx-metrics-snapshot.sh
+      if command -v shellcheck >/dev/null 2>&1; then
+        shellcheck scripts/wgx-metrics-snapshot.sh
+      else
+        echo "[wgx.guard] shellcheck nicht installiert – nur bash -n ausgeführt."
+      fi
+    else
+      echo "[wgx.guard] scripts/wgx-metrics-snapshot.sh fehlt – nichts zu prüfen."
+    fi
+
+  metrics: |
+    echo "[wgx.metrics] tools – metrics-Snapshot (best effort)…"
+    if [ -f scripts/wgx-metrics-snapshot.sh ]; then
+      bash scripts/wgx-metrics-snapshot.sh --json || echo "[wgx.metrics] metrics-snapshot fehlgeschlagen."
+    else
+      echo "[wgx.metrics] kein metrics-Skript vorhanden – skip."
+    fi
+
+  snapshot: |
+    echo "[wgx.snapshot] tools – Snapshot (best effort)…"
+    if [ -f scripts/wgx-metrics-snapshot.sh ]; then
+      bash scripts/wgx-metrics-snapshot.sh --json || true
+    fi
