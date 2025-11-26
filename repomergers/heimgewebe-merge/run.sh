@@ -30,7 +30,7 @@ declare -A EX_SET
 for e in "${EX_ARR[@]}"; do EX_SET["$e"]=1; done
 
 # Kuratierte Reihenfolge zuerst
-preferred=(metarepo wgx hausKI semantAH leitstand aussensensor heimlern)
+preferred=(metarepo wgx hausKI semantAH chronik aussensensor heimlern)
 declare -A PSET
 for p in "${preferred[@]}"; do PSET["$p"]=1; done
 

@@ -25,7 +25,7 @@ bash repomergers/heimgewebe-merge/run.sh out/heimgewebe-dossier
 ## Nützliche ENV-Schalter
 ```bash
 # Nur bestimmte Repos (Komma-Liste)
-ONLY="hausKI,leitstand" bash repomergers/heimgewebe-merge/run.sh out/hgw
+ONLY="hausKI,chronik" bash repomergers/heimgewebe-merge/run.sh out/hgw
 
 # Byte-Limit je Part (Default 5 MiB)
 MAX_BYTES=$((8*1024*1024)) bash repomergers/heimgewebe-merge/run.sh out/hgw
