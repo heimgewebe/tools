@@ -60,7 +60,7 @@ for p in "${preferred[@]}"; do
 done
 rest=()
 for r in "${sel[@]}"; do [[ -z "${PSET[$r]:-}" ]] && rest+=("$r"); done
-IFS=$'\n' rest_sorted=($(printf "%s\n" "${rest[@]}" | sort))
+mapfile -t rest_sorted < <(printf "%s\n" "${rest[@]}" | sort)
 ordered+=("${rest_sorted[@]}")
 
 echo "• Ausgewählt: ${#ordered[@]} Repos"
