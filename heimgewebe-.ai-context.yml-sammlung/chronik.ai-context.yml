@@ -9,11 +9,6 @@ project:
 
 dependencies:
   internal:
-    - name: chronik
-      relationship: uses
-      interface:
-        - event_query
-        - timeline_view
     - name: semantah
       relationship: uses
       interface:
