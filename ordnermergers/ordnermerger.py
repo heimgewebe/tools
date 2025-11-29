@@ -21,7 +21,9 @@ Dies kann via Environment-Variable ORDNERMERGER_HOME angepasst werden.
 """
 
 from __future__ import annotations
-import os, sys, shutil
+import os
+import sys
+import shutil
 from pathlib import Path
 from datetime import datetime, timezone
 from merger_lib import human, is_text, md5, lang
@@ -30,10 +32,13 @@ ENC = "utf-8"
 DEFAULT_NAME_PATTERN = "{name}_merge_%y%m%d%H%M"
 FORBIDDEN_DIR_NAMES = {"merges", ".git", ".cache", ".venv", "__pycache__"}
 
+
 def _script_home() -> Path:
     h = os.environ.get("ORDNERMERGER_HOME")
-    if h: return Path(h).expanduser().resolve()
+    if h:
+        return Path(h).expanduser().resolve()
     return Path(__file__).resolve().parent
+
 
 def _should_skip_dir(entry: Path, merge_dir: Path | None) -> bool:
     name = entry.name
@@ -47,36 +52,56 @@ def _should_skip_dir(entry: Path, merge_dir: Path | None) -> bool:
             return False
     return False
 
+
 def _tree(out, root: Path, merge_dir: Path | None):
-    def rec(cur: Path, depth:int):
-        try: entries=sorted(cur.iterdir(), key=lambda x:(not x.is_dir(), x.name.lower()))
-        except Exception: return
+    def rec(cur: Path, depth: int):
+        try:
+            entries = sorted(cur.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        except Exception:
+            return
         for e in entries:
             if e.is_dir() and _should_skip_dir(e, merge_dir):
                 continue
-            rel=e.relative_to(root); mark="📁" if e.is_dir() else "📄"
+            rel = e.relative_to(root)
+            mark = "📁" if e.is_dir() else "📄"
             out.write(f"{'  '*depth}- {mark} {rel}\n")
-            if e.is_dir(): rec(e, depth+1)
-    out.write("```tree\n"); out.write(f"{root}\n"); rec(root,0); out.write("```\n")
+            if e.is_dir():
+                rec(e, depth+1)
+    out.write("```tree\n")
+    out.write(f"{root}\n")
+    rec(root, 0)
+    out.write("```\n")
+
 
 def _out_path(src: Path, merge_dir: Path, utc: bool, pattern: str) -> Path:
     now = datetime.now(timezone.utc if utc else None)
     stem = now.strftime(pattern.replace("{name}", src.name))
     return merge_dir / f"{stem}.md"
 
+
 def merge_folder(src: Path, out_file: Path):
-    included=[]; skipped=[]; total=0
+    included = []
+    skipped = []
+    total = 0
     merge_dir = out_file.parent.resolve()
     for dirpath, dirnames, files in os.walk(src):
         if dirnames:
             cur = Path(dirpath)
             dirnames[:] = [d for d in dirnames if not _should_skip_dir(cur / d, merge_dir)]
         for fn in files:
-            p = Path(dirpath)/fn; rel=p.relative_to(src)
-            if not is_text(p): skipped.append(f"{rel} (binär)"); continue
-            try: sz=p.stat().st_size; dig=md5(p)
-            except Exception as e: skipped.append(f"{rel} (err {e})"); continue
-            included.append((p, rel, sz, dig)); total += sz
+            p = Path(dirpath)/fn
+            rel = p.relative_to(src)
+            if not is_text(p):
+                skipped.append(f"{rel} (binär)")
+                continue
+            try:
+                sz = p.stat().st_size
+                dig = md5(p)
+            except Exception as e:
+                skipped.append(f"{rel} (err {e})")
+                continue
+            included.append((p, rel, sz, dig))
+            total += sz
     included.sort(key=lambda t: str(t[1]).lower())
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -86,21 +111,28 @@ def merge_folder(src: Path, out_file: Path):
         out.write(f"**Quelle:** `{src}`\n")
         out.write(f"**Dateien:** {len(included)}\n")
         out.write(f"**Gesamtgröße:** {human(total)}\n\n")
-        out.write("## 📁 Struktur\n\n"); _tree(out, src, merge_dir); out.write("\n")
+        out.write("## 📁 Struktur\n\n")
+        _tree(out, src, merge_dir)
+        out.write("\n")
         out.write("## 📦 Dateien\n\n")
         for p, rel, sz, dig in included:
             out.write(f"### 📄 {rel}\n\n**Größe:** {human(sz)} | **md5:** `{dig}`\n\n```{lang(p)}\n")
-            try: txt=p.read_text(encoding=ENC, errors="replace")
-            except Exception as e: txt=f"<<Lesefehler: {e}>>"
+            try:
+                txt = p.read_text(encoding=ENC, errors="replace")
+            except Exception as e:
+                txt = f"<<Lesefehler: {e}>>"
             out.write(txt + ("\n" if not txt.endswith("\n") else ""))
             out.write("```\n\n")
         if skipped:
             out.write("## ⏭️ Übersprungen\n\n")
-            for s in skipped: out.write(f"- {s}\n")
+            for s in skipped:
+                out.write(f"- {s}\n")
+
 
 def retention_clean(merge_dir: Path, keep: int):
     """Behält nur die 'keep' neuesten Merges im Zielordner."""
-    if keep < 0: keep = 0
+    if keep < 0:
+        keep = 0
     try:
         files = sorted(merge_dir.glob("*_merge_*.md"), key=lambda p: p.stat().st_mtime)
     except Exception as e:
@@ -120,6 +152,7 @@ def retention_clean(merge_dir: Path, keep: int):
         except Exception as e:
             print(f"  ⚠️ Fehler beim Löschen von {f.name}: {e}")
 
+
 def parse_args(argv):
     import argparse
     ap = argparse.ArgumentParser(description="ordnermerger — Ordner zu Markdown zusammenführen")
@@ -131,10 +164,12 @@ def parse_args(argv):
     ap.add_argument("--retain", type=int, help="Nur die N neuesten Merges behalten, ältere löschen")
     ap.add_argument("-y", "--yes", action="store_true", help="Rückfragen überspringen (z.B. bei --delete)")
     ap.add_argument("--utc", action="store_true", help="UTC statt lokale Zeit im Dateinamen verwenden")
-    ap.add_argument("--pattern", default=DEFAULT_NAME_PATTERN, help=f"Namensmuster für Zieldatei (Default: {DEFAULT_NAME_PATTERN})")
+    ap.add_argument("--pattern", default=DEFAULT_NAME_PATTERN,
+                    help=f"Namensmuster für Zieldatei (Default: {DEFAULT_NAME_PATTERN})")
     return ap.parse_args(argv)
 
-def main(argv:list[str])->int:
+
+def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     home = _script_home()
@@ -146,12 +181,14 @@ def main(argv:list[str])->int:
         workdir = Path(args.workdir).expanduser() if args.workdir else Path.cwd()
         print(f"BATCH-Modus im Verzeichnis: {workdir}")
         for c in sorted(workdir.iterdir()):
-            if not c.is_dir(): continue
-            if _should_skip_dir(c, merge_dir): continue
+            if not c.is_dir():
+                continue
+            if _should_skip_dir(c, merge_dir):
+                continue
             sources.append(c)
     elif args.selected:
         sources = [Path(s).expanduser() for s in args.selected]
-    else: # Default is --here
+    else:  # Default is --here
         sources = [Path.cwd()]
 
     if not sources:
@@ -197,6 +234,7 @@ def main(argv:list[str])->int:
 
     print(f"📂 Ziel: {merge_dir}")
     return 0 if successful_merges else 2
+
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
