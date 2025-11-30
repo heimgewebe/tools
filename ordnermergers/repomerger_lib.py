@@ -55,8 +55,9 @@ class RepoMerger:
         try:
             if cfg_path.exists():
                 cfg.read(cfg_path, encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as e:
+            import sys
+            print(f"Warning: Failed to read config from {cfg_path}: {e}", file=sys.stderr)
         return cfg, cfg_path
 
     def _cfg_get_int(self, cfg, section, key, default):
@@ -90,8 +91,12 @@ class RepoMerger:
                 for p in base.rglob(basename):
                     if p.is_dir() and p.name == basename and len(str(p).split(os.sep)) <= max_depth_abs:
                         candidates.append(p)
-            except Exception:
+            except (OSError, PermissionError) as e:
+                # Ignore permission errors during recursive search
                 pass
+            except Exception as e:
+                import sys
+                print(f"Warning: Error during directory search in {base}: {e}", file=sys.stderr)
 
         uniq = sorted(list(set(candidates)), key=lambda p: (len(str(p)), str(p)))
         if not uniq:
@@ -157,8 +162,9 @@ class RepoMerger:
             for old in merges[:-keep]:
                 try:
                     old.unlink()
-                except Exception:
-                    pass
+                except Exception as e:
+                    import sys
+                    print(f"Warning: Failed to delete old merge file {old}: {e}", file=sys.stderr)
 
     def _do_merge(
         self,
