@@ -177,8 +177,9 @@ def parse_manifest(md: Path) -> dict[str, tuple[str, int]]:
 
                     if rel:
                         m[rel] = (md5_val, size_val)
-    except Exception:
-        pass
+    except Exception as e:
+        import sys
+        print(f"Warning: Failed to parse manifest from {md}: {e}", file=sys.stderr)
     return m
 
 

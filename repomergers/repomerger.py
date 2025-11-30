@@ -676,8 +676,9 @@ def safe_delete_source(src, base_dir, merges_dir, no_delete):
         src = src.resolve()
         base_dir = base_dir.resolve()
         merges_dir = merges_dir.resolve()
-    except Exception:
-        pass
+    except Exception as e:
+        print("Warnung: Fehler beim Auflösen von Pfaden: {0}".format(e), file=sys.stderr)
+        return
 
     parent = src.parent
     if parent != base_dir:
