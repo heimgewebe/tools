@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 import argparse
+import fnmatch
+import re
 import shutil
 import subprocess
 import sys
-import fnmatch
-import re
 from pathlib import Path
 
 
