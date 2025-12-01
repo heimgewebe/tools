@@ -134,6 +134,14 @@ CONFIG_FILENAMES = {
 
 DOC_EXTENSIONS = {".md", ".rst", ".txt"}
 
+LANG_MAP = {
+    "py": "python", "js": "javascript", "ts": "typescript", "html": "html", "css": "css",
+    "scss": "scss", "sass": "sass", "json": "json", "xml": "xml", "yaml": "yaml", "yml": "yaml",
+    "md": "markdown", "sh": "bash", "bat": "batch", "sql": "sql", "php": "php", "cpp": "cpp",
+    "c": "c", "java": "java", "cs": "csharp", "go": "go", "rs": "rust", "rb": "ruby",
+    "swift": "swift", "kt": "kotlin", "svelte": "svelte",
+}
+
 SOURCE_EXTENSIONS = {
     ".py",
     ".rs",
@@ -235,6 +243,11 @@ def compute_md5(path, limit_bytes=None):
         return h.hexdigest()
     except OSError:
         return "ERROR"
+
+
+def lang_for(ext):
+    """Ermittelt die Sprache für Markdown-Blöcke anhand der Endung."""
+    return LANG_MAP.get(ext.lower().lstrip("."), "")
 
 
 def classify_category(rel_path, ext):
@@ -562,7 +575,7 @@ def write_report(files, level, max_file_bytes, output_path, sources,
                 lines.append("")
                 continue
 
-            lines.append("```")
+            lines.append("```{0}".format(lang_for(fi.ext)))
             lines.append(content.rstrip("\n"))
             lines.append("```")
             lines.append("")
