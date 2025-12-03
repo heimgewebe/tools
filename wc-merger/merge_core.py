@@ -660,8 +660,8 @@ def generate_report_content(files: List[FileInfo], level: str, max_file_bytes: i
                     continue
 
             if truncated:
-                 lines.append(f"**Note:** File > {human_size(max_file_bytes)}, content truncated.")
-                 lines.append("")
+                lines.append(f"**Note:** File > {human_size(max_file_bytes)}, content truncated.")
+                lines.append("")
 
             lang = lang_for(fi.ext)
             lines.append(f"```{lang}")
