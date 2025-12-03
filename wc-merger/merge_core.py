@@ -9,7 +9,7 @@ import os
 import hashlib
 import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Dict, Optional, Tuple, Set, Any
 
 # --- Configuration & Heuristics (from repomerger) ---
 
@@ -20,6 +20,7 @@ DEFAULT_MAX_BYTES = 10_000_000  # 10 MB
 SKIP_DIRS = {
     ".git",
     ".idea",
+    # deliberately NOT: ".vscode" (tasks.json etc. are interesting)
     "node_modules",
     ".svelte-kit",
     ".next",
@@ -80,7 +81,7 @@ TEXT_EXTENSIONS = {
     ".csv",
     ".log",
     ".lock",   # e.g. Cargo.lock, pnpm-lock.yaml
-    ".bats",   # added based on feedback
+    ".bats",
     ".properties",
     ".gradle",
     ".groovy",
@@ -107,7 +108,10 @@ TEXT_EXTENSIONS = {
     ".hcl",
     ".gitignore",
     ".gitattributes",
-    ".editorconfig"
+    ".editorconfig",
+    ".cs",
+    ".swift",
+    ".adoc",
 }
 
 # Files typically considered configuration
@@ -138,6 +142,12 @@ CONFIG_FILENAMES = {
     ".pre-commit-config.yaml",
     ".gitignore",
     ".gitmodules",
+    "tsconfig.json",
+    "babel.config.js",
+    "webpack.config.js",
+    "rollup.config.js",
+    "vite.config.js",
+    "vite.config.ts",
 }
 
 DOC_EXTENSIONS = {".md", ".rst", ".txt", ".adoc"}
@@ -162,7 +172,9 @@ SOURCE_EXTENSIONS = {
     ".swift",
     ".kt",
     ".sh",
-    ".bash"
+    ".bash",
+    ".pl",
+    ".lua",
 }
 
 LANG_MAP = {
@@ -171,7 +183,7 @@ LANG_MAP = {
     "md": "markdown", "sh": "bash", "bat": "batch", "sql": "sql", "php": "php", "cpp": "cpp",
     "c": "c", "java": "java", "cs": "csharp", "go": "go", "rs": "rust", "rb": "ruby",
     "swift": "swift", "kt": "kotlin", "svelte": "svelte", "toml": "toml", "ini": "ini",
-    "dockerfile": "dockerfile", "tf": "hcl", "hcl": "hcl", "bats": "bash"
+    "dockerfile": "dockerfile", "tf": "hcl", "hcl": "hcl", "bats": "bash", "pl": "perl", "lua": "lua"
 }
 
 # Hardcoded path for Pythonista environment (wc-hub location)
@@ -194,7 +206,7 @@ class FileInfo(object):
         self.ext = ext
         self.skipped = skipped
         self.reason = reason
-        self.content = content  # Can be pre-loaded or loaded on demand
+        self.content = content
 
 
 # --- Utilities ---
@@ -248,7 +260,7 @@ def get_merges_dir(hub: Path) -> Path:
     return merges
 
 
-def human_size(n):
+def human_size(n: float) -> str:
     size = float(n)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024.0 or unit == "GB":
@@ -257,7 +269,7 @@ def human_size(n):
     return "{0:.2f} GB".format(size)
 
 
-def is_probably_text(path, size):
+def is_probably_text(path: Path, size: int) -> bool:
     name = path.name.lower()
     base, ext = os.path.splitext(name)
     if ext in TEXT_EXTENSIONS or name in TEXT_EXTENSIONS:
@@ -279,7 +291,7 @@ def is_probably_text(path, size):
     return True
 
 
-def compute_md5(path, limit_bytes=None):
+def compute_md5(path: Path, limit_bytes: Optional[int] = None) -> str:
     h = hashlib.md5()
     try:
         with path.open("rb") as f:
@@ -301,11 +313,11 @@ def compute_md5(path, limit_bytes=None):
         return "ERROR"
 
 
-def lang_for(ext):
+def lang_for(ext: str) -> str:
     return LANG_MAP.get(ext.lower().lstrip("."), "")
 
 
-def classify_category(rel_path, ext):
+def classify_category(rel_path: Path, ext: str) -> str:
     name = rel_path.name
     if name in CONFIG_FILENAMES:
         return "config"
@@ -320,11 +332,11 @@ def classify_category(rel_path, ext):
     if "docs" in parts or "doc" in parts:
         return "doc"
 
-    # Enhanced categorization based on feedback
+    # Enhanced categorization
     if "contracts" in parts or "contract" in parts or "schemas" in parts:
         return "contract"
     if "scripts" in parts:
-        return "source" # or 'script'? repomerger puts scripts in source if .sh
+        return "source"
     if "tests" in parts or "test" in parts or name.endswith("_test.py") or name.startswith("test_"):
         return "test"
 
@@ -347,7 +359,10 @@ def _normalize_ext_list(ext_text: str) -> List[str]:
 
 # --- Repo Scan Logic ---
 
-def scan_repo(repo_root: Path, extensions: Optional[List[str]], path_contains: Optional[str], max_bytes: int) -> Dict:
+def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES) -> Dict[str, Any]:
+    """
+    Scans a repository and returns a summary dict including file list.
+    """
     repo_root = repo_root.resolve()
     root_label = repo_root.name
     files = []
@@ -379,7 +394,12 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]], path_contains: O
                 continue
 
             abs_path = Path(dirpath) / fn
-            rel_path = abs_path.relative_to(repo_root)
+            try:
+                rel_path = abs_path.relative_to(repo_root)
+            except ValueError:
+                # Should not happen given os.walk
+                continue
+
             rel_path_str = rel_path.as_posix()
 
             # Path filter
@@ -415,21 +435,6 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]], path_contains: O
             else:
                 md5 = ""
 
-            skipped = False
-            reason = None
-            content = None
-
-            if size > max_bytes and is_text:
-                # We will handle truncation during reporting, but mark it here?
-                # Actually repomerger logic handles content reading separately or on demand.
-                # For compatibility with wc-merger provided logic which reads content immediately (in pythonista version),
-                # we can choose strategy. But repomerger reads on demand in write_report to be cleaner.
-                # HOWEVER, the pythonista `scan_repo` in the prompt read content eagerly.
-                # "Inhalt laden" ...
-                # Let's use lazy loading (store path) for efficiency unless we need it eagerly.
-                # Given we are "merging" logic, let's stick to repomerger's robust style: store metadata, read later.
-                pass
-
             fi = FileInfo(
                 root_label=root_label,
                 abs_path=abs_path,
@@ -455,20 +460,31 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]], path_contains: O
         "max_file_size": max_file_size,
     }
 
+def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str]]:
+    """
+    Returns a dictionary mapping relative paths to (size, md5).
+    Uses the same ignoring logic as scan_repo to ensure clean diffs.
+    """
+    snapshot = {}
+    summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=100_000_000) # Large limit for diffs
+    for fi in summary["files"]:
+        snapshot[fi.rel_path.as_posix()] = (fi.size, fi.md5)
+    return snapshot
+
 
 # --- Reporting Logic (Repomerger Style) ---
 
-def summarize_extensions(file_infos):
-    counts = {}
-    sizes = {}
+def summarize_extensions(file_infos: List[FileInfo]) -> Tuple[Dict[str, int], Dict[str, int]]:
+    counts: Dict[str, int] = {}
+    sizes: Dict[str, int] = {}
     for fi in file_infos:
         ext = fi.ext or "<none>"
         counts[ext] = counts.get(ext, 0) + 1
         sizes[ext] = sizes.get(ext, 0) + fi.size
     return counts, sizes
 
-def summarize_categories(file_infos):
-    stats = {}
+def summarize_categories(file_infos: List[FileInfo]) -> Dict[str, List[int]]:
+    stats: Dict[str, List[int]] = {}
     for fi in file_infos:
         cat = fi.category or "other"
         if cat not in stats:
@@ -477,8 +493,8 @@ def summarize_categories(file_infos):
         stats[cat][1] += fi.size
     return stats
 
-def build_tree(file_infos):
-    by_root = {}
+def build_tree(file_infos: List[FileInfo]) -> str:
+    by_root: Dict[str, List[Path]] = {}
     for fi in file_infos:
         by_root.setdefault(fi.root_label, []).append(fi.rel_path)
 
@@ -487,7 +503,7 @@ def build_tree(file_infos):
         rels = by_root[root]
         lines.append(f"📁 {root}/")
 
-        tree = {}
+        tree: Dict[str, Any] = {}
         for r in rels:
             parts = list(r.parts)
             node = tree
@@ -638,12 +654,9 @@ def generate_report_content(files: List[FileInfo], level: str, max_file_bytes: i
             truncated = False
             content = ""
 
-            # If content was preloaded (Pythonista style from prompt), use it
+            # If content was preloaded, use it
             if fi.content is not None:
                 content = fi.content
-                # Check length if we need to simulate truncation?
-                # The prompt logic had truncation in 'scan_repo' via max_bytes.
-                # Here we handle it display-side if possible.
             else:
                 # Lazy load
                 try:
