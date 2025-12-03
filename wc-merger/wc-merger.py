@@ -37,6 +37,7 @@ try:
     from merge_core import (
         MERGES_DIR_NAME,
         DEFAULT_MAX_BYTES,
+        SKIP_ROOTS,
         detect_hub_dir,
         get_merges_dir,
         scan_repo,
@@ -49,6 +50,7 @@ except ImportError:
     from merge_core import (
         MERGES_DIR_NAME,
         DEFAULT_MAX_BYTES,
+        SKIP_ROOTS,
         detect_hub_dir,
         get_merges_dir,
         scan_repo,
@@ -65,6 +67,8 @@ def find_repos_in_hub(hub: Path) -> List[str]:
         return []
     for child in sorted(hub.iterdir(), key=lambda p: p.name.lower()):
         if not child.is_dir():
+            continue
+        if child.name in SKIP_ROOTS:
             continue
         if child.name == MERGES_DIR_NAME:
             continue
