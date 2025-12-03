@@ -5,25 +5,25 @@
 repomerger – Multi-Repo-Merge ohne Diff, mit Plan-Phase, Kategorien und 3 Detailstufen.
 
 Funktionen:
-- Erzeugt EIN Markdown-File mit Überblick über ein oder mehrere Repos.
+- Erzeugt EIN Markdown-File mit Überblick über ein oder mehrere Repos.
 - Inhalte:
-  - Plan-Abschnitt (Metaüberblick mit Kategorien- und Endungsstatistik).
-  - Baumstruktur über alle Quellen.
+  - Plan-Abschnitt (Metaüberblick mit Kategorien- und Endungsstatistik).
+  - Baumstruktur über alle Quellen.
   - Manifest aller gefundenen Dateien.
-  - Je nach Detailstufe: Inhalte von Textdateien (mit Größenlimit pro Datei).
+  - Je nach Detailstufe: Inhalte von Textdateien (mit Größenlimit pro Datei).
 
 Detailstufen:
 - overview: Struktur + Manifest, keine Inhalte.
 - summary:  Struktur + Manifest + Inhalte aller Textdateien <= max_file_bytes.
 - full:     Struktur + Manifest + Inhalte aller Textdateien,
-            größere Textdateien werden bis max_file_bytes gekürzt.
+            größere Textdateien werden bis max_file_bytes gekürzt.
 
 Besonderheiten:
-- Keine Diffs zu früheren Läufen: jeder Merge ist ein eigenständiger Schnappschuss.
-- Mehrere Repos pro Lauf möglich.
+- Keine Diffs zu früheren Läufen: jeder Merge ist ein eigenständiger Schnappschuss.
+- Mehrere Repos pro Lauf möglich.
 - .env / .env.* werden ignoriert, außer .env.example / .env.template / .env.sample.
 - Merge-Dateien werden IMMER in den Ordner "merges" geschrieben (neben dem Script).
-- Quellordner werden nach dem Merge gelöscht, WENN sie im gleichen Ordner wie das Script liegen
+- Quellordner werden nach dem Merge gelöscht, WENN sie im gleichen Ordner wie das Script liegen
   (und nicht der merges-Ordner sind). Abschaltbar mit --no-delete.
 """
 
@@ -38,7 +38,7 @@ from pathlib import Path
 
 MERGES_DIR_NAME = "merges"
 
-# Verzeichnisse, die standardmäßig ignoriert werden (rekursiv)
+# Verzeichnisse, die standardmäßig ignoriert werden (rekursiv)
 SKIP_DIRS = {
     ".git",
     ".idea",
@@ -161,7 +161,7 @@ SOURCE_EXTENSIONS = {
 
 
 class FileInfo(object):
-    """Einfache Container-Klasse für Dateimetadaten."""
+    """Einfache Container-Klasse für Dateimetadaten."""
 
     def __init__(self, root_label, abs_path, rel_path, size, is_text, md5, category, ext):
         self.root_label = root_label
@@ -177,7 +177,7 @@ class FileInfo(object):
 # --- Hilfsfunktionen ---------------------------------------------------------
 
 def human_size(n):
-    """Formatierte Dateigröße, z.B. '1.23 MB'."""
+    """Formatierte Dateigröße, z.B. '1.23 MB'."""
     size = float(n)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024.0 or unit == "GB":
@@ -192,14 +192,14 @@ def is_probably_text(path, size):
 
     - bekannte Text-Endungen -> True
     - große unbekannte Dateien -> eher False
-    - ansonsten: 4 KiB lesen, auf NUL-Bytes prüfen.
+    - ansonsten: 4 KiB lesen, auf NUL-Bytes prüfen.
     """
     name = path.name.lower()
     base, ext = os.path.splitext(name)
     if ext in TEXT_EXTENSIONS or name in TEXT_EXTENSIONS:
         return True
 
-    # Sehr große unbekannte Dateien eher als binär behandeln
+    # Sehr große unbekannte Dateien eher als binär behandeln
     if size > 20 * 1024 * 1024:  # 20 MiB
         return False
 
@@ -221,7 +221,7 @@ def compute_md5(path, limit_bytes=None):
     """
     MD5-Hash einer Datei.
 
-    - Wenn limit_bytes gesetzt ist, lesen wir höchstens so viele Bytes.
+    - Wenn limit_bytes gesetzt ist, lesen wir höchstens so viele Bytes.
     - Bei Fehlern: 'ERROR'.
     """
     h = hashlib.md5()
@@ -246,7 +246,7 @@ def compute_md5(path, limit_bytes=None):
 
 
 def lang_for(ext):
-    """Ermittelt die Sprache für Markdown-Blöcke anhand der Endung."""
+    """Ermittelt die Sprache für Markdown-Blöcke anhand der Endung."""
     return LANG_MAP.get(ext.lower().lstrip("."), "")
 
 
@@ -271,7 +271,7 @@ def classify_category(rel_path, ext):
 
 
 def summarize_extensions(file_infos):
-    """Anzahl und Gesamtgröße pro Dateiendung."""
+    """Anzahl und Gesamtgröße pro Dateiendung."""
     counts = {}
     sizes = {}
     for fi in file_infos:
@@ -282,7 +282,7 @@ def summarize_extensions(file_infos):
 
 
 def summarize_categories(file_infos):
-    """Anzahl und Gesamtgröße pro Kategorie."""
+    """Anzahl und Gesamtgröße pro Kategorie."""
     stats = {}
     for fi in file_infos:
         cat = fi.category or "other"
@@ -295,7 +295,7 @@ def summarize_categories(file_infos):
 
 def scan_repo(repo, md5_limit_bytes):
     """
-    Scannt ein einzelnes Repo und erzeugt FileInfo-Einträge.
+    Scannt ein einzelnes Repo und erzeugt FileInfo-Einträge.
     """
     repo = repo.resolve()
     root_label = repo.name
@@ -442,22 +442,22 @@ def write_report(files, level, max_file_bytes, output_path, sources,
         for src in sources:
             lines.append("- `{0}`".format(src))
     lines.append("**Detailstufe:** `{0}`".format(level))
-    lines.append("**Maximale Inhaltsgröße pro Datei:** {0}".format(human_size(max_file_bytes)))
+    lines.append("**Maximale Inhaltsgröße pro Datei:** {0}".format(human_size(max_file_bytes)))
     lines.append("")
-    lines.append("> Hinweis für KIs:")
-    lines.append("> - Dies ist ein Schnappschuss des Dateisystems, keine vollständige Git-Historie.")
+    lines.append("> Hinweis für KIs:")
+    lines.append("> - Dies ist ein Schnappschuss des Dateisystems, keine vollständige Git-Historie.")
     lines.append("> - Baumansicht: `## 📁 Struktur`.")
     lines.append("> - Manifest: `## 🧾 Manifest`.")
     if level == "overview":
         lines.append("> - In dieser Detailstufe werden keine Dateiinhalte eingebettet.")
     elif level == "summary":
         lines.append("> - In dieser Detailstufe werden Inhalte kleiner Textdateien eingebettet;")
-        lines.append(">   größere Textdateien erscheinen nur im Manifest.")
+        lines.append(">   größere Textdateien erscheinen nur im Manifest.")
     else:
         lines.append("> - In dieser Detailstufe werden Inhalte aller Textdateien eingebettet;")
-        lines.append(">   große Dateien werden nach einer einstellbaren Byte-Grenze gekürzt.")
-    lines.append("> - `.env`-ähnliche Dateien werden gefiltert; sensible Daten können trotzdem in")
-    lines.append(">   anderen Textdateien vorkommen. Nutze den Merge nicht als öffentlichen Dump.")
+        lines.append(">   große Dateien werden nach einer einstellbaren Byte-Grenze gekürzt.")
+    lines.append("> - `.env`-ähnliche Dateien werden gefiltert; sensible Daten können trotzdem in")
+    lines.append(">   anderen Textdateien vorkommen. Nutze den Merge nicht als öffentlichen Dump.")
     lines.append("")
 
     # Plan
@@ -465,20 +465,20 @@ def write_report(files, level, max_file_bytes, output_path, sources,
     lines.append("")
     lines.append("- Gefundene Dateien gesamt: **{0}**".format(len(files)))
     lines.append("- Davon Textdateien: **{0}**".format(len(text_files)))
-    lines.append("- Davon Binärdateien: **{0}**".format(len(binary_files)))
+    lines.append("- Davon Binärdateien: **{0}**".format(len(binary_files)))
     lines.append("- Geplante Dateien mit Inhalteinbettung: **{0}**".format(planned_with_content))
-    lines.append("- Gesamtgröße der Quellen: **{0}**".format(human_size(total_size)))
+    lines.append("- Gesamtgröße der Quellen: **{0}**".format(human_size(total_size)))
     if any(fi.size > max_file_bytes for fi in text_files):
         lines.append(
-            "- Hinweis: Textdateien größer als {0} werden abhängig von der Detailstufe "
-            "gekürzt oder nur im Manifest aufgeführt.".format(human_size(max_file_bytes))
+            "- Hinweis: Textdateien größer als {0} werden abhängig von der Detailstufe "
+            "gekürzt oder nur im Manifest aufgeführt.".format(human_size(max_file_bytes))
         )
     lines.append("")
 
     if cat_stats:
         lines.append("**Dateien nach Kategorien:**")
         lines.append("")
-        lines.append("| Kategorie | Dateien | Gesamtgröße |")
+        lines.append("| Kategorie | Dateien | Gesamtgröße |")
         lines.append("| --- | ---: | ---: |")
         for cat in sorted(cat_stats.keys()):
             cnt, sz = cat_stats[cat]
@@ -488,7 +488,7 @@ def write_report(files, level, max_file_bytes, output_path, sources,
     if ext_counts:
         lines.append("**Grobe Statistik nach Dateiendungen:**")
         lines.append("")
-        lines.append("| Ext | Dateien | Gesamtgröße |")
+        lines.append("| Ext | Dateien | Gesamtgröße |")
         lines.append("| --- | ---: | ---: |")
         for ext in sorted(ext_counts.keys()):
             lines.append("| `{0}` | {1} | {2} |".format(
@@ -497,9 +497,9 @@ def write_report(files, level, max_file_bytes, output_path, sources,
         lines.append("")
 
     lines.append(
-        "Da der repomerger häufig nacheinander unterschiedliche Repos verarbeitet, "
-        "werden keine Diffs zu früheren Läufen berechnet. "
-        "Jeder Merge ist ein eigenständiger Schnappschuss."
+        "Da der repomerger häufig nacheinander unterschiedliche Repos verarbeitet, "
+        "werden keine Diffs zu früheren Läufen berechnet. "
+        "Jeder Merge ist ein eigenständiger Schnappschuss."
     )
     lines.append("")
 
@@ -516,7 +516,7 @@ def write_report(files, level, max_file_bytes, output_path, sources,
     # Manifest
     lines.append("## 🧾 Manifest")
     lines.append("")
-    lines.append("| Root | Pfad | Kategorie | Text | Größe | MD5 |")
+    lines.append("| Root | Pfad | Kategorie | Text | Größe | MD5 |")
     lines.append("| --- | --- | --- | --- | ---: | --- |")
     for fi in files:
         lines.append(
@@ -546,7 +546,7 @@ def write_report(files, level, max_file_bytes, output_path, sources,
             lines.append("")
             if fi.size > max_file_bytes and level == "full":
                 lines.append(
-                    "**Hinweis:** Datei ist größer als {0} – es wird nur ein Ausschnitt "
+                    "**Hinweis:** Datei ist größer als {0} – es wird nur ein Ausschnitt "
                     "bis zu dieser Grenze gezeigt.".format(human_size(max_file_bytes))
                 )
                 lines.append("")
@@ -562,7 +562,7 @@ def write_report(files, level, max_file_bytes, output_path, sources,
                                 break
                             if len(encoded) > remaining:
                                 part = encoded[:remaining].decode(encoding, errors="replace")
-                                collected.append(part + "\n[... gekürzt ...]\n")
+                                collected.append(part + "\n[... gekürzt ...]\n")
                                 remaining = 0
                                 break
                             collected.append(line)
@@ -587,7 +587,7 @@ def write_report(files, level, max_file_bytes, output_path, sources,
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        description="Erzeuge einen Gewebe-Merge-Bericht für ein oder mehrere Repos."
+        description="Erzeuge einen Gewebe-Merge-Bericht für ein oder mehrere Repos."
     )
     parser.add_argument(
         "paths",
@@ -610,12 +610,12 @@ def parse_args(argv):
         "--max-file-bytes",
         type=int,
         default=10_000_000,
-        help="Maximale Bytes pro Datei für Inhalteinbettung (Standard: 10 MiB).",
+        help="Maximale Bytes pro Datei für Inhalteinbettung (Standard: 10 MiB).",
     )
     parser.add_argument(
         "--encoding",
         default="utf-8",
-        help="Encoding für Textdateien (Standard: utf-8).",
+        help="Encoding für Textdateien (Standard: utf-8).",
     )
     parser.add_argument(
         "--plan-only",
@@ -625,14 +625,14 @@ def parse_args(argv):
     parser.add_argument(
         "--no-delete",
         action="store_true",
-        help="Quellordner nach dem Merge NICHT löschen.",
+        help="Quellordner nach dem Merge NICHT löschen.",
     )
     return parser.parse_args(argv)
 
 
 def resolve_level(raw_level):
     """
-    Übersetzt CLI/ENV-Level in eines der drei Kern-Level.
+    Übersetzt CLI/ENV-Level in eines der drei Kern-Level.
     Default = full.
     """
     if raw_level is None:
@@ -663,49 +663,37 @@ def discover_sources(base_dir, paths):
                 print("Warnung: Pfad ist kein Verzeichnis und wird ignoriert: {0}".format(p))
         return sources
 
-    sources = []
-    for child in sorted(base_dir.iterdir(), key=lambda p: p.name.lower()):
-        if not child.is_dir():
-            continue
-        if child.name.startswith(".") or child.name.startswith("_"):
-            continue
-        if child.name in SKIP_ROOTS:
-            continue
-        sources.append(child.resolve())
-    return sources
-
 
 def safe_delete_source(src, base_dir, merges_dir, no_delete):
     """
-    Löscht eine Quelle nur, wenn:
+    Löscht eine Quelle nur, wenn:
     - sie im gleichen Ordner wie das Script liegt (parent == base_dir) UND
     - sie nicht der merges-Ordner ist.
     """
     if no_delete:
-        print("Löschen deaktiviert (--no-delete): {0}".format(src))
+        print("Löschen deaktiviert (--no-delete): {0}".format(src))
         return
 
     try:
         src = src.resolve()
         base_dir = base_dir.resolve()
         merges_dir = merges_dir.resolve()
-    except Exception as e:
-        print("Warnung: Fehler beim Auflösen von Pfaden: {0}".format(e), file=sys.stderr)
-        return
+    except Exception:
+        pass
 
     parent = src.parent
     if parent != base_dir:
-        print("Quelle wird nicht gelöscht (liegt nicht im Script-Ordner): {0}".format(src))
+        print("Quelle wird nicht gelöscht (liegt nicht im Script-Ordner): {0}".format(src))
         return
     if src == merges_dir:
-        print("Merges-Ordner wird nicht gelöscht: {0}".format(src))
+        print("Merges-Ordner wird nicht gelöscht: {0}".format(src))
         return
 
     try:
         shutil.rmtree(str(src))
-        print("Quelle gelöscht: {0}".format(src))
+        print("Quelle gelöscht: {0}".format(src))
     except Exception as e:
-        print("Fehler beim Löschen von {0}: {1}".format(src, e))
+        print("Fehler beim Löschen von {0}: {1}".format(src, e))
 
 
 def main(argv=None):
@@ -725,7 +713,7 @@ def main(argv=None):
 
         sources = discover_sources(base_dir, args.paths)
         if not sources:
-            print("Keine gültigen Quellverzeichnisse gefunden.", file=sys.stderr)
+            print("Keine gültigen Quellverzeichnisse gefunden.", file=sys.stderr)
             return 1
 
         env_level = os.environ.get("REPOMERGER_LEVEL")
@@ -761,7 +749,7 @@ def main(argv=None):
         )
         print("Fertig.")
 
-        # Quellordner löschen (falls im gleichen Ordner wie das Script)
+        # Quellordner löschen (falls im gleichen Ordner wie das Script)
         for src in sources:
             safe_delete_source(src, base_dir, merges_dir, args.no_delete)
 
