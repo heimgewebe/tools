@@ -2,122 +2,255 @@
 # -*- coding: utf-8 -*-
 
 """
-wc-extractor.py
-Extracts ZIP archives into a target directory (wc-hub) and generates a diff report.
+wc_extractor – ZIPs im wc-hub entpacken und Repos aktualisieren.
+
+Funktion:
+- Suche alle *.zip im Hub (wc-hub).
+- Für jede ZIP:
+  - Entpacke in temporären Ordner.
+  - Wenn es bereits einen Zielordner mit gleichem Namen gibt:
+    - Erzeuge einfachen Diff-Bericht (Markdown) alt vs. neu.
+    - Lösche den alten Ordner.
+  - Benenne Temp-Ordner in Zielordner um.
+  - Lösche die ZIP-Datei.
+
+Diff-Berichte:
+- Liegen direkt im merges-Verzeichnis des Hubs (wie die Merge-Berichte).
+- Dateiname z.B.: <repo>-import-diff-YYMMDD-HHMMSS.md
 """
 
-import argparse
 import sys
-import os
 import shutil
 import zipfile
-import filecmp
+import datetime
 from pathlib import Path
+from typing import Dict, Tuple, Optional
 
-def compare_dirs(old_dir, new_dir):
+try:
+    import console  # type: ignore
+except ImportError:
+    console = None  # type: ignore
+
+# Import from core
+try:
+    from merge_core import (
+        detect_hub_dir,
+        get_merges_dir,
+        compute_md5,
+    )
+except ImportError:
+    # Fallback if running from root
+    sys.path.append(str(Path(__file__).parent))
+    from merge_core import (
+        detect_hub_dir,
+        get_merges_dir,
+        compute_md5,
+    )
+
+
+def detect_hub() -> Path:
+    script_path = Path(__file__).resolve()
+    return detect_hub_dir(script_path)
+
+
+def snapshot_dir(root: Path) -> Dict[str, Tuple[int, str]]:
     """
-    Compares two directories recursively and returns a list of changes.
+    Erzeugt einen Snapshot aller Dateien unterhalb von root.
+
+    Rückgabe: Dict[rel_path_posix -> (size, md5)]
     """
-    changes = []
+    result: Dict[str, Tuple[int, str]] = {}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        size = st.st_size
+        md5 = compute_md5(path)
+        result[rel] = (size, md5)
+    return result
 
-    old_files = set()
-    new_files = set()
 
-    for dirpath, _, filenames in os.walk(old_dir):
-        rel_dir = os.path.relpath(dirpath, old_dir)
-        if rel_dir == ".": rel_dir = ""
-        for fn in filenames:
-            old_files.add(os.path.join(rel_dir, fn))
+def diff_trees(
+    old: Path,
+    new: Path,
+    repo_name: str,
+    merges_dir: Path,
+) -> Path:
+    """
+    Vergleicht zwei Repo-Verzeichnisse und schreibt einen Markdown-Diff-Bericht.
+    Rückgabe: Pfad zur Diff-Datei.
+    """
+    old_map = snapshot_dir(old)
+    new_map = snapshot_dir(new)
 
-    for dirpath, _, filenames in os.walk(new_dir):
-        rel_dir = os.path.relpath(dirpath, new_dir)
-        if rel_dir == ".": rel_dir = ""
-        for fn in filenames:
-            new_files.add(os.path.join(rel_dir, fn))
+    old_keys = set(old_map.keys())
+    new_keys = set(new_map.keys())
 
-    all_files = old_files.union(new_files)
+    only_old = sorted(old_keys - new_keys)
+    only_new = sorted(new_keys - old_keys)
+    common = sorted(old_keys & new_keys)
 
-    for f in sorted(all_files):
-        in_old = f in old_files
-        in_new = f in new_files
+    changed = []
+    for rel in common:
+        size_old, md5_old = old_map[rel]
+        size_new, md5_new = new_map[rel]
+        if size_old != size_new or md5_old != md5_new:
+            changed.append((rel, size_old, size_new))
 
-        if in_old and not in_new:
-            changes.append(f"❌ REMOVED: {f}")
-        elif not in_old and in_new:
-            changes.append(f"✨ ADDED:   {f}")
-        else:
-            # In both, check content
-            old_p = os.path.join(old_dir, f)
-            new_p = os.path.join(new_dir, f)
-            if not filecmp.cmp(old_p, new_p, shallow=False):
-                 changes.append(f"📝 MODIFIED: {f}")
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    fname = "{}-import-diff-{}.md".format(repo_name, ts)
+    out_path = merges_dir / fname
 
-    return changes
+    lines = []
+    lines.append("# Import-Diff `{}`".format(repo_name))
+    lines.append("")
+    lines.append("- Zeitpunkt: `{}`".format(now))
+    lines.append("- Alter Pfad: `{}`".format(old))
+    lines.append("- Neuer Pfad (Temp): `{}`".format(new))
+    lines.append("")
+    lines.append("- Dateien nur im alten Repo: **{}**".format(len(only_old)))
+    lines.append("- Dateien nur im neuen Repo: **{}**".format(len(only_new)))
+    lines.append("- Dateien mit geändertem Inhalt: **{}**".format(len(changed)))
+    lines.append("")
 
-def main():
-    parser = argparse.ArgumentParser(description="Extract ZIP to wc-hub with diff report.")
-    parser.add_argument("zipfile", help="Path to the source ZIP file.")
-    parser.add_argument("destination", help="Target directory (wc-hub repo path).")
-    parser.add_argument("--force", action="store_true", help="Overwrite without confirmation.")
+    if only_old:
+        lines.append("## Nur im alten Repo")
+        lines.append("")
+        for rel in only_old:
+            lines.append("- `{}`".format(rel))
+        lines.append("")
 
+    if only_new:
+        lines.append("## Nur im neuen Repo")
+        lines.append("")
+        for rel in only_new:
+            lines.append("- `{}`".format(rel))
+        lines.append("")
+
+    if changed:
+        lines.append("## Geänderte Dateien")
+        lines.append("")
+        lines.append("| Pfad | Größe alt | Größe neu |")
+        lines.append("| --- | ---: | ---: |")
+        for rel, s_old, s_new in changed:
+            lines.append(
+                "| `{}` | {} | {} |".format(rel, s_old, s_new)
+            )
+        lines.append("")
+
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    return out_path
+
+
+def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
+    """
+    Entpackt eine einzelne ZIP-Datei in den Hub, behandelt Konflikte,
+    schreibt ggf. Diff und ersetzt das alte Repo.
+
+    Rückgabe:
+      Pfad zum Diff-Bericht oder None.
+    """
+    repo_name = zip_path.stem
+    target_dir = hub / repo_name
+    tmp_dir = hub / ("__extract_tmp_" + repo_name)
+
+    print("Verarbeite ZIP:", zip_path.name, "-> Repo", repo_name)
+
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    # ZIP entpacken
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        zf.extractall(tmp_dir)
+
+    diff_path = None  # type: Optional[Path]
+
+    # Wenn es schon ein Repo mit diesem Namen gibt → Diff + löschen
+    if target_dir.exists():
+        print("  Zielordner existiert bereits:", target_dir)
+        diff_path = diff_trees(target_dir, tmp_dir, repo_name, merges_dir)
+        print("  Diff-Bericht:", diff_path)
+        shutil.rmtree(target_dir)
+        print("  Alter Ordner gelöscht:", target_dir)
+    else:
+        print("  Kein vorhandenes Repo – frischer Import.")
+
+    # Temp-Ordner ins Ziel verschieben
+    tmp_dir.rename(target_dir)
+    print("  Neuer Repo-Ordner:", target_dir)
+
+    # ZIP nach erfolgreichem Import löschen
+    zip_path.unlink()
+    print("  ZIP gelöscht:", zip_path.name)
+    print("")
+
+    return diff_path
+
+
+def main() -> int:
+    # CLI-Argumente optional unterstützen? Das Skript ist eher als Batch-Job konzipiert.
+    # Hier einfache Batch-Logik wie im Original-Snippet.
+    import argparse
+    parser = argparse.ArgumentParser(description="wc-extractor: Import ZIPs to hub.")
+    parser.add_argument("--hub", help="Hub directory override.")
     args = parser.parse_args()
 
-    zip_path = Path(args.zipfile).resolve()
-    dest_path = Path(args.destination).resolve()
+    script_path = Path(__file__).resolve()
+    hub = detect_hub_dir(script_path, args.hub)
 
-    if not zip_path.exists():
-        print(f"Error: ZIP file not found: {zip_path}", file=sys.stderr)
-        sys.exit(1)
+    if not hub.exists():
+         print(f"Hub directory not found: {hub}")
+         return 1
 
-    print(f"Preparing to extract {zip_path.name} to {dest_path}...", file=sys.stderr)
+    merges_dir = get_merges_dir(hub)
 
-    # Create temp dir for extraction
-    temp_dir = dest_path.parent / (dest_path.name + "_temp_extract")
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
-    temp_dir.mkdir(parents=True)
+    print("wc_extractor – Hub:", hub)
+    zips = sorted(hub.glob("*.zip"))
 
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir)
+    if not zips:
+        msg = "Keine ZIP-Dateien im Hub gefunden."
+        print(msg)
+        if console:
+            console.alert("wc_extractor", msg, "OK", hide_cancel_button=True)
+        return 0
 
-        # If destination exists, compare
-        if dest_path.exists():
-            print("Destination exists. Comparing...", file=sys.stderr)
-            changes = compare_dirs(str(dest_path), str(temp_dir))
+    diff_paths = []
 
-            if not changes:
-                print("No changes detected.", file=sys.stderr)
-            else:
-                print("\n--- DIFF REPORT ---")
-                for c in changes:
-                    print(c)
-                print("-------------------\n")
+    for zp in zips:
+        try:
+            diff = import_zip(zp, hub, merges_dir)
+            if diff is not None:
+                diff_paths.append(diff)
+        except Exception as e:
+            print("Fehler bei {}: {}".format(zp, e), file=sys.stderr)
 
-            if not args.force:
-                print("Dry run completed. Use --force to apply changes.", file=sys.stderr)
-                shutil.rmtree(temp_dir)
-                return
+    summary_lines = []
+    summary_lines.append("Import fertig.")
+    summary_lines.append("Hub: {}".format(hub))
+    if diff_paths:
+        summary_lines.append(
+            "Diff-Berichte ({}):".format(len(diff_paths))
+        )
+        for p in diff_paths:
+            summary_lines.append("  - {}".format(p))
+    else:
+        summary_lines.append("Keine Diff-Berichte erzeugt.")
 
-            # Apply changes: Remove old, move new
-            # Better: rsync-like sync? For now, replace logic as requested implies extraction.
-            # "Extracts into target... comparing... before replacement"
+    summary = "\n".join(summary_lines)
+    print(summary)
 
-            print("Replacing content...", file=sys.stderr)
-            shutil.rmtree(dest_path)
-            shutil.move(str(temp_dir), str(dest_path))
-            print("Done.", file=sys.stderr)
+    if console:
+        console.alert("wc_extractor", summary, "OK", hide_cancel_button=True)
 
-        else:
-            print("Destination does not exist. Creating...", file=sys.stderr)
-            shutil.move(str(temp_dir), str(dest_path))
-            print("Done.", file=sys.stderr)
+    return 0
 
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir)
-        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
