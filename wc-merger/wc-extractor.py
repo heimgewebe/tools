@@ -24,7 +24,7 @@ import shutil
 import zipfile
 import datetime
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
 
 try:
     import console  # type: ignore
@@ -36,7 +36,7 @@ try:
     from merge_core import (
         detect_hub_dir,
         get_merges_dir,
-        compute_md5,
+        get_repo_snapshot,
     )
 except ImportError:
     # Fallback if running from root
@@ -44,34 +44,13 @@ except ImportError:
     from merge_core import (
         detect_hub_dir,
         get_merges_dir,
-        compute_md5,
+        get_repo_snapshot,
     )
 
 
 def detect_hub() -> Path:
     script_path = Path(__file__).resolve()
     return detect_hub_dir(script_path)
-
-
-def snapshot_dir(root: Path) -> Dict[str, Tuple[int, str]]:
-    """
-    Erzeugt einen Snapshot aller Dateien unterhalb von root.
-
-    Rückgabe: Dict[rel_path_posix -> (size, md5)]
-    """
-    result: Dict[str, Tuple[int, str]] = {}
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(root).as_posix()
-        try:
-            st = path.stat()
-        except OSError:
-            continue
-        size = st.st_size
-        md5 = compute_md5(path)
-        result[rel] = (size, md5)
-    return result
 
 
 def diff_trees(
@@ -84,8 +63,9 @@ def diff_trees(
     Vergleicht zwei Repo-Verzeichnisse und schreibt einen Markdown-Diff-Bericht.
     Rückgabe: Pfad zur Diff-Datei.
     """
-    old_map = snapshot_dir(old)
-    new_map = snapshot_dir(new)
+    # Use scan_repo / get_repo_snapshot via merge_core to respect ignores
+    old_map = get_repo_snapshot(old)
+    new_map = get_repo_snapshot(new)
 
     old_keys = set(old_map.keys())
     new_keys = set(new_map.keys())
@@ -175,8 +155,12 @@ def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
     # Wenn es schon ein Repo mit diesem Namen gibt → Diff + löschen
     if target_dir.exists():
         print("  Zielordner existiert bereits:", target_dir)
-        diff_path = diff_trees(target_dir, tmp_dir, repo_name, merges_dir)
-        print("  Diff-Bericht:", diff_path)
+        try:
+            diff_path = diff_trees(target_dir, tmp_dir, repo_name, merges_dir)
+            print("  Diff-Bericht:", diff_path)
+        except Exception as e:
+            print(f"  Warnung: Fehler beim Diff-Erstellen ({e}). Fahre fort.")
+
         shutil.rmtree(target_dir)
         print("  Alter Ordner gelöscht:", target_dir)
     else:
@@ -187,16 +171,17 @@ def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
     print("  Neuer Repo-Ordner:", target_dir)
 
     # ZIP nach erfolgreichem Import löschen
-    zip_path.unlink()
-    print("  ZIP gelöscht:", zip_path.name)
+    try:
+        zip_path.unlink()
+        print("  ZIP gelöscht:", zip_path.name)
+    except OSError as e:
+        print(f"  Warnung: Konnte ZIP nicht löschen ({e})")
     print("")
 
     return diff_path
 
 
 def main() -> int:
-    # CLI-Argumente optional unterstützen? Das Skript ist eher als Batch-Job konzipiert.
-    # Hier einfache Batch-Logik wie im Original-Snippet.
     import argparse
     parser = argparse.ArgumentParser(description="wc-extractor: Import ZIPs to hub.")
     parser.add_argument("--hub", help="Hub directory override.")

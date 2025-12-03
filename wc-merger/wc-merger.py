@@ -327,8 +327,8 @@ class MergerUI(object):
             if not root.is_dir():
                 continue
             summary = scan_repo(root, extensions or None, path_contains, max_bytes)
-            # Add name explicitly to summary
-            summary["name"] = name
+            # Add name explicitly to summary (though it is in summary['name'] via scan_repo)
+            # scan_repo returns root_label as name, which is correct
             summaries.append(summary)
 
         if not summaries:
@@ -424,7 +424,7 @@ def main_cli():
     for src in sources:
         print(f"Scanning {src.name}...")
         summary = scan_repo(src, None, None, args.max_bytes)
-        summary["name"] = src.name
+        # summary has 'name' from root dirname
         summaries.append(summary)
 
     merges_dir = get_merges_dir(hub)
