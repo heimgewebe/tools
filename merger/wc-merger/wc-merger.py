@@ -97,76 +97,13 @@ def parse_human_size(text: str) -> int:
 
 # --- UI Class (Pythonista) ---
 
-def make_root_with_fake_sheet(inner_view) -> "ui.View": # type: ignore
-    root = ui.View()
-    root.name = 'wc-merger'
-    root.background_color = 'black'
-    root.flex = 'WH'
-
-    # „Karte“ / Fake-Sheet
-    sheet = ui.View()
-    sheet.background_color = (0.12, 0.12, 0.12)  # dunkler
-    sheet.corner_radius = 20
-    sheet.border_width = 1
-    sheet.border_color = (0.3, 0.3, 0.3, 0.8)
-    sheet.flex = 'LRTB'
-    root.add_subview(sheet)
-
-    # Close-Button
-    close_btn = ui.Button(title='✕')
-    close_btn.tint_color = 'white'
-    close_btn.width = 32
-    close_btn.height = 32
-
-    def close_action(sender):
-        v = sender
-        # bis zum obersten View hocharbeiten
-        while v.superview is not None:
-            v = v.superview
-        v.close()
-
-    close_btn.action = close_action
-    sheet.add_subview(close_btn)
-
-    # Deine eigentliche App-View in die Karte rein
-    inner_view.flex = 'WH'
-    sheet.add_subview(inner_view)
-
-    # Layout-Funktionen
-
-    def layout_root(sender):
-        # Karte mittig platzieren und skalieren
-        margin = 40
-        max_w = 900
-        max_h = 650
-
-        w, h = sender.width, sender.height
-        sheet.width = min(max_w, w - 2 * margin)
-        sheet.height = min(max_h, h - 2 * margin)
-        sheet.x = (w - sheet.width) / 2
-        sheet.y = (h - sheet.height) / 2
-
-    def layout_sheet(sender):
-        # Close-Button in die Ecke, inner_view darunter
-        padding = 16
-        btn_size = 28
-
-        close_btn.width = btn_size
-        close_btn.height = btn_size
-        close_btn.x = sender.width - padding - btn_size
-        close_btn.y = padding
-
-        # inner_view mit etwas Abstand nach innen
-        top_offset = padding + btn_size + 8
-        inner_view.x = padding
-        inner_view.y = top_offset
-        inner_view.width = sender.width - 2 * padding
-        inner_view.height = sender.height - top_offset - padding
-
-    root.layout = layout_root
-    sheet.layout = layout_sheet
-
-    return root
+def run_ui(hub: Path) -> int:
+    """Starte den Merger im klassischen Vollbild-UI-Modus."""
+    ui_obj = MergerUI(hub)
+    v = ui_obj.view
+    # Vollbild, mit Standard-Titelbalken (weißer Balken oben)
+    v.present('fullscreen', hide_title_bar=False)
+    return 0
 
 class MergerUI(object):
     def __init__(self, hub: Path) -> None:
@@ -617,22 +554,24 @@ def main():
         try:
             script_path = Path(__file__).resolve()
             hub = detect_hub_dir(script_path)
-            ui_obj = MergerUI(hub)
-            root = make_root_with_fake_sheet(ui_obj.view)
-            # Explicitly set root frame to screen size to avoid tiny window bug
-            try:
-                sw, sh = ui.get_screen_size()
-                root.frame = (0, 0, sw, sh)
-            except Exception:
-                pass
-            root.present('full_screen', hide_title_bar=True)
-            return
+            return run_ui(hub)
         except Exception as e:
             # Fallback auf CLI (headless), falls UI trotz ui-Import nicht verfügbar ist
             if console:
-                console.alert("wc-merger", f"UI not available, falling back to CLI. ({e})", "OK", hide_cancel_button=True)
+                try:
+                    console.alert(
+                        "wc-merger",
+                        f"UI not available, falling back to CLI. ({e})",
+                        "OK",
+                        hide_cancel_button=True,
+                    )
+                except Exception:
+                    pass
             else:
-                print(f"wc-merger: UI not available, falling back to CLI. ({e})", file=sys.stderr)
+                print(
+                    f"wc-merger: UI not available, falling back to CLI. ({e})",
+                    file=sys.stderr,
+                )
             main_cli()
     else:
         main_cli()
