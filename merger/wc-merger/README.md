@@ -90,4 +90,26 @@ python3 wc-merger.py --cli --repos myrepo --detail dev --mode batch
 python3 wc-merger.py --cli --repos myrepo --detail max --split-size 20
 ```
 
+### Nutzung in iOS Shortcuts (Headless)
+
+Shortcuts startet Pythonista oft als **App-Extension** mit stark eingeschränkten Rechten.
+In dieser Umgebung sind die Pythonista-Module `editor`, `ui`, `console` u. a. nicht verfügbar.
+
+Der wc-merger unterstützt deshalb einen **Headless-Modus**:
+
+```bash
+# Variante 1: per Flag
+python3 wc-merger.py --headless --level dev --mode gesamt
+
+# Variante 2: per Umgebungsvariable
+WC_HEADLESS=1 python3 wc-merger.py --level dev --mode gesamt
+```
+
+**Tipp:** Soll ein Shortcut Pythonista *voll* starten (mit UI/editor),
+nutze das URL-Scheme:
+
+```
+pythonista3://merger/wc-merger/wc-merger.py?action=run
+```
+
 Weitere Details siehe [wc-merger-spec.md](./wc-merger-spec.md).

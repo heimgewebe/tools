@@ -7,18 +7,27 @@ Enhanced AI-optimized reports with strict Pflichtenheft structure.
 """
 
 import sys
+import os
 import traceback
 from pathlib import Path
 from typing import List
 
 # Try importing Pythonista modules
+# In Shortcuts-App-Extension werfen diese Importe NotImplementedError.
+# Deshalb JEGLICHEN Import-Fehler abfangen, nicht nur ImportError.
 try:
     import ui        # type: ignore
-    import console   # type: ignore
-    import editor    # type: ignore
-except ImportError:
+except Exception:
     ui = None        # type: ignore
+
+try:
+    import console   # type: ignore
+except Exception:
     console = None   # type: ignore
+
+try:
+    import editor    # type: ignore
+except Exception:
     editor = None    # type: ignore
 
 # Import core logic
@@ -409,6 +418,13 @@ class MergerUI(object):
 
 # --- CLI Mode ---
 
+def _is_headless_requested() -> bool:
+    # Headless wenn:
+    # 1) --headless Flag, oder
+    # 2) WC_HEADLESS=1 in der Umgebung, oder
+    # 3) ui-Framework nicht verfügbar
+    return ("--headless" in sys.argv) or (os.environ.get("WC_HEADLESS") == "1") or (ui is None)
+
 def main_cli():
     import argparse
     parser = argparse.ArgumentParser(description="wc-merger CLI")
@@ -420,6 +436,7 @@ def main_cli():
     parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
 
     args = parser.parse_args()
 
@@ -469,11 +486,18 @@ def main_cli():
 
 
 def main():
-    if ui is not None:
+    # Headless in Shortcuts-Extension erzwingen (kein ui/editor erlaubt).
+    if not _is_headless_requested():
         script_path = Path(__file__).resolve()
         hub = detect_hub_dir(script_path)
-        ui_obj = MergerUI(hub)
-        ui_obj.view.present("sheet")
+        try:
+            ui_obj = MergerUI(hub)
+            ui_obj.view.present("sheet")
+        except Exception as e:
+            # Fallback auf CLI (headless), falls UI trotz ui-Import nicht verfügbar ist
+            if console:
+                console.alert("wc-merger", f"UI not available, falling back to CLI. ({e})", "OK", hide_cancel_button=True)
+            main_cli()
     else:
         main_cli()
 
