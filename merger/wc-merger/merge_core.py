@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core_v2 – Enhanced core functions for wc-merger.
-Implements improved AI-friendly formatting, tagging, and structure.
+merge_core – Core functions for wc-merger (v2 Standard).
+Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
 import os
@@ -511,7 +511,7 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     header.append("## Source & Profile")
     if sources:
         for s in sources:
-             header.append(f"- **Source:** `{s.name}`")
+            header.append(f"- **Source:** `{s.name}`")
     header.append(f"- **Profile:** `{level}`")
     header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')}")
     header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
@@ -581,11 +581,11 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
 
     for fi, status in processed_files:
         if status in ("omitted", "meta-only"):
-             continue
+            continue
 
         if fi.root_label != current_root:
-             yield f"## 📦 {fi.root_label}\n\n"
-             current_root = fi.root_label
+            yield f"## 📦 {fi.root_label}\n\n"
+            current_root = fi.root_label
 
         block = []
         block.append(f"### `{fi.rel_path}`")
