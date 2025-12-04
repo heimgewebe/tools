@@ -9,9 +9,9 @@ This document identifies code inconsistencies found in the tools repository and 
 ### 1. Massive Code Duplication in Merger Scripts
 
 **Problem**: Three nearly identical merger scripts contain 30+ duplicate functions:
-- `repomergers/hauski-merger.py` (708 lines)
-- `repomergers/weltgewebe-merger.py` (662 lines)  
-- `repomergers/wgx-merger.py` (710 lines)
+- `repomerger/hauski-merger.py` (708 lines)
+- `repomerger/weltgewebe-merger.py` (662 lines)  
+- `repomerger/wgx-merger.py` (710 lines)
 
 **Duplicated Functions**:
 - Utility functions: `human()`, `_deurl()`, `ensure_dir()`, `safe_is_dir()`
@@ -29,8 +29,8 @@ This document identifies code inconsistencies found in the tools repository and 
 
 **Existing Solution**:
 The repository already has shared libraries:
-- `ordnermergers/merger_lib.py` - contains utility functions
-- `ordnermergers/repomerger_lib.py` - contains `RepoMerger` class with shared logic
+- `ordnermerger/merger_lib.py` - contains utility functions
+- `ordnermerger/repomerger_lib.py` - contains `RepoMerger` class with shared logic
 
 **Recommendation**:
 Refactor the three scripts to use the `RepoMerger` class and shared utilities, keeping only configuration-specific code.
@@ -113,7 +113,7 @@ def human(n: int) -> str:
 
 ### 4. Unused Shared Library
 
-**Problem**: `ordnermergers/repomerger_lib.py` contains a `RepoMerger` class designed for code reuse, but the three merger scripts don't use it.
+**Problem**: `ordnermerger/repomerger_lib.py` contains a `RepoMerger` class designed for code reuse, but the three merger scripts don't use it.
 
 **Impact**: The architecture is confusing - shared code exists but isn't used.
 
@@ -121,7 +121,7 @@ def human(n: int) -> str:
 
 **Problem**: Some files use relative imports, others use absolute imports.
 
-`ordnermergers/repomerger_lib.py` (line 14):
+`ordnermerger/repomerger_lib.py` (line 14):
 ```python
 from . import merger_lib as ml
 ```

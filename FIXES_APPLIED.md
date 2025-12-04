@@ -14,7 +14,7 @@ Replaced silent exception handlers with proper error logging to `stderr`.
 
 ### Files Modified
 
-#### 1. `ordnermergers/merger_lib.py`
+#### 1. `ordnermerger/merger_lib.py`
 **Location**: `parse_manifest()` function (line ~180)
 - **Before**: `except Exception: pass`
 - **After**: Logs warning with specific error message
@@ -24,7 +24,7 @@ except Exception as e:
     print(f"Warning: Failed to parse manifest from {md}: {e}", file=sys.stderr)
 ```
 
-#### 2. `ordnermergers/repomerger_lib.py`
+#### 2. `ordnermerger/repomerger_lib.py`
 **Location 1**: `_load_config()` method (line ~58)
 - **Before**: `except Exception: pass`
 - **After**: Logs warning when config file cannot be read
@@ -55,7 +55,7 @@ except Exception as e:
     print(f"Warning: Failed to delete old merge file {old}: {e}", file=sys.stderr)
 ```
 
-#### 3. `repomergers/repomerger.py`
+#### 3. `repomerger/repomerger.py`
 **Location**: `safe_delete_source()` function (line ~679)
 - **Before**: `except Exception: pass` (continues execution with potentially unresolved paths)
 - **After**: Logs warning and returns early to prevent unsafe operations
@@ -74,9 +74,9 @@ except Exception as e:
 ### Testing
 All modified files pass Python syntax validation:
 ```bash
-python3 -m py_compile ordnermergers/merger_lib.py      # ✓ OK
-python3 -m py_compile ordnermergers/repomerger_lib.py  # ✓ OK
-python3 -m py_compile repomergers/repomerger.py        # ✓ OK
+python3 -m py_compile ordnermerger/merger_lib.py      # ✓ OK
+python3 -m py_compile ordnermerger/repomerger_lib.py  # ✓ OK
+python3 -m py_compile repomerger/repomerger.py        # ✓ OK
 ```
 
 ## 📝 Documentation Added
@@ -97,7 +97,7 @@ This document - describes the fixes implemented.
 ### High Priority: Code Duplication
 **Not fixed because**: Requires significant refactoring and thorough testing.
 
-The three merger scripts (`hauski-merger.py`, `weltgewebe-merger.py`, `wgx-merger.py`) contain ~2100 lines of duplicate code. While `ordnermergers/repomerger_lib.py` provides a `RepoMerger` class designed for code reuse, the scripts don't use it.
+The three merger scripts (`hauski-merger.py`, `weltgewebe-merger.py`, `wgx-merger.py`) contain ~2100 lines of duplicate code. While `ordnermerger/repomerger_lib.py` provides a `RepoMerger` class designed for code reuse, the scripts don't use it.
 
 **Recommendation**: Create a follow-up issue to refactor these scripts to use the shared library.
 

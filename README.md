@@ -2,8 +2,8 @@
 
 Kurzüberblick über Ordner:
 - `scripts/` – wiederverwendbare Helfer
-- `repomergers/` – Repo-Zusammenführungen
-- `ordnermergers/` – Ordner-Zusammenführungen
+- `repomerger/` – Repo-Zusammenführungen
+- `ordnermerger/` – Ordner-Zusammenführungen
 
 ## Nutzung (Beispiele)
 
