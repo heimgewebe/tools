@@ -90,6 +90,7 @@ class MergerUI(object):
 
         v = ui.View()
         v.name = "WC-Merger"
+        # Dark background, accent color in classic iOS blue for good contrast
         v.background_color = "#111111"
         v.frame = (0, 0, 540, 660) # Increased height
         self.view = v
@@ -125,6 +126,8 @@ class MergerUI(object):
         tv.separator_color = "#333333"
         tv.row_height = 32
         tv.allows_multiple_selection = True
+        # Improve readability on dark background
+        tv.tint_color = "#007aff"
 
         ds = ui.ListDataSource(self.repos)
         ds.text_color = "white"
@@ -158,6 +161,8 @@ class MergerUI(object):
         path_field.background_color = "#222222"
         path_field.text_color = "white"
         path_field.tint_color = "white"
+        path_field.autocorrection_type = False
+        path_field.spellchecking_type = False
         v.add_subview(path_field)
         self.path_field = path_field
 
@@ -175,7 +180,8 @@ class MergerUI(object):
         seg_detail.selected_index = 2
         seg_detail.frame = (70, y - 2, 220, 28)
         seg_detail.flex = "W"
-        seg_detail.tint_color = "#ffffff"
+        # Use standard iOS blue instead of white for better contrast
+        seg_detail.tint_color = "#007aff"
         v.add_subview(seg_detail)
         self.seg_detail = seg_detail
 
@@ -191,7 +197,8 @@ class MergerUI(object):
         seg_mode.selected_index = 0
         seg_mode.frame = (360, y - 2, v.width - 370, 28)
         seg_mode.flex = "W"
-        seg_mode.tint_color = "#ffffff"
+        # Same accent color as detail segmented control
+        seg_mode.tint_color = "#007aff"
         v.add_subview(seg_mode)
         self.seg_mode = seg_mode
 
