@@ -183,7 +183,18 @@ class MergerUI(object):
         v.name = "WC-Merger"
         # Dark background, accent color in classic iOS blue for good contrast
         v.background_color = "#111111"
-        v.frame = (0, 0, 540, 660) # Increased height
+
+        # UI-Größe: ca. 80% des Screens, zentriert (iPad-Fenster statt Briefmarke)
+        try:
+            screen_w, screen_h = ui.get_screen_size()
+        except Exception:
+            # Fallback-Werte, falls get_screen_size nicht verfügbar ist
+            screen_w, screen_h = 1024, 768
+        view_w = screen_w * 0.8
+        view_h = screen_h * 0.8
+        v.frame = (0, 0, view_w, view_h)
+        v.flex = "WH"
+
         self.view = v
 
         # kleine Helper-Funktion für Dark-Theme-Textfelder
