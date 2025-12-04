@@ -237,6 +237,8 @@ def extract_purpose(repo_root: Path) -> str:
                     txt = f.read().strip()
                     # First paragraph is content until double newline
                     first = txt.split("\n\n")[0].strip()
+                    # Markdown-Überschrift (#, ##, …) vorne abschneiden
+                    first = first.lstrip("#").strip()
                     return first
             except Exception:
                 return ""
@@ -276,8 +278,6 @@ def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
         tags.append("feed")
     if "lock" in name: # *lock* pattern
         tags.append("lockfile")
-    if "tools" in parts and "src" in parts:
-        tags.append("cli")
     if name == "readme.md":
         tags.append("readme")
     if ".wgx" in parts and name.startswith("profile"):
@@ -696,7 +696,7 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     elif level == "max":
         header.append("`max`")
         header.append("- alle Textdateien → voll")
-        header.append("- nur > Max Bytes → BITECHT truncated")
+        header.append("- nur Dateien > Max Bytes → truncated")
     else:
         header.append(f"`{level}` (custom)")
     header.append("")
@@ -835,6 +835,8 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
 
 def generate_report_content(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool, debug: bool = False) -> str:
     report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug))
+    if plan_only:
+        return report
     try:
         validate_report_structure(report)
     except ValueError as e:
