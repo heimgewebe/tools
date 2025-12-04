@@ -583,7 +583,16 @@ def validate_report_structure(report: str):
     if "{#manifest}" not in report:
         raise ValueError("Manifest missing required anchor {#manifest}")
 
-def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool, debug: bool = False) -> Iterator[str]:
+def iter_report_blocks(
+    files: List[FileInfo],
+    level: str,
+    max_file_bytes: int,
+    sources: List[Path],
+    plan_only: bool,
+    debug: bool = False,
+    path_filter: Optional[str] = None,
+    ext_filter: Optional[List[str]] = None,
+) -> Iterator[str]:
     # UTC Timestamp
     now = datetime.datetime.utcnow()
 
@@ -681,6 +690,20 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
     header.append(f"- **Declared Purpose:** {declared_purpose}")
+
+    # Neue, explizite Filterangaben
+    if path_filter:
+        header.append(f"- **Path Filter:** `{path_filter}`")
+    else:
+        header.append("- **Path Filter:** `none (full tree)`")
+
+    if ext_filter:
+        header.append(
+            "- **Extension Filter:** "
+            + ", ".join(f"`{e}`" for e in sorted(ext_filter))
+        )
+    else:
+        header.append("- **Extension Filter:** `none (all text types)`")
     header.append("")
 
     # --- 3. Profile Description ---
@@ -833,8 +856,17 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
         block.append("[↑ Zurück zum Manifest](#manifest)")
         yield "\n".join(block) + "\n\n"
 
-def generate_report_content(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool, debug: bool = False) -> str:
-    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug))
+def generate_report_content(
+    files: List[FileInfo],
+    level: str,
+    max_file_bytes: int,
+    sources: List[Path],
+    plan_only: bool,
+    debug: bool = False,
+    path_filter: Optional[str] = None,
+    ext_filter: Optional[List[str]] = None,
+) -> str:
+    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug, path_filter, ext_filter))
     if plan_only:
         return report
     try:
@@ -848,7 +880,19 @@ def generate_report_content(files: List[FileInfo], level: str, max_file_bytes: i
         raise
     return report
 
-def write_reports_v2(merges_dir: Path, hub: Path, repo_summaries: List[Dict], detail: str, mode: str, max_bytes: int, plan_only: bool, split_size: int = 0, debug: bool = False) -> List[Path]:
+def write_reports_v2(
+    merges_dir: Path,
+    hub: Path,
+    repo_summaries: List[Dict],
+    detail: str,
+    mode: str,
+    max_bytes: int,
+    plan_only: bool,
+    split_size: int = 0,
+    debug: bool = False,
+    path_filter: Optional[str] = None,
+    ext_filter: Optional[List[str]] = None,
+) -> List[Path]:
     out_paths = []
 
     # Helper for writing logic
@@ -878,7 +922,7 @@ def write_reports_v2(merges_dir: Path, hub: Path, repo_summaries: List[Dict], de
                 else:
                     current_size = 0
 
-            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug)
+            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter)
 
             for block in iterator:
                 block_len = len(block.encode('utf-8'))
@@ -893,7 +937,7 @@ def write_reports_v2(merges_dir: Path, hub: Path, repo_summaries: List[Dict], de
 
         else:
             # Standard single file
-            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug)
+            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter)
             out_path = output_filename_base_func(part=None)
             out_path.write_text(content, encoding="utf-8")
             out_paths.append(out_path)
@@ -907,7 +951,14 @@ def write_reports_v2(merges_dir: Path, hub: Path, repo_summaries: List[Dict], de
             repo_names.append(s["name"])
             sources.append(s["root"])
 
-        process_and_write(all_files, sources, lambda part=None: make_output_filename(merges_dir, repo_names, mode, detail, part))
+        # kosmetisches Label im Dateinamen:
+        # nur ein Repo → "single", mehrere → "gesamt"
+        mode_label = "single" if len(repo_names) == 1 else "gesamt"
+        process_and_write(
+            all_files,
+            sources,
+            lambda part=None: make_output_filename(merges_dir, repo_names, mode_label, detail, part),
+        )
 
     else:
         for s in repo_summaries:

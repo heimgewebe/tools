@@ -115,6 +115,14 @@ class MergerUI(object):
         v.frame = (0, 0, 540, 660) # Increased height
         self.view = v
 
+        # kleine Helper-Funktion für Dark-Theme-Textfelder
+        def _style_textfield(tf: ui.TextField) -> None:
+            tf.background_color = "#222222"
+            tf.text_color = "white"
+            tf.tint_color = "white"
+            # Border bewusst einfach halten, damit iOS nicht wieder weiß hinterlegt
+            tf.border_style = ui.TEXT_FIELD_BORDER_ROUNDED
+
         y = 10
 
         base_label = ui.Label()
@@ -166,9 +174,7 @@ class MergerUI(object):
         ext_field.flex = "W"
         ext_field.placeholder = ".md,.yml,.rs (empty = all)"
         ext_field.text = ""
-        ext_field.background_color = "#222222"
-        ext_field.text_color = "white"
-        ext_field.tint_color = "white"
+        _style_textfield(ext_field)
         v.add_subview(ext_field)
         self.ext_field = ext_field
 
@@ -178,9 +184,7 @@ class MergerUI(object):
         path_field.frame = (10, y, v.width - 20, 28)
         path_field.flex = "W"
         path_field.placeholder = "Path contains (e.g. docs/ or .github/)"
-        path_field.background_color = "#222222"
-        path_field.text_color = "white"
-        path_field.tint_color = "white"
+        _style_textfield(path_field)
         path_field.autocorrection_type = False
         path_field.spellchecking_type = False
         v.add_subview(path_field)
@@ -205,6 +209,7 @@ class MergerUI(object):
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
         seg_detail.tint_color = "#007aff"
+        seg_detail.background_color = "#111111"
         v.add_subview(seg_detail)
         self.seg_detail = seg_detail
 
@@ -225,6 +230,7 @@ class MergerUI(object):
         seg_mode.flex = "W"
         # Same accent color as detail segmented control
         seg_mode.tint_color = "#007aff"
+        seg_mode.background_color = "#111111"
         v.add_subview(seg_mode)
         self.seg_mode = seg_mode
 
@@ -241,9 +247,7 @@ class MergerUI(object):
         max_field.text = str(args.max_bytes)
         max_field.frame = (130, y - 2, 140, 28)
         max_field.flex = "W"
-        max_field.background_color = "#222222"
-        max_field.text_color = "white"
-        max_field.tint_color = "white"
+        _style_textfield(max_field)
         max_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
         v.add_subview(max_field)
         self.max_field = max_field
@@ -262,9 +266,7 @@ class MergerUI(object):
         split_field.text = args.split_size if args.split_size != "0" else ""
         split_field.frame = (130, y - 2, 140, 28)
         split_field.flex = "W"
-        split_field.background_color = "#222222"
-        split_field.text_color = "white"
-        split_field.tint_color = "white"
+        _style_textfield(split_field)
         split_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
         v.add_subview(split_field)
         self.split_field = split_field
@@ -405,6 +407,8 @@ class MergerUI(object):
             max_bytes,
             plan_only,
             split_size,
+            path_contains,
+            extensions or None,
         )
 
         if not out_paths:
@@ -495,7 +499,19 @@ def main_cli():
         print(f"Splitting at {split_size} bytes")
 
     merges_dir = get_merges_dir(hub)
-    out_paths = write_reports_v2(merges_dir, hub, summaries, args.level, args.mode, args.max_bytes, args.plan_only, split_size, debug=args.debug)
+    out_paths = write_reports_v2(
+        merges_dir,
+        hub,
+        summaries,
+        args.level,
+        args.mode,
+        args.max_bytes,
+        args.plan_only,
+        split_size,
+        debug=args.debug,
+        path_filter=None,
+        ext_filter=None,
+    )
 
     print(f"Generated {len(out_paths)} report(s):")
     for p in out_paths:
