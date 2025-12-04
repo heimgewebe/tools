@@ -81,13 +81,13 @@ Der wc-merger v2 kennt drei optimierte Profile:
 
 ```bash
 # Overview-Profil
-python3 wc-merger.py --cli --repos repo1,repo2 --detail overview
+python3 wc-merger.py --cli --repos repo1,repo2 --level overview
 
 # Dev-Profil
-python3 wc-merger.py --cli --repos myrepo --detail dev --mode batch
+python3 wc-merger.py --cli --repos myrepo --level dev --mode batch
 
 # Max-Profil mit Split
-python3 wc-merger.py --cli --repos myrepo --detail max --split-size 20
+python3 wc-merger.py --cli --repos myrepo --level max --split-size 20
 ```
 
 ### Nutzung in iOS Shortcuts (Headless)
@@ -111,5 +111,24 @@ nutze das URL-Scheme:
 ```
 pythonista3://merger/wc-merger/wc-merger.py?action=run
 ```
+
+### Power-User (Variante B: URL-Scheme mit Parametern)
+
+Das URL-Scheme ist die empfohlene Variante, um die Einschränkungen von App-Extensions zu umgehen.
+Es unterstützt nun auch Parameter, um die UI vorzubelegen oder Modi direkt zu wählen:
+
+**Beispiel: Max-Profil, Gesamt-Merge**
+
+```
+pythonista3://wc-merger/wc-merger.py?action=run&root=icloud&argv=--level&argv=max&argv=--mode&argv=gesamt
+```
+
+**Beispiel: Extractor (ZIPs entpacken)**
+
+```
+pythonista3://wc-merger/wc-extractor.py?action=run&root=icloud
+```
+
+Diese Methode garantiert vollen Zugriff auf UI, Alerts und das Dateisystem.
 
 Weitere Details siehe [wc-merger-spec.md](./wc-merger-spec.md).

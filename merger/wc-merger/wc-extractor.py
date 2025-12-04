@@ -180,6 +180,21 @@ def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
     return diff_path
 
 
+def import_zip_wrapper(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
+    """Wraps import_zip with finally cleanup."""
+    try:
+        return import_zip(zip_path, hub, merges_dir)
+    except Exception:
+        raise
+    finally:
+        if zip_path.exists():
+            try:
+                zip_path.unlink()
+                print(f"  Cleanup: ZIP gelöscht ({zip_path.name})")
+            except OSError:
+                pass
+
+
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser(description="wc-extractor-v2: Import ZIPs to hub.")
@@ -209,7 +224,7 @@ def main() -> int:
 
     for zp in zips:
         try:
-            diff = import_zip(zp, hub, merges_dir)
+            diff = import_zip_wrapper(zp, hub, merges_dir)
             if diff is not None:
                 diff_paths.append(diff)
         except Exception as e:
