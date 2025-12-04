@@ -12,6 +12,11 @@ import traceback
 from pathlib import Path
 from typing import List
 
+try:
+    import appex  # type: ignore
+except Exception:
+    appex = None  # type: ignore
+
 # Try importing Pythonista modules
 # In Shortcuts-App-Extension werfen diese Importe NotImplementedError.
 # Deshalb JEGLICHEN Import-Fehler abfangen, nicht nur ImportError.
@@ -601,18 +606,33 @@ def main_cli():
 
 
 def main():
-    # Headless in Shortcuts-Extension erzwingen (kein ui/editor erlaubt).
-    if not _is_headless_requested():
-        script_path = Path(__file__).resolve()
-        hub = detect_hub_dir(script_path)
+    # UI nur verwenden, wenn wir NICHT als App-Extension laufen und NICHT headless requested ist
+    use_ui = (
+        ui is not None
+        and not _is_headless_requested()
+        and (appex is None or not appex.is_running_extension())
+    )
+
+    if use_ui:
         try:
+            script_path = Path(__file__).resolve()
+            hub = detect_hub_dir(script_path)
             ui_obj = MergerUI(hub)
             root = make_root_with_fake_sheet(ui_obj.view)
+            # Explicitly set root frame to screen size to avoid tiny window bug
+            try:
+                sw, sh = ui.get_screen_size()
+                root.frame = (0, 0, sw, sh)
+            except Exception:
+                pass
             root.present('full_screen', hide_title_bar=True)
+            return
         except Exception as e:
             # Fallback auf CLI (headless), falls UI trotz ui-Import nicht verfügbar ist
             if console:
                 console.alert("wc-merger", f"UI not available, falling back to CLI. ({e})", "OK", hide_cancel_button=True)
+            else:
+                print(f"wc-merger: UI not available, falling back to CLI. ({e})", file=sys.stderr)
             main_cli()
     else:
         main_cli()
