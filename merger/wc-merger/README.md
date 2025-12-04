@@ -278,28 +278,28 @@ Typische Nutzung:
 
 ---
 
-## v2-Dateien und Nutzung
+## Dateien und Nutzung
 
-Die aktuelle v2-Implementation besteht aus:
+Die aktuelle Implementation besteht aus:
 
-- **`merge_core_v2.py`**: Kern-Logik für Scanning, Kategorisierung, Tagging und Report-Generierung
-- **`wc-merger-v2.py`**: Pythonista-UI und CLI-Interface für v2
-- **`wc-extractor-v2.py`**: Extraktion einzelner Dateien aus Merges (v2-kompatibel)
+- **`merge_core.py`**: Kern-Logik für Scanning, Kategorisierung, Tagging und Report-Generierung
+- **`wc-merger.py`**: Pythonista-UI und CLI-Interface
+- **`wc-extractor.py`**: Extraktion einzelner Dateien aus Merges
 
 ### CLI-Nutzung:
 
 ```bash
 # Overview-Profil (nur Prioritätsdateien)
-python3 wc-merger-v2.py --cli --repos repo1,repo2 --detail overview
+python3 wc-merger.py --cli --repos repo1,repo2 --detail overview
 
 # Dev-Profil (Code + Docs, summarisierte Lockfiles)
-python3 wc-merger-v2.py --cli --repos myrepo --detail dev --mode batch
+python3 wc-merger.py --cli --repos myrepo --detail dev --mode batch
 
 # Max-Profil mit Split (alle 20 MB)
-python3 wc-merger-v2.py --cli --repos myrepo --detail max --split-size 20
+python3 wc-merger.py --cli --repos myrepo --detail max --split-size 20
 
 # Plan-Only (keine Inhalte, nur Metadaten)
-python3 wc-merger-v2.py --cli --repos myrepo --plan-only
+python3 wc-merger.py --cli --repos myrepo --plan-only
 ```
 
 ### Pythonista-UI:
