@@ -92,6 +92,77 @@ def parse_human_size(text: str) -> int:
 
 # --- UI Class (Pythonista) ---
 
+def make_root_with_fake_sheet(inner_view) -> "ui.View": # type: ignore
+    root = ui.View()
+    root.name = 'wc-merger'
+    root.background_color = 'black'
+    root.flex = 'WH'
+
+    # „Karte“ / Fake-Sheet
+    sheet = ui.View()
+    sheet.background_color = (0.12, 0.12, 0.12)  # dunkler
+    sheet.corner_radius = 20
+    sheet.border_width = 1
+    sheet.border_color = (0.3, 0.3, 0.3, 0.8)
+    sheet.flex = 'LRTB'
+    root.add_subview(sheet)
+
+    # Close-Button
+    close_btn = ui.Button(title='✕')
+    close_btn.tint_color = 'white'
+    close_btn.width = 32
+    close_btn.height = 32
+
+    def close_action(sender):
+        v = sender
+        # bis zum obersten View hocharbeiten
+        while v.superview is not None:
+            v = v.superview
+        v.close()
+
+    close_btn.action = close_action
+    sheet.add_subview(close_btn)
+
+    # Deine eigentliche App-View in die Karte rein
+    inner_view.flex = 'WH'
+    sheet.add_subview(inner_view)
+
+    # Layout-Funktionen
+
+    def layout_root(sender):
+        # Karte mittig platzieren und skalieren
+        margin = 40
+        max_w = 900
+        max_h = 650
+
+        w, h = sender.width, sender.height
+        sheet.width = min(max_w, w - 2 * margin)
+        sheet.height = min(max_h, h - 2 * margin)
+        sheet.x = (w - sheet.width) / 2
+        sheet.y = (h - sheet.height) / 2
+
+    def layout_sheet(sender):
+        # Close-Button in die Ecke, inner_view darunter
+        padding = 16
+        btn_size = 28
+
+        close_btn.width = btn_size
+        close_btn.height = btn_size
+        close_btn.x = sender.width - padding - btn_size
+        close_btn.y = padding
+
+        # inner_view mit etwas Abstand nach innen
+        top_offset = padding + btn_size + 8
+        inner_view.x = padding
+        inner_view.y = top_offset
+        inner_view.width = sender.width - 2 * padding
+        inner_view.height = sender.height - top_offset - padding
+
+    root.layout = layout_root
+    sheet.layout = layout_sheet
+
+    return root
+
 class MergerUI(object):
     def __init__(self, hub: Path) -> None:
         self.hub = hub
@@ -121,7 +192,7 @@ class MergerUI(object):
             tf.text_color = "white"
             tf.tint_color = "white"
             # Border bewusst einfach halten, damit iOS nicht wieder weiß hinterlegt
-            tf.border_style = ui.TEXT_FIELD_BORDER_ROUNDED
+            tf.border_style = 3 # ui.TEXT_FIELD_BORDER_ROUNDED (const missing in some contexts)
 
         y = 10
 
@@ -525,7 +596,8 @@ def main():
         hub = detect_hub_dir(script_path)
         try:
             ui_obj = MergerUI(hub)
-            ui_obj.view.present("sheet")
+            root = make_root_with_fake_sheet(ui_obj.view)
+            root.present('full_screen', hide_title_bar=True)
         except Exception as e:
             # Fallback auf CLI (headless), falls UI trotz ui-Import nicht verfügbar ist
             if console:
