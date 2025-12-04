@@ -204,13 +204,13 @@ def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
     """
     Returns (category, tags).
     Categories: config, doc, source, test, contract, other
-    Tags: ai-context, ci, wgx-profile, script, adr, lockfile, etc.
+    Tags: ai-context, ci, wgx-profile, script, adr, lockfile, runbook, feed, etc.
     """
     parts = rel_path.parts
     name = rel_path.name.lower()
     tags = []
 
-    # Identify specific tags first
+    # Identify specific tags
     if name == ".ai-context.yml":
         tags.append("ai-context")
     if ".github" in parts and "workflows" in parts:
@@ -221,6 +221,10 @@ def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
         tags.append("script")
     if "docs" in parts and "adr" in parts:
         tags.append("adr")
+    if name.startswith("runbook"):
+        tags.append("runbook")
+    if "export" in parts and ext == ".jsonl":
+        tags.append("feed")
     if name in SUMMARIZE_FILES:
         tags.append("lockfile")
 
@@ -436,39 +440,54 @@ def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[
                 f.seek(f_size - tail_size)
                 tail = f.read(tail_size)
                 return (
-                    head + f"\n\n... [TRUNCATED {human_size(f_size - head_size - tail_size)}] ...\n\n" + tail,
+                    head + f"\n\n> [TRUNCATED] Original size: {human_size(fi.size)}. Included: first {human_size(head_size)} and last {human_size(tail_size)}.\n\n" + tail,
                     True,
-                    f"Original size: {human_size(fi.size)}. Included: First {human_size(head_size)} + Last {human_size(tail_size)}."
+                    f"Included: first {human_size(head_size)} and last {human_size(tail_size)}."
                 )
             else:
-                # Should have been caught by size check, but just in case
                 f.seek(0)
                 return f.read(), False, ""
 
     except OSError as e:
         return f"_Error reading file: {e}_", False, ""
 
+def is_priority_file(fi: FileInfo) -> bool:
+    if "ai-context" in fi.tags: return True
+    if "runbook" in fi.tags: return True
+    if fi.rel_path.name.lower() == "readme.md": return True
+    return False
+
 def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool) -> Iterator[str]:
     now = datetime.datetime.now()
+
+    # Pre-calculate status
+    processed_files = []
+
+    for fi in files:
+        status = "omitted"
+        if fi.is_text:
+            if level == "overview":
+                if is_priority_file(fi): status = "full"
+                else: status = "meta-only"
+            elif level == "dev":
+                if "lockfile" in fi.tags and fi.size > 20000:
+                    status = "meta-only"
+                else:
+                    status = "full"
+            elif level == "max":
+                status = "full"
+            else: # summary logic from before? let's stick to these 3
+                if fi.size <= max_file_bytes: status = "full"
+                else: status = "omitted"
+
+        if status == "full" and fi.size > max_file_bytes:
+            status = "truncated"
+
+        processed_files.append((fi, status))
+
     total_size = sum(fi.size for fi in files)
     text_files = [fi for fi in files if fi.is_text]
-
-    # Filter files based on level
-    included_files = []
-
-    for fi in text_files:
-        if level == "overview":
-            continue
-        elif level == "summary":
-            if fi.size <= max_file_bytes:
-                included_files.append(fi)
-        elif level == "dev":
-             if "lockfile" in fi.tags and fi.size > 20000:
-                 included_files.append(fi)
-             else:
-                 included_files.append(fi)
-        else: # max
-            included_files.append(fi)
+    included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
 
     cat_stats = summarize_categories(files)
 
@@ -489,40 +508,44 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     header = []
     header.append("# WC-Merge Report (v2)")
     header.append("")
-    header.append(f"**Date:** {now.strftime('%Y-%m-%d %H:%M:%S')}")
-    header.append(f"**Level:** `{level}`")
-    header.append(f"**Max File Bytes:** {human_size(max_file_bytes)}")
+    header.append("## Source & Profile")
+    if sources:
+        for s in sources:
+             header.append(f"- **Source:** `{s.name}`")
+    header.append(f"- **Profile:** `{level}`")
+    header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
     header.append("")
-    header.append("> **Note for AIs:**")
-    header.append("> 1. **Context:** Read `README.md`, `docs/runbook.md`, `*.ai-context.yml` first.")
-    header.append("> 2. **Structure:** See `## 📁 Structure` and `## 🧾 Manifest`.")
-    header.append("> 3. **Content:** Files are in `## 📄 Content`. Each file has a metadata block.")
-    if level == "dev":
-         header.append("> 4. **Profile:** `dev` - Focus on code, docs, CI. Large lockfiles are summarized.")
+
+    if level == "overview":
+        header.append("> **Profile Description:** `overview` - Includes Structure and Manifest. Content only for priority files (README, Runbook, AI-Context).")
+    elif level == "dev":
+        header.append("> **Profile Description:** `dev` - Includes full content for code, docs, CI, contracts. Large lockfiles/artifacts are summarized/meta-only.")
     elif level == "max":
-         header.append("> 4. **Profile:** `max` - All text files included (large ones truncated).")
+        header.append("> **Profile Description:** `max` - Includes full content for all text files (truncated only if extremely large).")
     header.append("")
+
+    header.append("> **Reading Plan:**")
+    header.append("> 1. **Plan**: Quick stats and folder highlights.")
+    header.append("> 2. **Structure**: Directory tree.")
+    header.append("> 3. **Manifest**: Table of all files with metadata.")
+    header.append("> 4. **Content**: File contents grouped by root.")
+    header.append("")
+
     yield "\n".join(header) + "\n"
 
     # --- Plan ---
     plan = []
-    plan.append("## 🧮 Plan")
+    plan.append("## Plan")
     plan.append("")
     plan.append(f"- **Total Files:** {len(files)} (Text: {len(text_files)})")
     plan.append(f"- **Total Size:** {human_size(total_size)}")
-    plan.append(f"- **Included Content:** {len(included_files)} files")
+    plan.append(f"- **Included Content:** {included_count} files (full/truncated)")
     plan.append("")
     plan.append("**Folder Highlights:**")
     if code_folders: plan.append(f"- Code: `{', '.join(sorted(code_folders))}`")
     if doc_folders: plan.append(f"- Docs: `{', '.join(sorted(doc_folders))}`")
     if infra_folders: plan.append(f"- Infra: `{', '.join(sorted(infra_folders))}`")
-    plan.append("")
-    if cat_stats:
-        plan.append("| Category | Files | Size |")
-        plan.append("| --- | ---: | ---: |")
-        for cat in sorted(cat_stats.keys()):
-            cnt, sz = cat_stats[cat]
-            plan.append(f"| `{cat}` | {cnt} | {human_size(sz)} |")
     plan.append("")
     yield "\n".join(plan) + "\n"
 
@@ -541,55 +564,49 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     manifest = []
     manifest.append("## 🧾 Manifest")
     manifest.append("")
-    manifest.append("| Path | Category | Tags | Size | MD5 |")
-    manifest.append("| --- | --- | --- | ---: | --- |")
-    for fi in files:
+    manifest.append("| Root | Path | Category | Tags | Size | Included | MD5 |")
+    manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
+    for fi, status in processed_files:
         tags_str = ", ".join(fi.tags) if fi.tags else "-"
         manifest.append(
-            f"| `{fi.root_label}/{fi.rel_path}` | `{fi.category}` | {tags_str} | {human_size(fi.size)} | `{fi.md5}` |"
+            f"| `{fi.root_label}` | `{fi.rel_path}` | `{fi.category}` | {tags_str} | {human_size(fi.size)} | `{status}` | `{fi.md5}` |"
         )
     manifest.append("")
     yield "\n".join(manifest) + "\n"
 
     # --- Content ---
-    if included_files:
-        yield "## 📄 Content\n\n"
+    yield "## 📄 Content\n\n"
 
-        for fi in included_files:
-            block = []
+    current_root = None
 
-            is_summary_only = False
-            if level == "dev" and "lockfile" in fi.tags and fi.size > 20000:
-                is_summary_only = True
+    for fi, status in processed_files:
+        if status in ("omitted", "meta-only"):
+             continue
 
-            block.append(f"### 📄 {fi.root_label}/{fi.rel_path}")
-            block.append(f"**Category:** {fi.category}")
-            if fi.tags:
-                block.append(f"**Tags:** `[{', '.join(fi.tags)}]`")
-            block.append(f"**Size:** {human_size(fi.size)}")
-            block.append(f"**MD5:** `{fi.md5}`")
+        if fi.root_label != current_root:
+             yield f"## 📦 {fi.root_label}\n\n"
+             current_root = fi.root_label
 
-            if is_summary_only:
-                 block.append("")
-                 block.append("> [SUMMARY ONLY] Large lockfile omitted in 'dev' profile.")
-                 block.append("")
-                 yield "\n".join(block) + "\n\n"
-                 continue
+        block = []
+        block.append(f"### `{fi.rel_path}`")
+        block.append(f"- Category: {fi.category}")
+        if fi.tags:
+            block.append(f"- Tags: {', '.join(fi.tags)}")
+        else:
+            block.append(f"- Tags: -")
+        block.append(f"- Size: {human_size(fi.size)}")
+        block.append(f"- Included: {status}")
+        block.append(f"- MD5: {fi.md5}")
 
-            content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
+        content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
 
-            if truncated:
-                block.append(f"**Truncated:** {trunc_msg}")
-            else:
-                block.append("**Truncated:** No (Full content)")
-
-            lang = lang_for(fi.ext)
-            block.append("")
-            block.append(f"```{lang}")
-            block.append(content)
-            block.append("```")
-            block.append("")
-            yield "\n".join(block) + "\n\n"
+        lang = lang_for(fi.ext)
+        block.append("")
+        block.append(f"```{lang}")
+        block.append(content)
+        block.append("```")
+        block.append("")
+        yield "\n".join(block) + "\n\n"
 
 def generate_report_content(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool) -> str:
     return "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only))
@@ -610,9 +627,6 @@ def write_reports_v2(merges_dir: Path, hub: Path, repo_summaries: List[Dict], de
                 if not current_lines:
                     return
 
-                # If we have only a header line and nothing else, and it's not the first part, maybe skip?
-                # But safer to just write it.
-
                 out_path = output_filename_base_func(part=part_num)
                 out_path.write_text("".join(current_lines), encoding="utf-8")
                 out_paths.append(out_path)
@@ -632,8 +646,6 @@ def write_reports_v2(merges_dir: Path, hub: Path, repo_summaries: List[Dict], de
             for block in iterator:
                 block_len = len(block.encode('utf-8'))
 
-                # If adding this block exceeds limit, flush first
-                # But ensure we have at least something besides the header
                 if current_size + block_len > split_size and len(current_lines) > 1:
                     flush_part()
 
