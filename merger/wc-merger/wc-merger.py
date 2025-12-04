@@ -2,12 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-wc-merger – Working-Copy Merger (v2 Standard).
+wc-merger – Working-Copy Merger.
 Enhanced AI-optimized reports with strict Pflichtenheft structure.
 """
 
 import sys
-import os
 import traceback
 from pathlib import Path
 from typing import List
@@ -90,7 +89,7 @@ class MergerUI(object):
         self.repos = find_repos_in_hub(hub)
 
         v = ui.View()
-        v.name = "WC-Merger v2"
+        v.name = "WC-Merger"
         v.background_color = "#111111"
         v.frame = (0, 0, 540, 660) # Increased height
         self.view = v
@@ -103,7 +102,7 @@ class MergerUI(object):
         base_label.number_of_lines = 2
         base_label.text = f"Base-Dir: {hub}"
         base_label.text_color = "white"
-        base_label.background_color = "#000000"
+        base_label.background_color = "#111111"
         base_label.font = ("<System>", 11)
         v.add_subview(base_label)
         self.base_label = base_label
@@ -123,10 +122,14 @@ class MergerUI(object):
         tv.frame = (10, y, v.width - 20, 160)
         tv.flex = "W"
         tv.background_color = "#111111"
+        tv.separator_color = "#333333"
         tv.row_height = 32
         tv.allows_multiple_selection = True
 
         ds = ui.ListDataSource(self.repos)
+        ds.text_color = "white"
+        ds.highlight_color = "#333333"
+        ds.tableview_cell_for_row = self._tableview_cell
         tv.data_source = ds
         tv.delegate = ds
         v.add_subview(tv)
@@ -233,21 +236,7 @@ class MergerUI(object):
         v.add_subview(split_field)
         self.split_field = split_field
 
-        plan_switch = ui.Switch()
-        plan_switch.value = False
-        plan_switch.frame = (10, y + 32, 0, 0)
-        v.add_subview(plan_switch)
-        self.plan_switch = plan_switch
-
-        plan_label = ui.Label()
-        plan_label.text = "Plan only (no content)"
-        plan_label.text_color = "white"
-        plan_label.background_color = "#111111"
-        plan_label.frame = (60, y + 32, v.width - 70, 22)
-        plan_label.flex = "W"
-        v.add_subview(plan_label)
-
-        y += 64
+        y += 36
 
         info_label = ui.Label()
         info_label.text_color = "white"
@@ -263,7 +252,7 @@ class MergerUI(object):
         y += 26
 
         btn = ui.Button()
-        btn.title = "Run Merge V2"
+        btn.title = "Run Merge"
         btn.frame = (10, y, v.width - 20, 40)
         btn.flex = "W"
         btn.background_color = "#007aff"
@@ -278,6 +267,19 @@ class MergerUI(object):
             self.info_label.text = "No repos found in Hub."
         else:
             self.info_label.text = f"{len(self.repos)} Repos found."
+
+    def _tableview_cell(self, tableview, section, row):
+        cell = ui.TableViewCell()
+        cell.background_color = "#111111"
+        if 0 <= row < len(self.repos):
+            cell.text_label.text = self.repos[row]
+        cell.text_label.text_color = "white"
+        cell.text_label.background_color = "#111111"
+
+        selected_bg = ui.View()
+        selected_bg.background_color = "#333333"
+        cell.selected_background_view = selected_bg
+        return cell
 
     def _get_selected_repos(self) -> List[str]:
         tv = self.tv
@@ -345,7 +347,7 @@ class MergerUI(object):
 
         max_bytes = self._parse_max_bytes()
         split_size = self._parse_split_size()
-        plan_only = bool(self.plan_switch.value)
+        plan_only = False
 
         summaries = []
         for name in selected:
@@ -391,9 +393,9 @@ class MergerUI(object):
             try:
                 console.hud_alert(msg)
             except Exception:
-                console.alert("wc-merger v2", msg, "OK", hide_cancel_button=True)
+                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
         else:
-            print(f"wc-merger v2: OK ({msg})")
+            print(f"wc-merger: OK ({msg})")
             for p in out_paths:
                 print(f"  - {p.name}")
 
@@ -402,7 +404,7 @@ class MergerUI(object):
 
 def main_cli():
     import argparse
-    parser = argparse.ArgumentParser(description="wc-merger v2 CLI")
+    parser = argparse.ArgumentParser(description="wc-merger CLI")
     parser.add_argument("paths", nargs="*", help="Repositories to merge")
     parser.add_argument("--hub", help="Base directory (wc-hub)")
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default="dev")
