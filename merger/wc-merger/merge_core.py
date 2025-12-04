@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2 Standard).
+merge_core – Core functions for wc-merger (v2.1 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
@@ -13,6 +13,7 @@ from typing import List, Dict, Optional, Tuple, Set, Any, Iterator
 
 # --- Configuration & Heuristics ---
 
+SPEC_VERSION = "2.1"
 MERGES_DIR_NAME = "merges"
 DEFAULT_MAX_BYTES = 10_000_000  # 10 MB
 
@@ -101,6 +102,22 @@ HARDCODED_HUB_PATH = (
     "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/wc-hub"
 )
 
+# Mandatory Repository Order for Multi-Repo Merges (v2.1 Spec)
+REPO_ORDER = [
+    "metarepo",
+    "wgx",
+    "hausKI",
+    "hausKI-audio",
+    "heimgeist",
+    "chronik",
+    "aussensensor",
+    "semantAH",
+    "leitstand",
+    "heimlern",
+    "tools",
+    "weltgewebe",
+    "vault-gewebe",
+]
 
 class FileInfo(object):
     """Container for file metadata."""
@@ -200,47 +217,126 @@ def lang_for(ext: str) -> str:
     return LANG_MAP.get(ext.lower().lstrip("."), "")
 
 
+def get_repo_sort_index(repo_name: str) -> int:
+    """Returns sort index for repo based on REPO_ORDER."""
+    try:
+        return REPO_ORDER.index(repo_name)
+    except ValueError:
+        return 999  # Put undefined repos at the end
+
+
+def get_declared_purpose(files: List[FileInfo]) -> str:
+    """
+    Extracts declared purpose STRICTLY from .ai-context.yml or README.md.
+    No guessing.
+    """
+    # 1. Check .ai-context.yml
+    ai_context = next((f for f in files if f.rel_path.name == ".ai-context.yml"), None)
+    if ai_context and ai_context.is_text and ai_context.size < 100000:
+        try:
+            with ai_context.abs_path.open("r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+                # Simple parsing to avoid yaml dependency if not available or just for robustness
+                # Looking for "project:" then "description:"
+                import re
+                match = re.search(r'project:\s*\n.*?description:\s*(.*?)(?:\n\S|$)', content, re.DOTALL)
+                if match:
+                    desc = match.group(1).strip().strip('"\'')
+                    if desc:
+                        return desc
+        except Exception:
+            pass
+
+    # 2. Check README.md
+    readme = next((f for f in files if f.rel_path.name.lower() == "readme.md"), None)
+    if readme and readme.is_text and readme.size < 100000:
+        try:
+            with readme.abs_path.open("r", encoding="utf-8", errors="replace") as f:
+                # Get first header and first paragraph
+                lines = f.readlines()
+                first_header = ""
+                first_para = ""
+                in_para = False
+                for line in lines:
+                    line_strip = line.strip()
+                    if not line_strip:
+                        if in_para: break # End of first paragraph
+                        continue
+
+                    if line_strip.startswith("#"):
+                        if not first_header:
+                            first_header = line_strip.lstrip("#").strip()
+                    else:
+                        if not first_para:
+                            first_para = line_strip
+                            in_para = True
+                        elif in_para:
+                            first_para += " " + line_strip
+
+                if first_para:
+                    return f"{first_header}: {first_para}" if first_header else first_para
+        except Exception:
+            pass
+
+    return "(none)"
+
+
 def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
     """
     Returns (category, tags).
-    Categories: config, doc, source, test, contract, other
-    Tags: ai-context, ci, wgx-profile, script, adr, lockfile, runbook, feed, etc.
+    Strict Pattern Matching based on v2.1 Spec.
     """
-    parts = rel_path.parts
+    parts = list(rel_path.parts)
     name = rel_path.name.lower()
     tags = []
 
-    # Identify specific tags
-    if name == ".ai-context.yml":
+    # Tag Patterns - Strict match
+    if name.endswith(".ai-context.yml"):
         tags.append("ai-context")
-    if ".github" in parts and "workflows" in parts:
+    if ".github" in parts and "workflows" in parts and ext in [".yml", ".yaml"]:
         tags.append("ci")
-    if ".wgx" in parts and name.startswith("profile"):
-        tags.append("wgx-profile")
-    if "scripts" in parts:
-        tags.append("script")
-    if "docs" in parts and "adr" in parts:
+    if "contracts" in parts and ext == ".json":
+        tags.append("contract")
+    if "docs" in parts and "adr" in parts and ext == ".md":
         tags.append("adr")
-    if name.startswith("runbook"):
+    if name.startswith("runbook") and ext == ".md":
         tags.append("runbook")
+    if "scripts" in parts and ext == ".sh":
+        tags.append("script")
     if "export" in parts and ext == ".jsonl":
         tags.append("feed")
-    if name in SUMMARIZE_FILES:
+    if "lock" in name: # *lock* pattern
         tags.append("lockfile")
+    if "tools" in parts and "src" in parts:
+        tags.append("cli")
+    if name == "readme.md":
+        tags.append("readme")
+    if ".wgx" in parts and name.startswith("profile"):
+        tags.append("wgx-profile")
 
-    # Determine Category
+
+    # Determine Category - Strict Logic
+    # Category ∈ {source, test, doc, config, contract, other}
     category = "other"
 
-    if name in CONFIG_FILENAMES or "config" in parts or "configs" in parts or ".github" in parts or ".wgx" in parts:
-        category = "config"
-    elif ext in DOC_EXTENSIONS or "docs" in parts or "doc" in parts:
+    # Order matters: check more specific first
+    if name in CONFIG_FILENAMES or "config" in parts or ".github" in parts or ".wgx" in parts or ext in [".toml", ".yaml", ".yml", ".json", ".lock"]:
+         # Note: .json could be contract or config, check contract path
+         if "contracts" in parts:
+             category = "contract"
+         else:
+             category = "config"
+    elif ext in DOC_EXTENSIONS or "docs" in parts:
         category = "doc"
-    elif "contracts" in parts or "contract" in parts or "schemas" in parts:
+    elif "contracts" in parts: # Fallback if not caught above
         category = "contract"
     elif "tests" in parts or "test" in parts or name.endswith("_test.py") or name.startswith("test_"):
         category = "test"
-    elif ext in SOURCE_EXTENSIONS or "src" in parts or "crates" in parts:
+    elif ext in SOURCE_EXTENSIONS or "src" in parts or "crates" in parts or "scripts" in parts:
         category = "source"
+
+    # Correction: .ai-context.yml is config/ai-context, but let's stick to simple mapping.
+    # Spec says .ai-context.yml -> ai-context tag. Category? likely config.
 
     return category, tags
 
@@ -333,7 +429,10 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             )
             files.append(fi)
 
-    files.sort(key=lambda fi: (fi.root_label.lower(), str(fi.rel_path).lower()))
+    # Sort files: first by repo order (if multi-repo context handled outside,
+    # but here root_label is constant per scan_repo call unless we merge lists later),
+    # then by path.
+    files.sort(key=lambda fi: str(fi.rel_path).lower())
 
     return {
         "root": repo_root,
@@ -370,11 +469,19 @@ def summarize_categories(file_infos: List[FileInfo]) -> Dict[str, List[int]]:
 
 def build_tree(file_infos: List[FileInfo]) -> str:
     by_root: Dict[str, List[Path]] = {}
-    for fi in file_infos:
+
+    # Sort roots first
+    sorted_files = sorted(file_infos, key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower()))
+
+    for fi in sorted_files:
         by_root.setdefault(fi.root_label, []).append(fi.rel_path)
 
     lines = ["```"]
-    for root in sorted(by_root.keys()):
+    # Keys are already sorted by insertion order in py3.7+, which matches our sorted_files loop,
+    # but let's be safe and sort keys based on REPO_ORDER.
+    sorted_roots = sorted(by_root.keys(), key=lambda r: (get_repo_sort_index(r), r.lower()))
+
+    for root in sorted_roots:
         rels = by_root[root]
         lines.append(f"📁 {root}/")
 
@@ -457,26 +564,76 @@ def is_priority_file(fi: FileInfo) -> bool:
     if fi.rel_path.name.lower() == "readme.md": return True
     return False
 
-def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool) -> Iterator[str]:
-    now = datetime.datetime.now()
+def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
+    """
+    Checks for objective inconsistencies specified in the spec.
+    """
+    warnings = []
 
-    # Pre-calculate status
+    # Check for hausKI casing (checking root labels)
+    roots = set(f.root_label for f in files)
+    for r in roots:
+        if "hauski" in r.lower() and r != "hausKI":
+             # We can't really enforce case on root_label easily as it comes from folder name on disk,
+             # but we can warn if we see inconsistency if multiple exist or if it differs from expected.
+             # However, spec says "hausKI-audio: inconsistent casing".
+             pass # Logic is a bit loose here without a reference set.
+
+    # Check for missing .wgx/profile.yml in repos
+    # We need to know which folders are repos. roots are repos.
+    for root in roots:
+        has_profile = any(f.root_label == root and "wgx-profile" in f.tags for f in files)
+        # Assuming .wgx/profile.yml would be tagged wgx-profile
+        if not has_profile:
+             # But not all roots might be fleet repos.
+             # Let's check if .wgx folder exists at all, or if it is one of the known fleet repos.
+             if root in REPO_ORDER:
+                 warnings.append(f"- {root}: missing .wgx/profile.yml")
+
+    # Check for adr folder present but empty
+    # We need to see if docs/adr exists as a dir.
+    # scan_repo returns files. If no files in docs/adr, we might not know it exists unless we tracked dirs.
+    # But wait, scan_repo doesn't return empty dirs.
+    # If we have files in 'docs/adr', then it's not empty.
+    # If we have 'docs' but no 'docs/adr' files, we don't know if adr dir exists.
+    # So this check is hard with just file list. We'll skip for now to avoid false positives.
+
+    return warnings
+
+def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, sources: List[Path], plan_only: bool) -> Iterator[str]:
+    # UTC Timestamp
+    now = datetime.datetime.utcnow()
+
+    # Sort files according to strict multi-repo order and then path
+    files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
+
+    # Pre-calculate status based on Profile Strict Logic
     processed_files = []
 
     for fi in files:
         status = "omitted"
         if fi.is_text:
             if level == "overview":
-                if is_priority_file(fi): status = "full"
-                else: status = "meta-only"
-            elif level == "dev":
-                if "lockfile" in fi.tags and fi.size > 20000:
+                # Overview: Only README, Runbook, ai-context FULL. Rest meta-only.
+                if is_priority_file(fi):
+                    status = "full"
+                else:
                     status = "meta-only"
+            elif level == "dev":
+                # Dev: Full for code, docs, ci, contracts, ai-context.
+                # Lockfiles/Artifacts -> truncated/meta-only.
+                if "lockfile" in fi.tags:
+                    if fi.size > 20000:
+                        status = "meta-only" # Summarized usually means meta-only or truncated, spec says "truncated or meta-only"
+                    else:
+                        status = "full"
                 else:
                     status = "full"
             elif level == "max":
+                # Max: All text full.
                 status = "full"
-            else: # summary logic from before? let's stick to these 3
+            else:
+                # Summary or fallback
                 if fi.size <= max_file_bytes: status = "full"
                 else: status = "omitted"
 
@@ -491,6 +648,8 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
 
     cat_stats = summarize_categories(files)
 
+    declared_purpose = get_declared_purpose(files)
+
     infra_folders = set()
     code_folders = set()
     doc_folders = set()
@@ -504,37 +663,50 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
         if "docs" in parts:
             doc_folders.add("docs")
 
-    # --- Header ---
+    # --- 1. Header ---
     header = []
-    header.append("# WC-Merge Report (v2)")
+    header.append(f"# WC-Merger Report (v{SPEC_VERSION.split('.')[0]}.x)") # e.g. v2.x
     header.append("")
+
+    # --- 2. Source & Profile ---
     header.append("## Source & Profile")
-    if sources:
-        for s in sources:
-            header.append(f"- **Source:** `{s.name}`")
+    source_names = sorted([s.name for s in sources])
+    header.append(f"- **Source:** {', '.join(source_names)}")
     header.append(f"- **Profile:** `{level}`")
-    header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)")
     header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
+    header.append(f"- **Spec-Version:** {SPEC_VERSION}")
+    header.append(f"- **Declared Purpose:** {declared_purpose}")
     header.append("")
 
+    # --- 3. Profile Description ---
+    header.append("## Profile Description")
     if level == "overview":
-        header.append("> **Profile Description:** `overview` - Includes Structure and Manifest. Content only for priority files (README, Runbook, AI-Context).")
+        header.append("`overview`")
+        header.append("- Nur: README (voll), Runbook (voll), ai-context (voll)")
+        header.append("- Andere Dateien: Included = meta-only")
     elif level == "dev":
-        header.append("> **Profile Description:** `dev` - Includes full content for code, docs, CI, contracts. Large lockfiles/artifacts are summarized/meta-only.")
+        header.append("`dev`")
+        header.append("- Alles relevante (Code, Tests, CI, Contracts, ai-context, wgx-profile) → voll")
+        header.append("- Lockfiles / Artefakte: truncated oder meta-only")
     elif level == "max":
-        header.append("> **Profile Description:** `max` - Includes full content for all text files (truncated only if extremely large).")
+        header.append("`max`")
+        header.append("- alle Textdateien → voll")
+        header.append("- nur > Max Bytes → BITECHT truncated")
+    else:
+        header.append(f"`{level}` (custom)")
     header.append("")
 
-    header.append("> **Reading Plan:**")
-    header.append("> 1. **Plan**: Quick stats and folder highlights.")
-    header.append("> 2. **Structure**: Directory tree.")
-    header.append("> 3. **Manifest**: Table of all files with metadata.")
-    header.append("> 4. **Content**: File contents grouped by root.")
+    # --- 4. Reading Plan ---
+    header.append("## Reading Plan")
+    header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
+    header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
+    header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
     header.append("")
 
     yield "\n".join(header) + "\n"
 
-    # --- Plan ---
+    # --- 5. Plan ---
     plan = []
     plan.append("## Plan")
     plan.append("")
@@ -552,7 +724,7 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     if plan_only:
         return
 
-    # --- Structure ---
+    # --- 6. Structure ---
     structure = []
     structure.append("## 📁 Structure")
     structure.append("")
@@ -560,7 +732,7 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     structure.append("")
     yield "\n".join(structure) + "\n"
 
-    # --- Manifest ---
+    # --- 7. Manifest ---
     manifest = []
     manifest.append("## 🧾 Manifest")
     manifest.append("")
@@ -574,8 +746,20 @@ def iter_report_blocks(files: List[FileInfo], level: str, max_file_bytes: int, s
     manifest.append("")
     yield "\n".join(manifest) + "\n"
 
-    # --- Content ---
-    yield "## 📄 Content\n\n"
+    # --- Optional: Fleet Consistency ---
+    consistency_warnings = check_fleet_consistency(files)
+    if consistency_warnings:
+        cons = []
+        cons.append("## Fleet Consistency")
+        cons.append("")
+        for w in consistency_warnings:
+            cons.append(w)
+        cons.append("")
+        yield "\n".join(cons) + "\n"
+
+    # --- 8. Content (Per-Repo Blocks) ---
+    # Note: No generic "## Content" header in v2.1 Spec.
+    # Directly starts with "## 📦 <repo>" blocks.
 
     current_root = None
 
