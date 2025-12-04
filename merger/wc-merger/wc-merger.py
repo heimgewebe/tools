@@ -419,6 +419,7 @@ def main_cli():
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)")
     parser.add_argument("--plan-only", action="store_true")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
 
     args = parser.parse_args()
 
@@ -460,7 +461,7 @@ def main_cli():
         print(f"Splitting at {split_size} bytes")
 
     merges_dir = get_merges_dir(hub)
-    out_paths = write_reports_v2(merges_dir, hub, summaries, args.level, args.mode, args.max_bytes, args.plan_only, split_size)
+    out_paths = write_reports_v2(merges_dir, hub, summaries, args.level, args.mode, args.max_bytes, args.plan_only, split_size, debug=args.debug)
 
     print(f"Generated {len(out_paths)} report(s):")
     for p in out_paths:

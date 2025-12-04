@@ -1,255 +1,202 @@
-# wc-merger v2.1 – SPEC
+# WC-MERGER SPEC v2.3
 
-**Version:** 2.1
-**Status:** Active / Mandatory
-**Date:** 2024-05-23
+(Normative Spezifikation)
 
-Zweck:
-Dieses Dokument definiert verbindlich Struktur, Semantik und Verhalten des wc-merger.
-wc-merger erzeugt deterministische, KI-freundliche Text-Merges aus einem oder mehreren Repositories, ohne jemals Bedeutungen zu erfinden.
+## 1. Zweck
 
----
-
-## 1. Grundprinzipien
-
-1.  **Null-Halluzinationsprinzip**
-    wc-merger interpretiert nie, sondern extrahiert nur.
-2.  **Determinismus**
-    Gleicher Input → gleicher Output (abgesehen von Zeitstempel).
-3.  **Strikte Struktur**
-    Die Reihenfolge aller Abschnitte ist fest und unverhandelbar.
-4.  **KI-Optimierung**
-    Ziel: KIs sollen einen maximal vollständigen, maschinenlesbaren Überblick erhalten, ohne nach-trägliche Interpretation.
-5.  **Profiles**
-    Alle Merges basieren auf einem der Profile:
-    *   `overview`
-    *   `dev`
-    *   `max`
-6.  **Multi-Repo-Unterstützung**
-    Jeder Merge kann mehrere Repositories enthalten.
-    Ordnung und Sortierung sind definiert.
+Der wc-merger erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.
+Diese dienen KIs als Navigations- und Arbeitsfläche, ähnlich einer Mini-IDE.
 
 ---
 
-## 2. Output-Struktur (unverhandelbar)
+## 2. Invariante Struktur des Merges (strict ordering)
 
-Jeder Merge hat exakt die folgende Struktur:
+Jeder Merge folgt exakt dieser Reihenfolge:
+1.  Source & Profile
+2.  Profile Description
+3.  Reading Plan
+4.  Plan
+5.  📁 Structure
+6.  🧾 Manifest
+7.  📄 Content
 
-1.  `# WC-Merger Report (v2.x)`
-2.  `## Source & Profile`
-3.  `## Profile Description`
-4.  `## Reading Plan`
-5.  `## Plan`
-6.  `## 📁 Structure`
-7.  `## 🧾 Manifest`
-8.  `## 📦 <repo-1>`
-    *   `### ...`
-    *   `<content>`
-9.  `## 📦 <repo-2>` ...
+Fehlt ein Abschnitt → Fehler.
 
-Die Reihenfolge ist fest. Fehlt ein Abschnitt → der Merge gilt als ungültig.
+Reihenfolge falsch → Fehler.
 
 ---
 
-## 3. Abschnittsdefinitionen
+## 3. Spec-Version-Pinning
 
-### 3.1 Source & Profile
+Header muss enthalten:
 
-Muss enthalten:
-*   **Source:** Liste aller Repos (alphabetisch sortiert oder deklarierte Reihenfolge).
-*   **Profile:** `overview` • `dev` • `max`
-*   **Generated At:** ISO-Zeitstempel (UTC)
-*   **Max File Bytes:** Limit für Truncation
-*   **Spec-Version:** `2.1`
+- Spec-Version: 2.3
 
-Optional (aber empfohlen):
-*   **Declared Purpose:**
-    Wird nur übernommen aus:
-    1.  `.ai-context.yml` -> `project.description`, oder
-    2.  oberste Überschrift + erster Absatz aus `README.md`
-    → niemals raten
-    → wenn nichts da: `(none)`
+Optional:
 
-### 3.2 Profile Description
+- Spec-Checksum: <sha256>
 
-Muss exakt beschreiben, was das Profil bedeutet.
+---
 
-*   **overview**
-    *   Nur: `README` (voll), `Runbook` (voll), `ai-context` (voll)
-    *   Andere Dateien: Included = `meta-only`
-*   **dev**
-    *   Alles relevante (Code, Tests, CI, Contracts, ai-context, wgx-profile) → voll
-    *   Lockfiles / Artefakte: truncated oder meta-only
-*   **max**
-    *   alle Textdateien → voll
-    *   nur > Max Bytes → BIT-ECHT truncated
+## 4. Kategorien
 
-### 3.3 Reading Plan
+Erlaubte Werte:
+- source
+- doc
+- config
+- test
+- contract
+- ci
+- other
 
-Muss enthalten:
-1.  „Lies zuerst“: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`
-2.  Danach: `Structure` -> `Manifest` -> `Content`
-3.  Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“
+Neue Kategorien dürfen nicht entstehen.
 
-### 3.4 Plan
+---
 
-Muss enthalten:
-*   **Total Files**
-*   **Total Size**
-*   **Included Content:** (Anzahl full/truncated/meta-only)
-*   **Folder Highlights:** Code, Docs, Infra
+## 5. Tags
 
-### 3.5 📁 Structure
+Erlaubte Tags:
+- ai-context
+- runbook
+- lockfile
+- script
+- ci
+- adr
+- feed
+- wgx-profile
 
-Eine Baumansicht aller Repos.
-*   max. 5 Ebenen tief
-*   einheitliche Einrückung
-*   Ellipsen (…) erlaubt
+Jede Datei darf 0–n Tags haben.
+Neue Tags sind verboten, außer Spec wird geändert.
 
-### 3.6 🧾 Manifest
+---
 
-Tabellenformat ist verbindlich:
+## 6. Hyperlink-Schema (Pflicht)
 
-`| Root | Path | Category | Tags | Size | Included | MD5 |`
+### 6.1 Datei-Anchor (Pflicht)
+
+Jede Datei im Content-Bereich erhält einen Anchor:
+
+`<a id="file-<root>-<path-without-slashes>"></a>`
 
 Regeln:
-*   **Root:** Repo-Name
-*   **Path:** relativ zum Repo-Root
-*   **Category** ∈ `{source, test, doc, config, contract, other}`
-*   **Tags:** siehe Abschnitt 4. Tag-System
-*   **Included** ∈ `{full, truncated, meta-only, omitted}`
-*   **MD5:** Hash des Originalinhalts
-*   **Sortierung:** alphabetisch nach Path
+- `/` → `-`
+- `.` → `-`
 
-### 3.7 Per-Repo-Blöcke 📦 <repo>
+Beispiel:
 
-Jedes Repo bekommt eigenen Block.
+`tools/merger/merge_core.py`
+→ `file-tools-merger-merge_core-py`
 
-**Reihenfolge der Repos (Multi-Repo-Merge):**
-1.  metarepo
-2.  wgx
-3.  hausKI
-4.  hausKI-audio
-5.  heimgeist
-6.  chronik
-7.  aussensensor
-8.  semantAH
-9.  leitstand
-10. heimlern
-11. tools
-12. weltgewebe
-13. vault-gewebe
-14. rest (alphabetisch)
+---
 
-**Pro Datei:**
+### 6.2 Manifest-Link (Pflicht)
+
+Pfadspalte:
+
+[`<path>`](#file-<root>-<path>)
+
+---
+
+### 6.3 Strukturbaum-Link (optional)
+
+📄 [filename](#file-…)
+
+---
+
+### 6.4 Repo-Anchor (Pflicht bei Multi-Repo)
+
+`## 📦 tools {#repo-tools}`
+
+---
+
+### 6.5 Backlink (Pflicht)
+
+Jeder Datei-Contentblock endet mit:
+
+`[↑ Zurück zum Manifest](#manifest)`
+
+---
+
+## 7. Manifest-Anker
+
+Oberhalb Manifest:
+
+`## 🧾 Manifest {#manifest}`
+
+---
+
+## 8. Navigation-Indexe
+
+Vor dem Manifest:
 
 ```markdown
-### `pfad/datei`
-
-- Category: ...
-- Tags: ...
-- Size: X KB
-- Included: full|truncated|meta-only|omitted
-- MD5: abc123...
-
-<code-fence>
-...
+## Index
+- [Source Files](#cat-source)
+- [Docs](#cat-doc)
+- [Config](#cat-config)
+- [Contracts](#cat-contract)
+- [Tests](#cat-test)
+- [CI](#cat-ci)
+- [WGX Profiles](#tag-wgx-profile)
 ```
 
-Keine Datei ohne diese Metadaten.
-Keine Metadaten ohne Datei.
+Für jede Kategorie:
+
+```markdown
+## Category: source {#cat-source}
+- [file](#file-...)
+```
 
 ---
 
-## 4. Tag-System (deterministisch)
-
-**Regeln:**
-*   Tags basieren **ausschließlich auf Pfadmustern**.
-*   Keine Interpretation, kein Raten.
-
-**Tag-Liste:**
-
-| Pattern | Tag |
-|---|---|
-| `*.ai-context.yml` | `ai-context` |
-| `.github/workflows/*.yml` | `ci` |
-| `contracts/*.json` | `contract` |
-| `docs/adr/*.md` | `adr` |
-| `docs/runbook*.md` | `runbook` |
-| `scripts/*.sh` | `script` |
-| `export/*.jsonl` | `feed` |
-| `*lock*` | `lockfile` |
-| `tools/*/src/*` | `cli` |
-| `README.md` | `readme` |
-
-Tags werden **kommagetrennt** ausgegeben.
-
----
-
-## 5. Truncation
-
-Eine Datei wird gekürzt wenn:
-`Size > Max File Bytes`
-
-**Schema:**
-`[TRUNCATED] Original size: X MB. Included: first 128 KB + last 8 KB.`
-
-**Metadaten:**
-`Included: truncated`
-
----
-
-## 6. Konsistenzprüfung („Fleet Consistency“)
-
-Optionaler, aber empfohlener Abschnitt:
-
-**Fleet Consistency**
-*   chronik: present in system-overview, commented out in repos.yml
-*   hausKI-audio: inconsistent casing
-*   <repo>: missing .wgx/profile.yml
-*   <repo>: adr folder present but empty
+## 9. Non-Interpretation Guard
 
 Regeln:
-*   Nur **objektive** Diskrepanzen melden
-*   Nie interpretieren
+- Keine Rateversuche.
+- Unklare Klassifikation → other.
+- Unklare Tags → keine Tags.
+- Unklare Repo-Beschreibung → leer.
 
 ---
 
-## 7. Verbotene Features
+## 10. Repo-Zweck-Auslesung (safe)
 
-wc-merger darf **niemals**:
-*   Zweck von Repos erraten
-*   Inhalte zusammenfassen
-*   Prioritäten zuweisen
-*   Beziehungen interpretieren
-*   Repos umsortieren außerhalb der definierten Reihenfolge
-*   „intelligente“ Patterns anwenden
+Der Merger liest nur:
+1.  README.md (erster Absatz)
+2.  docs/intro.md (erster Absatz)
 
-wc-merger ist **dumm aber strukturell brillant**.
+Keine weiteren Quellen. Keine Interpretation.
 
----
+Output:
 
-## 8. Testing & Determinismus
-
-### Golden-Files (empfohlen)
-Für ausgewählte Repos (z. B. metarepo, hausKI, aussensensor):
-*   vorhandene Merges als Golden Files
-*   Vergleiche: Header, Strukturabschnitte, Manifest, Reihenfolge.
-
-### Validator
-Ein optionales Tool `wc-merger validate <file>` prüft:
-*   Abschnittsstruktur stimmt
-*   Manifest vollständig
-*   Tags gültig
-*   Kategorien gültig
-*   Content-Blöcke vollständig
-*   Keine ratenen Inhalte
+`- Declared Purpose: <ausgelesener Absatz>`
 
 ---
 
-## 10. Schlussformel
+## 11. Debug Mode
 
-Dies ist die **verbindliche Spezifikation** für wc-merger ab Version 2.1+.
-Jede Implementierung muss diese Struktur **zu 100 %** einhalten.
+CLI: `--debug`
 
-> **wc-merger ist nicht klug. wc-merger ist zuverlässig. Und Zuverlässigkeit ist klüger als Intelligenz.**
+Mindestinformationen:
+- unbekannte Kategorien
+- unbekannte Tags
+- Dateien ohne Anchor
+- Dateien ohne Manifest-Eintrag
+- Dateien ohne Tags
+- kollidierende Anchors
+- Section-Ordering-Check-Report
+
+---
+
+## 12. Strict Validator
+
+Jede Ausgabe wird geprüft:
+- Abschnittsreihenfolge
+- vollständige Manifest-Anker
+- vollständige Content-Anker
+- nur erlaubte Kategorien
+- nur erlaubte Tags
+- Spec-Version vorhanden
+- keine verbotenen Schlüsselwörter oder Strukturen
+
+Fehler → kein Merge wird geschrieben.
