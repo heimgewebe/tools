@@ -97,6 +97,17 @@ class MergerUI(object):
         self.hub = hub
         self.repos = find_repos_in_hub(hub)
 
+        # Basic argv parsing for UI defaults
+        # Expected format: wc-merger.py --level max --mode gesamt ...
+        import argparse
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("--level", default="dev")
+        parser.add_argument("--mode", default="gesamt")
+        parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+        parser.add_argument("--split-size", default="0")
+        # Ignore unknown args
+        args, _ = parser.parse_known_args()
+
         v = ui.View()
         v.name = "WC-Merger"
         # Dark background, accent color in classic iOS blue for good contrast
@@ -186,7 +197,10 @@ class MergerUI(object):
 
         seg_detail = ui.SegmentedControl()
         seg_detail.segments = ["overview", "summary", "dev", "max"]
-        seg_detail.selected_index = 2
+        try:
+            seg_detail.selected_index = seg_detail.segments.index(args.level)
+        except ValueError:
+            seg_detail.selected_index = 2 # Default dev
         seg_detail.frame = (70, y - 2, 220, 28)
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
@@ -203,7 +217,10 @@ class MergerUI(object):
 
         seg_mode = ui.SegmentedControl()
         seg_mode.segments = ["combined", "per repo"]
-        seg_mode.selected_index = 0
+        if args.mode == "pro-repo":
+             seg_mode.selected_index = 1
+        else:
+             seg_mode.selected_index = 0
         seg_mode.frame = (360, y - 2, v.width - 370, 28)
         seg_mode.flex = "W"
         # Same accent color as detail segmented control
@@ -221,7 +238,7 @@ class MergerUI(object):
         v.add_subview(max_label)
 
         max_field = ui.TextField()
-        max_field.text = str(DEFAULT_MAX_BYTES)
+        max_field.text = str(args.max_bytes)
         max_field.frame = (130, y - 2, 140, 28)
         max_field.flex = "W"
         max_field.background_color = "#222222"
@@ -242,7 +259,7 @@ class MergerUI(object):
 
         split_field = ui.TextField()
         split_field.placeholder = "0 = No Split"
-        split_field.text = ""
+        split_field.text = args.split_size if args.split_size != "0" else ""
         split_field.frame = (130, y - 2, 140, 28)
         split_field.flex = "W"
         split_field.background_color = "#222222"
