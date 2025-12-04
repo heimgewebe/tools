@@ -19,23 +19,23 @@ mit zusätzlichem **Index** und **Cross-Repo-Analyse**.
 
 ## Quickstart
 ```bash
-bash repomergers/heimgewebe-merge/run.sh out/heimgewebe-dossier
+bash repomerger/heimgewebe-merge/run.sh out/heimgewebe-dossier
 ```
 
 ## Nützliche ENV-Schalter
 ```bash
 # Nur bestimmte Repos (Komma-Liste)
-ONLY="hausKI,chronik" bash repomergers/heimgewebe-merge/run.sh out/hgw
+ONLY="hausKI,chronik" bash repomerger/heimgewebe-merge/run.sh out/hgw
 
 # Byte-Limit je Part (Default 5 MiB)
-MAX_BYTES=$((8*1024*1024)) bash repomergers/heimgewebe-merge/run.sh out/hgw
+MAX_BYTES=$((8*1024*1024)) bash repomerger/heimgewebe-merge/run.sh out/hgw
 
 # Exclude-Liste ergänzen/ändern
-EXCLUDES_CSV="vault-gewebe,vault-privat,weltgewebe,foo" bash repomergers/heimgewebe-merge/run.sh out/hgw
+EXCLUDES_CSV="vault-gewebe,vault-privat,weltgewebe,foo" bash repomerger/heimgewebe-merge/run.sh out/hgw
 
 # Muster für Inklusion (Komma-Liste, Glob)
 GLOBS="README.md,docs/**,**/*.md,**/*.rs,**/*.py,**/*.ts,**/*.svelte,**/*.sh" \
-  bash repomergers/heimgewebe-merge/run.sh out/hgw
+  bash repomerger/heimgewebe-merge/run.sh out/hgw
 ```
 
 ## Hinweise
