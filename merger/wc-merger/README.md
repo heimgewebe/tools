@@ -64,34 +64,40 @@ Zusätzlich soll es möglich sein, einen **vollumfänglichen, maximal detaillier
 
 ---
 
-## Detailgrade
+## Detailgrade (Profile)
 
-Der wc-merger kennt drei typische Detailstufen:
+Der wc-merger v2 kennt drei optimierte Profile:
 
-### 1. Plan
+### 1. Overview (`overview`)
 
 - Kopf, Plan, Strukturbaum, Manifest.
-- **Keine Dateiinhalte.**
+- **Inhalte nur für Prioritätsdateien:**
+  - `README.*`, `docs/runbook.*`, `.ai-context.yml`
+- Alle anderen Dateien nur als Metadaten im Manifest.
 
 Einsatz:
-- schneller Überblick,
-- Vorprüfung (z. B. welche Dateien es gibt, wie groß das Repo ist).
+- schneller Überblick mit Fokus auf Dokumentation,
+- Vorprüfung (z. B. welche Dateien es gibt, wie groß das Repo ist),
+- Orientierung für KIs ohne vollen Code-Download.
 
-### 2. Kompakt
+### 2. Dev (`dev`)
 
 - Kopf, Plan, Struktur, Manifest,
-- Inhalte eines **ausgewählten Kerns**:
-  - `README.*`, `docs/runbook.*`, ADRs,
-  - zentrale Workflows (`.github/workflows/**`),
+- **Vollständige Inhalte für:**
+  - Source-Code (`.py`, `.rs`, `.ts`, `.js`, `.sh`, etc.),
+  - Dokumentation (`.md`, `.adoc`, `.txt`),
+  - CI/CD-Workflows (`.github/workflows/**`),
   - Contracts/Schemas (`contracts/**`, `json/**`, `proto/**`),
-  - wichtige Skripte (`scripts/**`),
-  - Test-Einstiege (`tests/run.*`, zentrale Testdateien).
+  - Konfigurationsdateien (`.yml`, `.toml`, `.json`).
+- **Zusammengefasste Inhalte für:**
+  - Große Lockfiles (`package-lock.json`, `Cargo.lock`, `poetry.lock`).
 
 Einsatz:
 - gute Balance zwischen Vollständigkeit und Dateigröße,
-- ideal für viele KI-Anwendungsfälle (Erklärungen, Architekturüberblick, moderate Codeaufgaben).
+- ideal für KI-Entwicklungsaufgaben (Code-Review, Refactoring, Architekturüberblick),
+- reduziert Rauschen durch Summarisierung großer Artifacts.
 
-### 3. Max
+### 3. Max (`max`)
 
 - Kopf, Plan, Struktur, Manifest,
 - Inhalte **aller Textdateien** (bis zu einer konfigurierbaren Byte-Grenze pro Datei),
@@ -173,44 +179,63 @@ Gut geeignet, um ein „Subsystem“ (z. B. mehrere Dienste) gemeinsam zu betrac
 
 ---
 
-## Ausgabeformat (Layout)
+## Ausgabeformat (Layout) – Strenge Pflichtenheft-Struktur
 
-Ein Merge folgt im Idealfall diesem Aufbau:
+Die v2-Implementierung folgt einer strikten, AI-optimierten Dokumentstruktur gemäß „Pflichtenheft":
 
-1. **Kopf**
-   - Zeitpunkt,
-   - Hub-Pfad,
-   - Liste der Repos,
-   - gewählter Detailgrad,
+1. **📋 Header** (Metadaten)
+   - Zeitpunkt der Erstellung,
+   - Hub-Pfad und betrachtete Repos,
+   - Gewähltes Profil (`overview`, `dev`, `max`),
    - Max-Bytes pro Datei,
-   - ggf. aktive Filter.
+   - Aktive Filter (Extensions, Path-Contains).
 
-2. **🧮 Plan**
+2. **🧮 Plan** (Statistiken)
    - Anzahl Dateien insgesamt,
-   - Aufschlüsselung nach Kategorien,
-   - Statistik nach Endungen,
-   - ggf. weitere Kennzahlen.
+   - Aufschlüsselung nach Kategorien (config, doc, source, test, ci, contract, other),
+   - Anzahl eingebetteter Dateien (full/truncated),
+   - Statistik nach Endungen.
 
-3. **📁 Struktur**
-   - Verzeichnisbaum der betrachteten Wurzel,
-   - Einrückung pro Ebene,
-   - Fokus auf logische Bereiche (Apps, Tools, Infra, Docs, CI).
+3. **📁 Structure** (Verzeichnisbaum)
+   - Hierarchische Darstellung der Repository-Struktur,
+   - Gruppiert nach Root-Verzeichnis (bei Multi-Repo-Merges),
+   - Einrückung pro Ebene für klare Übersicht.
 
-4. **🧾 Manifest**
+4. **🧾 Manifest** (Datei-Inventar)
    - Tabelle mit:
-     - Root/Repo,
-     - Pfad,
-     - Kategorie,
-     - Text ja/nein,
-     - Größe,
-     - Hash,
-     - Flags (z. B. `truncated`, `binary`, `sensitive_candidate`).
+     - **Root** (Repository-Name),
+     - **Path** (relativer Pfad),
+     - **Category** (config, doc, source, test, ci, contract, other),
+     - **Tags** (z. B. `runbook`, `feed`, `ai-context`, `lockfile`, `ci`, `wgx-profile`),
+     - **Size** (lesbar formatiert),
+     - **Included** (full, truncated, meta-only, skipped),
+     - **MD5** (für Versionskontrolle).
 
-5. **📄 Dateiinhalte**
-   - pro Textdatei ein Abschnitt:
-     - Überschrift mit Pfad,
-     - Codeblock mit Inhalt,
-     - ggf. Hinweise bei Kürzung oder besonderer Rolle.
+5. **📄 Content** (Dateiinhalte)
+   - Pro Textdatei ein Abschnitt mit:
+     - **Überschrift:** Pfad + Kategorie,
+     - **Metadaten-Block:**
+       - Root, Category, Tags, Size, Included-Status,
+     - **Codeblock:** Syntax-Highlighted Content,
+     - **Hinweise:** Bei Kürzung, Summarisierung oder besonderer Rolle.
+   - **Gruppierung:** Content-Blöcke sind nach Root-Verzeichnis gruppiert für bessere Übersicht.
+
+### Neue Features in v2:
+
+- **Semantic Tags:** Dateien werden mit semantischen Tags versehen:
+  - `runbook`: Runbook-Dokumentation,
+  - `feed`: Feed-Files (.ai-context.yml, data feeds),
+  - `lockfile`: Dependency-Lockfiles,
+  - `ci`: CI/CD-Workflows,
+  - `wgx-profile`: WGX-Profile,
+  - `adr`: Architecture Decision Records,
+  - `script`: Ausführbare Skripte.
+
+- **Included-Column:** Das Manifest zeigt explizit, ob eine Datei vollständig (`full`), gekürzt (`truncated`), nur als Metadaten (`meta-only`) oder übersprungen (`skipped`) eingebunden ist.
+
+- **Intelligente Summarisierung:** Im `dev`-Profil werden große Lockfiles automatisch zusammengefasst, statt vollständig eingebettet.
+
+- **Split-Size-Option:** Große Merges können automatisch in mehrere Dateien gesplittet werden (z. B. alle 10 MB), um KI-Token-Limits zu respektieren.
 
 ---
 
@@ -253,15 +278,52 @@ Typische Nutzung:
 
 ---
 
+## v2-Dateien und Nutzung
+
+Die aktuelle v2-Implementation besteht aus:
+
+- **`merge_core_v2.py`**: Kern-Logik für Scanning, Kategorisierung, Tagging und Report-Generierung
+- **`wc-merger-v2.py`**: Pythonista-UI und CLI-Interface für v2
+- **`wc-extractor-v2.py`**: Extraktion einzelner Dateien aus Merges (v2-kompatibel)
+
+### CLI-Nutzung:
+
+```bash
+# Overview-Profil (nur Prioritätsdateien)
+python3 wc-merger-v2.py --cli --repos repo1,repo2 --detail overview
+
+# Dev-Profil (Code + Docs, summarisierte Lockfiles)
+python3 wc-merger-v2.py --cli --repos myrepo --detail dev --mode batch
+
+# Max-Profil mit Split (alle 20 MB)
+python3 wc-merger-v2.py --cli --repos myrepo --detail max --split-size 20
+
+# Plan-Only (keine Inhalte, nur Metadaten)
+python3 wc-merger-v2.py --cli --repos myrepo --plan-only
+```
+
+### Pythonista-UI:
+
+Die UI bietet Felder für:
+- Repo-Auswahl (Mehrfachauswahl)
+- Pfad-Filter (optional)
+- Extension-Filter (optional)
+- Profil-Auswahl (overview, dev, max)
+- Mode (single, multi, batch)
+- Max-Bytes pro Datei
+- Split-Size (in MB, 0 = kein Split)
+- Plan-Only-Checkbox
+
 ## Roadmap / Ideen
 
-Mögliche Erweiterungen, die im Projekt vorgesehen sind:
+Mögliche zukünftige Erweiterungen:
 
 - automatische Kurz-Zusammenfassungen aus README / Runbook / ADRs,
 - Erkennung und Markierung von Rollen (`service`, `cli`, `library`, `infra`),
 - CI- und Contract-Matrix (welche Workflows nutzen welche zentralen Contracts),
 - optionaler Diff-Modus zwischen zwei Merges,
-- Ausgabe des Manifests zusätzlich als JSON/YAML zur Weiterverarbeitung.
+- Ausgabe des Manifests zusätzlich als JSON/YAML zur Weiterverarbeitung,
+- Integration mit Vector-Datenbanken für semantische Suche.
 
 ---
 

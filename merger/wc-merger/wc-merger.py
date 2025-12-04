@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-wc-merger-v2 – Enhanced Working-Copy Merger.
-Uses merge_core_v2 for AI-optimized reports.
+wc-merger – Working-Copy Merger (v2 Standard).
+Enhanced AI-optimized reports with strict Pflichtenheft structure.
 """
 
 import sys
@@ -22,9 +22,9 @@ except ImportError:
     console = None   # type: ignore
     editor = None    # type: ignore
 
-# Import core logic v2
+# Import core logic
 try:
-    from merge_core_v2 import (
+    from merge_core import (
         MERGES_DIR_NAME,
         DEFAULT_MAX_BYTES,
         SKIP_ROOTS,
@@ -36,7 +36,7 @@ try:
     )
 except ImportError:
     sys.path.append(str(Path(__file__).parent))
-    from merge_core_v2 import (
+    from merge_core import (
         MERGES_DIR_NAME,
         DEFAULT_MAX_BYTES,
         SKIP_ROOTS,

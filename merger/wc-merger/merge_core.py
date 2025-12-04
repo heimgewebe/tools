@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core_v2 – Enhanced core functions for wc-merger.
-Implements improved AI-friendly formatting, tagging, and structure.
+merge_core – Core functions for wc-merger (v2 Standard).
+Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
 import os

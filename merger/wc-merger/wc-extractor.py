@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-wc_extractor-v2 – ZIPs im wc-hub entpacken und Repos aktualisieren.
-Verwendet merge_core_v2.
+wc_extractor – ZIPs im wc-hub entpacken und Repos aktualisieren.
+Verwendet merge_core.
 
 Funktion:
 - Suche alle *.zip im Hub (wc-hub).
@@ -31,16 +31,16 @@ try:
 except ImportError:
     console = None  # type: ignore
 
-# Import from core v2
+# Import from core
 try:
-    from merge_core_v2 import (
+    from merge_core import (
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
     )
 except ImportError:
     sys.path.append(str(Path(__file__).parent))
-    from merge_core_v2 import (
+    from merge_core import (
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
