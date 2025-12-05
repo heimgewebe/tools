@@ -26,6 +26,11 @@ except Exception:
     ui = None        # type: ignore
 
 try:
+    TF_BORDER_NONE = ui.TEXT_FIELD_BORDER_NONE  # neuere Pythonista-Versionen
+except Exception:
+    TF_BORDER_NONE = 0  # Fallback: Standardwert, entspricht "kein Rahmen"
+
+try:
     import console   # type: ignore
 except Exception:
     console = None   # type: ignore
@@ -174,7 +179,12 @@ class MergerUI(object):
             tf.background_color = (0, 0, 0, 0)
             tf.text_color = "white"
             tf.tint_color = "white"
-            tf.border_style = ui.TEXT_FIELD_BORDER_NONE
+
+            if hasattr(tf, "border_style"):
+                try:
+                    tf.border_style = TF_BORDER_NONE
+                except Exception:
+                    pass
 
             # Leichter Innenabstand
             tf.frame = (tf.x + 4, tf.y + 2, tf.width - 8, tf.height - 4)
