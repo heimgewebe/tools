@@ -165,20 +165,21 @@ class MergerUI(object):
         self.view = v
 
         def _wrap_textfield_in_dark_bg(parent_view, tf):
-            """Erzeugt einen dunklen Hintergrundkasten hinter einem TextField."""
+            """
+            Wrapper für Eingabefelder.
 
-            # Hintergrund-Kasten
-            bg = ui.View(frame=tf.frame)
-            bg.background_color = "#333333"
-            if hasattr(bg, "corner_radius"):
-                bg.corner_radius = 6
+            Wichtiger als „perfekt dunkel“ ist hier:
+            - Text immer gut lesbar
+            - keine weiße Schrift auf weißem Feld
 
-            parent_view.add_subview(bg)
+            Darum nutzen wir den systemhellen TextField-Hintergrund
+            und erzwingen nur gut sichtbare Schrift / Cursor.
+            """
 
-            # TextField durchsichtig + weiße Schrift
-            tf.background_color = (0, 0, 0, 0)
-            tf.text_color = "white"
-            tf.tint_color = "white"
+            # System-Hintergrund (hell) beibehalten
+            tf.background_color = None
+            tf.text_color = "black"        # gut lesbar auf hell
+            tf.tint_color = "#007aff"      # Standard-iOS-Blau für Cursor/Markierung
 
             if hasattr(tf, "border_style"):
                 try:
@@ -186,10 +187,7 @@ class MergerUI(object):
                 except Exception:
                     pass
 
-            # Leichter Innenabstand
-            tf.frame = (tf.x + 4, tf.y + 2, tf.width - 8, tf.height - 4)
-
-            # Danach erneut hinzufügen → auf Vordergrund holen
+            # Kein extra Hintergrund-View mehr – direkt hinzufügen
             parent_view.add_subview(tf)
 
         # kleine Helper-Funktion für Dark-Theme-Textfelder
