@@ -144,8 +144,9 @@ class MergerUI(object):
             tf.background_color = "#222222"
             tf.text_color = "white"
             tf.tint_color = "white"
-            # Border bewusst einfach halten, damit iOS nicht wieder weiß hinterlegt
-            tf.border_style = 3 # ui.TEXT_FIELD_BORDER_ROUNDED (const missing in some contexts)
+            # Border komplett deaktivieren, damit der Dark-Background sichtbar bleibt
+            tf.border_style = 0  # = TEXT_FIELD_BORDER_NONE
+            tf.corner_radius = 4.0
 
         y = 10
 
@@ -216,6 +217,7 @@ class MergerUI(object):
 
         y += 36
 
+        # --- Detail: eigene Zeile ---
         detail_label = ui.Label()
         detail_label.text = "Detail:"
         detail_label.text_color = "white"
@@ -228,8 +230,8 @@ class MergerUI(object):
         try:
             seg_detail.selected_index = seg_detail.segments.index(args.level)
         except ValueError:
-            seg_detail.selected_index = 2 # Default dev
-        seg_detail.frame = (70, y - 2, 220, 28)
+            seg_detail.selected_index = 2  # Default dev
+        seg_detail.frame = (70, y - 2, v.width - 80, 28)
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
         seg_detail.tint_color = "#007aff"
@@ -237,20 +239,23 @@ class MergerUI(object):
         v.add_subview(seg_detail)
         self.seg_detail = seg_detail
 
+        y += 36  # neue Zeile für Mode
+
+        # --- Mode: darunter, eigene Zeile ---
         mode_label = ui.Label()
         mode_label.text = "Mode:"
         mode_label.text_color = "white"
         mode_label.background_color = "#111111"
-        mode_label.frame = (300, y, 60, 22)
+        mode_label.frame = (10, y, 60, 22)
         v.add_subview(mode_label)
 
         seg_mode = ui.SegmentedControl()
         seg_mode.segments = ["combined", "per repo"]
         if args.mode == "pro-repo":
-             seg_mode.selected_index = 1
+            seg_mode.selected_index = 1
         else:
-             seg_mode.selected_index = 0
-        seg_mode.frame = (360, y - 2, v.width - 370, 28)
+            seg_mode.selected_index = 0
+        seg_mode.frame = (70, y - 2, v.width - 80, 28)
         seg_mode.flex = "W"
         # Same accent color as detail segmented control
         seg_mode.tint_color = "#007aff"
