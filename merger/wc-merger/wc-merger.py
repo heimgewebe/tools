@@ -525,7 +525,12 @@ class MergerUI(object):
             return
 
         detail_idx = self.seg_detail.selected_index
-        detail = self.seg_detail.segments[detail_idx] if 0 <= detail_idx < len(self.seg_detail.segments) else "dev"
+        if 0 <= detail_idx < len(self.seg_detail.segments):
+            detail = self.seg_detail.segments[detail_idx]
+        elif self.seg_detail.segments:
+            detail = self.seg_detail.segments[0]
+        else:
+            detail = ""
 
         data = {
             "selected_repos": self._collect_selected_repo_names(),
