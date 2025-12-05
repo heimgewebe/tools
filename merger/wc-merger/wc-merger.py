@@ -226,10 +226,12 @@ class MergerUI(object):
         v.add_subview(base_label)
         self.base_label = base_label
 
-        # Close-Button rechts oben
+        # Close-Button rechts oben – leicht nach innen versetzt,
+        # damit er nicht mit iOS-Ecken kollidiert.
         close_btn = ui.Button()
         close_btn.title = "Close"
-        close_btn.frame = (v.width - 70, y + 3, 60, 28)
+        # etwas mehr Rand nach rechts: ca. 20pt Abstand
+        close_btn.frame = (v.width - 80, y + 3, 60, 28)
         close_btn.flex = "WL"
         close_btn.background_color = "#333333"
         close_btn.tint_color = "white"
@@ -495,7 +497,6 @@ class MergerUI(object):
     def select_all_repos(self, sender) -> None:
         """
         Toggle: nichts → alle ausgewählt, alles ausgewählt → Auswahl löschen.
-
         Semantik bleibt: „keine Auswahl = alle Repos“, nur die Optik ändert sich.
         """
         if not self.repos:
@@ -508,18 +509,10 @@ class MergerUI(object):
             # alles war ausgewählt → Auswahl löschen (zurück zu „none = all“)
             tv.selected_rows = []
         else:
+            # explizit alle Zeilen selektieren
             tv.selected_rows = [(0, i) for i in range(len(self.repos))]
-        # TableView in Pythonista kennt reload_data(), nicht reload()
-        try:
-            tv.reload_data()
-        except Exception:
-            # Falls wir in einer älteren/anderen Umgebung laufen, lieber still ignorieren
-            pass
 
-        # internen Toggle-Status anhand der tatsächlichen Auswahl setzen
-        rows = tv.selected_rows or []
-        self._all_toggle_selected = bool(rows)
-
+        # Info-Zeile aktualisieren
         self._update_repo_info()
 
     def close_view(self, sender=None) -> None:
@@ -661,6 +654,9 @@ class MergerUI(object):
                 console.hud_alert("Config loaded")
             except Exception:
                 pass
+
+        # Info-Zeile nach dem Wiederherstellen aktualisieren
+        self._update_repo_info()
 
 
     def _tableview_cell(self, tableview, section, row):
