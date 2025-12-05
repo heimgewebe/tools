@@ -367,6 +367,23 @@ class MergerUI(object):
 
         y += 36
 
+        # --- Plan Only Switch ---
+        plan_label = ui.Label()
+        plan_label.text = "Plan only:"
+        plan_label.text_color = "white"
+        plan_label.background_color = "#111111"
+        plan_label.frame = (10, y, 120, 22)
+        v.add_subview(plan_label)
+
+        plan_switch = ui.Switch()
+        plan_switch.frame = (130, y - 2, 60, 32)
+        plan_switch.flex = "W"
+        plan_switch.value = False
+        v.add_subview(plan_switch)
+        self.plan_only_switch = plan_switch
+
+        y += 36
+
         info_label = ui.Label()
         info_label.text_color = "white"
         info_label.background_color = "#111111"
@@ -402,8 +419,16 @@ class MergerUI(object):
         if not self.repos:
             return
         tv = self.tv
+
+        # WICHTIG: zuerst reload, sonst ignoriert Pythonista die Auswahl
+        tv.reload()
+
         tv.selected_rows = [(0, i) for i in range(len(self.repos))]
-        # Refresh, damit die Highlight-Farbe überall sichtbar wird
+
+        # Mini-Delay erzwingen, damit iOS den Zustand übernimmt
+        import time
+        time.sleep(0.01)
+
         tv.reload()
 
     def _tableview_cell(self, tableview, section, row):
@@ -486,7 +511,11 @@ class MergerUI(object):
 
         max_bytes = self._parse_max_bytes()
         split_size = self._parse_split_size()
-        plan_only = False
+
+        # Plan-only wird aus dem Switch gelesen; falls Switch nicht existiert,
+        # bleibt der Modus aus.
+        plan_switch = getattr(self, "plan_only_switch", None)
+        plan_only = bool(plan_switch and plan_switch.value)
 
         summaries = []
         for name in selected:
