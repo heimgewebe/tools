@@ -159,28 +159,34 @@ class MergerUI(object):
 
         self.view = v
 
+        def _wrap_textfield_in_dark_bg(parent_view, tf):
+            """Erzeugt einen dunklen Hintergrundkasten hinter einem TextField."""
+
+            # Hintergrund-Kasten
+            bg = ui.View(frame=tf.frame)
+            bg.background_color = "#333333"
+            if hasattr(bg, "corner_radius"):
+                bg.corner_radius = 6
+
+            parent_view.add_subview(bg)
+
+            # TextField durchsichtig + weiße Schrift
+            tf.background_color = (0, 0, 0, 0)
+            tf.text_color = "white"
+            tf.tint_color = "white"
+            tf.border_style = ui.TEXT_FIELD_BORDER_NONE
+
+            # Leichter Innenabstand
+            tf.frame = (tf.x + 4, tf.y + 2, tf.width - 8, tf.height - 4)
+
+            # Danach erneut hinzufügen → auf Vordergrund holen
+            parent_view.add_subview(tf)
+
         # kleine Helper-Funktion für Dark-Theme-Textfelder
         def _style_textfield(tf: ui.TextField) -> None:
-            """Dunkles Textfeld für Dark-Mode."""
-            # Hintergrund wirklich sichtbar abdunkeln
-            tf.background_color = "#333333"   # etwas heller als #222, damit der Rahmen sichtbar bleibt
-            tf.text_color = "white"
-            tf.tint_color = "white"           # Cursor / Auswahl
-
-            # Border explizit als ROUNDED setzen – das respektiert die background_color
-            try:
-                tf.border_style = ui.TEXT_FIELD_BORDER_ROUNDED
-            except AttributeError:
-                tf.border_style = 3  # Fallback-Wert für ROUNDED
-
-            # Corner-Radius leicht anrunden, falls unterstützt
-            if hasattr(tf, "corner_radius"):
-                tf.corner_radius = 4.0
-
-            # Optional: etwas Innenabstand, damit der Text nicht an den Rand klatscht
-            if hasattr(tf, "content_inset"):
-                # (links, oben, rechts, unten)
-                tf.content_inset = (4, 2, 4, 2)
+            """Basis-Styling, Wrapper übernimmt das Dunkel-Thema."""
+            tf.autocorrection_type = False
+            tf.autocapitalization_type = ui.AUTOCAPITALIZE_NONE
 
         y = 10
 
@@ -234,7 +240,7 @@ class MergerUI(object):
         ext_field.placeholder = ".md,.yml,.rs (empty = all)"
         ext_field.text = ""
         _style_textfield(ext_field)
-        v.add_subview(ext_field)
+        _wrap_textfield_in_dark_bg(v, ext_field)
         self.ext_field = ext_field
 
         y += 34
@@ -246,7 +252,7 @@ class MergerUI(object):
         _style_textfield(path_field)
         path_field.autocorrection_type = False
         path_field.spellchecking_type = False
-        v.add_subview(path_field)
+        _wrap_textfield_in_dark_bg(v, path_field)
         self.path_field = path_field
 
         y += 36
@@ -312,7 +318,7 @@ class MergerUI(object):
         max_field.flex = "W"
         _style_textfield(max_field)
         max_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
-        v.add_subview(max_field)
+        _wrap_textfield_in_dark_bg(v, max_field)
         self.max_field = max_field
 
         y += 36
@@ -331,7 +337,7 @@ class MergerUI(object):
         split_field.flex = "W"
         _style_textfield(split_field)
         split_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
-        v.add_subview(split_field)
+        _wrap_textfield_in_dark_bg(v, split_field)
         self.split_field = split_field
 
         y += 36
