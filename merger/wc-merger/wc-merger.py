@@ -539,7 +539,7 @@ class MergerUI(object):
         try:
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:
-            print(f"[wc-merger] could not persist state: {exc!r}")
+            print(f"[wc-merger] could not persist state: {exc}")
 
     def restore_last_state(self, sender=None) -> None:
         try:
