@@ -521,6 +521,13 @@ class MergerUI(object):
                     self.tv.select_row(idx)
 
     def save_last_state(self) -> None:
+        """
+        Persistiert den aktuellen UI-Zustand in einer JSON-Datei.
+
+        Speichert die ausgewählten Repositories, Filtereinstellungen, das gewählte Profil,
+        sowie weitere relevante UI-Parameter in einer Datei unter `self._state_path`.
+        Dies ermöglicht das Wiederherstellen des letzten Zustands beim nächsten Start.
+        """
         if not self.repos:
             return
 
