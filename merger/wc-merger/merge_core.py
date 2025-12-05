@@ -6,6 +6,7 @@ Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
 import os
+import sys
 import hashlib
 import datetime
 from pathlib import Path
@@ -61,6 +62,19 @@ TEXT_EXTENSIONS = {
     ".lua", ".sql", ".bat", ".cmd", ".ps1", ".make", "makefile", "justfile",
     ".tf", ".hcl", ".gitignore", ".gitattributes", ".editorconfig", ".cs",
     ".swift", ".adoc", ".ai-context"
+}
+
+# Directories considered "noise" (build artifacts etc.)
+NOISY_DIRECTORIES = ("node_modules/", "dist/", "build/", "target/")
+
+# Standard lockfile names
+LOCKFILE_NAMES = {
+    "Cargo.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "poetry.lock",
+    "Pipfile.lock",
 }
 
 # Files typically considered configuration
@@ -151,19 +165,11 @@ def is_noise_file(fi: FileInfo) -> bool:
     name = fi.rel_path.name
 
     # Offensichtlich: Node/JS/Build-Wüste
-    noisy_dirs = ("node_modules/", "dist/", "build/", "target/")
-    if any(seg in path_str for seg in noisy_dirs):
+    if any(seg in path_str for seg in NOISY_DIRECTORIES):
         return True
 
     # Klassische Lockfiles
-    if name.endswith(".lock") or name in {
-        "Cargo.lock",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "poetry.lock",
-        "Pipfile.lock",
-    }:
+    if name.endswith(".lock") or name in LOCKFILE_NAMES:
         return True
 
     # Falls du intern schon Tags für solche Dateien vergibst
@@ -182,8 +188,8 @@ def detect_hub_dir(script_path: Path, arg_base_dir: Optional[str] = None) -> Pat
     p = Path(HARDCODED_HUB_PATH)
     try:
         if p.expanduser().is_dir(): return p
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to check hub dir {p}: {e}\n")
 
     if arg_base_dir:
         p = Path(arg_base_dir).expanduser()
@@ -274,7 +280,8 @@ def extract_purpose(repo_root: Path) -> str:
                     # Markdown-Überschrift (#, ##, …) vorne abschneiden
                     first = first.lstrip("#").strip()
                     return first
-            except Exception:
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to extract purpose from {p}: {e}\n")
                 return ""
     return ""
 
