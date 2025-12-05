@@ -425,12 +425,26 @@ class MergerUI(object):
         self.info_label = info_label
         self._update_repo_info()
 
-        # Nach dem UI-Aufbau versuchen, letzten Zustand zu laden
-        self.restore_last_state()
         # Initiale Anzeige des Hints
         self.on_profile_changed(None)
 
         y += 26
+
+        # --- Load State Button ---
+        # Vor dem Run-Button, damit man alte Configs laden kann
+        load_btn = ui.Button()
+        load_btn.title = "Load Last Config"
+        load_btn.font = ("<System>", 14)
+        # Position: gleiche Breite wie Felder, etwas niedriger als Standard-Button
+        load_btn.frame = (10, y, v.width - 20, 32)
+        load_btn.flex = "W"
+        load_btn.background_color = "#333333"
+        load_btn.tint_color = "white"
+        load_btn.corner_radius = 6.0
+        load_btn.action = self.restore_last_state
+        v.add_subview(load_btn)
+
+        y += 42
 
         btn = ui.Button()
         btn.title = "Run Merge"
@@ -527,10 +541,13 @@ class MergerUI(object):
         except Exception as exc:
             print(f"[wc-merger] could not persist state: {exc!r}")
 
-    def restore_last_state(self) -> None:
+    def restore_last_state(self, sender=None) -> None:
         try:
             raw = self._state_path.read_text(encoding="utf-8")
         except FileNotFoundError:
+            if sender: # Nur bei Klick Feedback geben
+                if console:
+                    console.alert("wc-merger", "No saved state found.", "OK", hide_cancel_button=True)
             return
         except Exception as exc:
             print(f"[wc-merger] could not read state: {exc!r}")
@@ -556,6 +573,9 @@ class MergerUI(object):
         self.split_field.text = data.get("split_mb", "")
         self.plan_only_switch.value = bool(data.get("plan_only", False))
 
+        # Update hint text to match restored profile
+        self.on_profile_changed(None)
+
         selected = data.get("selected_repos") or []
         if selected:
             # Short delay might be needed if UI is not fully ready, but usually okay here
@@ -563,6 +583,13 @@ class MergerUI(object):
             def _restore_selection():
                 self._apply_selected_repo_names(selected)
             ui.delay(_restore_selection, 0.1)
+
+        if sender and console:
+             # Kurzes Feedback
+             try:
+                 console.hud_alert("Config loaded")
+             except:
+                 pass
 
 
     def _tableview_cell(self, tableview, section, row):
