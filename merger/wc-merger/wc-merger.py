@@ -98,11 +98,11 @@ def parse_human_size(text: str) -> int:
 # --- UI Class (Pythonista) ---
 
 def run_ui(hub: Path) -> int:
-    """Starte den Merger im klassischen Vollbild-UI-Modus."""
+    """Starte den Merger im Vollbild-UI-Modus ohne Pythonista-Titlebar."""
     ui_obj = MergerUI(hub)
     v = ui_obj.view
-    # Vollbild, mit Standard-Titelbalken (weißer Balken oben)
-    v.present('fullscreen', hide_title_bar=False)
+    # Volle Fläche, eigene „Titlebar“ im View, keine weiße System-Leiste
+    v.present('fullscreen', hide_title_bar=True)
     return 0
 
 class MergerUI(object):
@@ -123,30 +123,35 @@ class MergerUI(object):
 
         v = ui.View()
         v.name = "WC-Merger"
-        # Dark background, accent color in classic iOS blue for good contrast
         v.background_color = "#111111"
 
-        # UI-Größe: ca. 80% des Screens, zentriert (iPad-Fenster statt Briefmarke)
+        # Vollbild nutzen – die Größe übernimmt dann das fullscreen-Present.
         try:
             screen_w, screen_h = ui.get_screen_size()
+            v.frame = (0, 0, screen_w, screen_h)
         except Exception:
-            # Fallback-Werte, falls get_screen_size nicht verfügbar ist
-            screen_w, screen_h = 1024, 768
-        view_w = screen_w * 0.8
-        view_h = screen_h * 0.8
-        v.frame = (0, 0, view_w, view_h)
+            # Fallback, falls get_screen_size nicht verfügbar ist
+            v.frame = (0, 0, 1024, 768)
         v.flex = "WH"
 
         self.view = v
 
         # kleine Helper-Funktion für Dark-Theme-Textfelder
         def _style_textfield(tf: ui.TextField) -> None:
-            tf.background_color = "#222222"
+            """Dunkles Textfeld für Dark-Mode."""
+            tf.background_color = "#222222"   # dunkles Grau
             tf.text_color = "white"
-            tf.tint_color = "white"
-            # Border komplett deaktivieren, damit der Dark-Background sichtbar bleibt
-            tf.border_style = 0  # = TEXT_FIELD_BORDER_NONE
-            tf.corner_radius = 4.0
+            tf.tint_color = "white"           # Cursor / Auswahl
+
+            # Border wirklich abschalten – erst über Konstante, sonst Fallback auf 0
+            try:
+                tf.border_style = ui.TEXT_FIELD_BORDER_NONE
+            except AttributeError:
+                tf.border_style = 0
+
+            # Corner-Radius nur setzen, wenn vorhanden (Safety)
+            if hasattr(tf, "corner_radius"):
+                tf.corner_radius = 4.0
 
         y = 10
 
@@ -235,7 +240,7 @@ class MergerUI(object):
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
         seg_detail.tint_color = "#007aff"
-        seg_detail.background_color = "white"
+        seg_detail.background_color = "#dddddd"
         v.add_subview(seg_detail)
         self.seg_detail = seg_detail
 
@@ -259,7 +264,7 @@ class MergerUI(object):
         seg_mode.flex = "W"
         # Same accent color as detail segmented control
         seg_mode.tint_color = "#007aff"
-        seg_mode.background_color = "white"
+        seg_mode.background_color = "#dddddd"
         v.add_subview(seg_mode)
         self.seg_mode = seg_mode
 
