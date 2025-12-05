@@ -233,7 +233,7 @@ class MergerUI(object):
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
         seg_detail.tint_color = "#007aff"
-        seg_detail.background_color = "#111111"
+        seg_detail.background_color = "white"
         v.add_subview(seg_detail)
         self.seg_detail = seg_detail
 
@@ -254,7 +254,7 @@ class MergerUI(object):
         seg_mode.flex = "W"
         # Same accent color as detail segmented control
         seg_mode.tint_color = "#007aff"
-        seg_mode.background_color = "#111111"
+        seg_mode.background_color = "white"
         v.add_subview(seg_mode)
         self.seg_mode = seg_mode
 
