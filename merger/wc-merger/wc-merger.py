@@ -589,6 +589,7 @@ class MergerUI(object):
              try:
                  console.hud_alert("Config loaded")
              except:
+                 # Ignore all exceptions here: HUD alert is non-critical UI feedback.
                  pass
 
 
