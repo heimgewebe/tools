@@ -585,7 +585,7 @@ class MergerUI(object):
             ui.delay(_restore_selection, 0.1)
 
         if sender and console:
-             # Kurzes Feedback
+            # Kurzes Feedback
              try:
                  console.hud_alert("Config loaded")
              except:
