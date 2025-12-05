@@ -577,6 +577,7 @@ class MergerUI(object):
             try:
                 self.seg_detail.selected_index = self.seg_detail.segments.index(profile)
             except ValueError:
+                # If the profile is not found in segments, just skip setting selected_index.
                 pass
 
         self.ext_field.text = data.get("ext_filter", "")
