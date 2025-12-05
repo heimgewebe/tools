@@ -153,28 +153,45 @@ class FileInfo(object):
 
 # --- Utilities ---
 
-def is_noise_file(fi: FileInfo) -> bool:
+def is_noise_file(fi: "FileInfo") -> bool:
     """
-    Heuristik für 'Noise':
-    - Lockfiles und Paketmanager-Artefakte
-    - Vendor-/Build-Ordner wie node_modules, target, dist
-    (ohne neue Tags oder Schema-Änderungen – nur eine Kennzeichnung
-    in der 'Included'-Spalte des Manifests).
+    Heuristik für 'Noise'-Dateien:
+    - offensichtliche Lockfiles / Paketmanager-Artefakte
+    - typische Build-/Vendor-Verzeichnisse
+    ohne das Manifest-Schema zu verändern – nur das Included-Label wird erweitert.
     """
-    path_str = str(fi.rel_path).replace("\\", "/")
-    name = fi.rel_path.name
+    try:
+        path_str = str(fi.rel_path).replace("\\", "/").lower()
+        name = fi.rel_path.name.lower()
+    except Exception:
+        return False
 
-    # Offensichtlich: Node/JS/Build-Wüste
-    if any(seg in path_str for seg in NOISY_DIRECTORIES):
+    noisy_dirs = (
+        "node_modules/",
+        "dist/",
+        "build/",
+        "target/",
+        "venv/",
+        ".venv/",
+        "__pycache__/",
+    )
+    if any(seg in path_str for seg in noisy_dirs):
         return True
 
-    # Klassische Lockfiles
-    if name.endswith(".lock") or name in LOCKFILE_NAMES:
+    lock_names = {
+        "cargo.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "poetry.lock",
+        "pipfile.lock",
+        "composer.lock",
+    }
+    if name in lock_names or name.endswith(".lock"):
         return True
 
-    # Falls du intern schon Tags für solche Dateien vergibst
-    lowered_tags = {t.lower() for t in fi.tags}
-    if "lockfile" in lowered_tags or "deps" in lowered_tags:
+    tags_lower = {t.lower() for t in (fi.tags or [])}
+    if "lockfile" in tags_lower or "deps" in tags_lower or "vendor" in tags_lower:
         return True
 
     return False
@@ -737,18 +754,18 @@ def iter_report_blocks(
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
     header.append(f"- **Declared Purpose:** {declared_purpose}")
 
-    # Scope-Zeile: wie viele Roots/Repos sind wirklich beteiligt?
-    root_labels = sorted({fi.root_label for fi in files})
-    if not root_labels:
-        scope_line = "empty (no matching files)"
-    elif len(root_labels) == 1:
-        scope_line = f"single repo `{root_labels[0]}`"
+    # Scope-Zeile: welche Roots/Repos sind beteiligt?
+    roots = sorted({fi.root_label for fi in files})
+    if not roots:
+        scope_desc = "empty (no matching files)"
+    elif len(roots) == 1:
+        scope_desc = f"single repo `{roots[0]}`"
     else:
-        shown = ", ".join(root_labels[:5])
-        if len(root_labels) > 5:
-            shown += ", …"
-        scope_line = f"{len(root_labels)} repos: {shown}"
-    header.append(f"- **Scope:** {scope_line}")
+        preview = ", ".join(f"`{r}`" for r in roots[:5])
+        if len(roots) > 5:
+            preview += ", …"
+        scope_desc = f"{len(roots)} repos: {preview}"
+    header.append(f"- **Scope:** {scope_desc}")
 
     # Neue, explizite Filterangaben
     if path_filter:
@@ -793,37 +810,38 @@ def iter_report_blocks(
     yield "\n".join(header) + "\n"
 
     # --- 5. Plan ---
-    plan = []
+    plan: List[str] = []
     plan.append("## Plan")
     plan.append("")
     plan.append(f"- **Total Files:** {len(files)} (Text: {len(text_files)})")
     plan.append(f"- **Total Size:** {human_size(total_size)}")
     plan.append(f"- **Included Content:** {included_count} files (full/truncated)")
+    plan.append("")
 
-    # Mini-Summary pro Repo: ideal für KIs, um schnell zu sehen,
-    # wo wie viel los ist.
+    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
     files_by_root: Dict[str, List[FileInfo]] = {}
     for fi in files:
         files_by_root.setdefault(fi.root_label, []).append(fi)
 
     if files_by_root:
-        plan.append("")
         plan.append("### Repo Snapshots")
         plan.append("")
         for root in sorted(files_by_root.keys()):
             root_files = files_by_root[root]
             root_total = len(root_files)
+            # „relevante Textdateien“: Code, Docs, Config, Tests, CI, Contracts
             root_text = sum(
-                1 for fi in root_files if fi.category in {"source", "doc", "config"}
+                1
+                for f in root_files
+                if f.is_text
+                and f.category in {"source", "doc", "config", "test", "ci", "contract"}
             )
-            root_bytes = sum(fi.size for fi in root_files)
+            root_bytes = sum(f.size for f in root_files)
             plan.append(
-                f"- `{root}` → {root_total} Dateien "
-                f"({root_text} relevante Textdateien, "
-                f"{human_size(root_bytes)})"
+                f"- `{root}` → {root_total} files "
+                f"({root_text} relevant text, {human_size(root_bytes)})"
             )
-
-    plan.append("")
+        plan.append("")
     plan.append("**Folder Highlights:**")
     if code_folders: plan.append(f"- Code: `{', '.join(sorted(code_folders))}`")
     if doc_folders: plan.append(f"- Docs: `{', '.join(sorted(doc_folders))}`")
@@ -876,23 +894,23 @@ def iter_report_blocks(
     yield "\n".join(index_blocks) + "\n"
 
     # --- 7. Manifest (Patch A) ---
-    manifest = []
+    manifest: List[str] = []
     manifest.append("## 🧾 Manifest {#manifest}")
     manifest.append("")
     manifest.append("| Root | Path | Category | Tags | Size | Included | MD5 |")
     manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
     for fi, status in processed_files:
         tags_str = ", ".join(fi.tags) if fi.tags else "-"
-        # Link in Manifest
-        path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
-
-        # Noise explizit markieren, ohne das Tabellenschema zu ändern:
+        # Noise kennzeichnen, ohne das Schema zu ändern
         included_label = status
         if is_noise_file(fi):
             included_label = f"{status} (noise)"
 
+        # Link in Manifest
+        path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
         manifest.append(
-            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | {human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
+            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | "
+            f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
         )
     manifest.append("")
     yield "\n".join(manifest) + "\n"

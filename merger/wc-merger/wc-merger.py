@@ -215,7 +215,8 @@ class MergerUI(object):
         y = 10
 
         base_label = ui.Label()
-        base_label.frame = (10, y, v.width - 20, 34)
+        # etwas Platz rechts für den Close-Button lassen
+        base_label.frame = (10, y, v.width - 80, 34)
         base_label.flex = "W"
         base_label.number_of_lines = 2
         base_label.text = f"Base-Dir: {hub}"
@@ -224,6 +225,19 @@ class MergerUI(object):
         base_label.font = ("<System>", 11)
         v.add_subview(base_label)
         self.base_label = base_label
+
+        # Close-Button rechts oben
+        close_btn = ui.Button()
+        close_btn.title = "Close"
+        close_btn.frame = (v.width - 70, y + 3, 60, 28)
+        close_btn.flex = "WL"
+        close_btn.background_color = "#333333"
+        close_btn.tint_color = "white"
+        close_btn.corner_radius = 4.0
+        close_btn.action = self.close_view
+        v.add_subview(close_btn)
+        self.close_button = close_btn
+
         y += 40
 
         repo_label = ui.Label()
@@ -246,6 +260,8 @@ class MergerUI(object):
         select_all_btn.action = self.select_all_repos
         v.add_subview(select_all_btn)
         self.select_all_button = select_all_btn
+        # interner Toggle-Status für den All-Button
+        self._all_toggle_selected = False
 
         y += 22
 
@@ -458,30 +474,55 @@ class MergerUI(object):
         self.run_button = btn
 
     def _update_repo_info(self) -> None:
+        """Zeigt unten an, wie viele Repos es gibt und wie viele ausgewählt sind."""
         if not self.repos:
             self.info_label.text = "No repos found in Hub."
+            return
+
+        total = len(self.repos)
+        tv = getattr(self, "tv", None)
+        if tv is None:
+            self.info_label.text = f"{total} Repos found."
+            return
+
+        rows = tv.selected_rows or []
+        if not rows:
+            # None = All – das explizit kenntlich machen
+            self.info_label.text = f"{total} Repos found (none selected = all)."
         else:
-            self.info_label.text = f"{len(self.repos)} Repos found."
+            self.info_label.text = f"{total} Repos found ({len(rows)} selected)."
 
     def select_all_repos(self, sender) -> None:
-        """Markiert alle Repos in der Liste als ausgewählt (und lässt spätere Abwahlen zu)."""
+        """
+        Toggle: nichts → alle ausgewählt, alles ausgewählt → Auswahl löschen.
+
+        Semantik bleibt: „keine Auswahl = alle Repos“, nur die Optik ändert sich.
+        """
         if not self.repos:
             return
-        tv = self.tv
 
-        # Pythonista-TableView hat i. d. R. selected_rows statt select_row().
-        rows = [(0, i) for i in range(len(self.repos))]
+        tv = self.tv
+        rows = tv.selected_rows or []
+
+        if rows and len(rows) == len(self.repos):
+            # alles war ausgewählt → Auswahl löschen (zurück zu „none = all“)
+            tv.selected_rows = []
+            tv.reload()
+            self._all_toggle_selected = False
+        else:
+            tv.selected_rows = [(0, i) for i in range(len(self.repos))]
+            tv.reload()
+            self._all_toggle_selected = True
+
+        self._update_repo_info()
+
+    def close_view(self, sender=None) -> None:
+        """Schließt den Merger-Screen in Pythonista."""
         try:
-            tv.selected_rows = rows
+            self.view.close()
         except Exception:
-            # Fallback: wenigstens eine Zeile selektieren, falls multiple selection
-            # nicht sauber funktioniert.
-            try:
-                if rows:
-                    tv.selected_row = rows[0]
-            except Exception:
-                # Dann eben ohne Vorauswahl – aber kein Crash.
-                pass
+            # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven
+            pass
 
     def on_profile_changed(self, sender):
         """Aktualisiert den Hint-Text basierend auf dem gewählten Profil."""
