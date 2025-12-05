@@ -221,8 +221,10 @@ class MergerUI(object):
         y += 22
 
         tv = ui.TableView()
-        tv.frame = (10, y, v.width - 20, 160)
-        tv.flex = "W"
+        # Höhe dynamisch: mind. 160, sonst ca. 45% des Screens
+        list_height = max(160, v.height * 0.45)
+        tv.frame = (10, y, v.width - 20, list_height)
+        tv.flex = "WH"
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
         tv.row_height = 32
@@ -240,7 +242,8 @@ class MergerUI(object):
         self.tv = tv
         self.ds = ds
 
-        y += 170
+        # Alle folgenden Elemente direkt UNTER die Liste setzen
+        y = tv.frame.y + tv.frame.height + 10
 
         ext_field = ui.TextField()
         ext_field.frame = (10, y, v.width - 20, 28)
