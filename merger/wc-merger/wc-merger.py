@@ -139,19 +139,25 @@ class MergerUI(object):
         # kleine Helper-Funktion für Dark-Theme-Textfelder
         def _style_textfield(tf: ui.TextField) -> None:
             """Dunkles Textfeld für Dark-Mode."""
-            tf.background_color = "#222222"   # dunkles Grau
+            # Hintergrund wirklich sichtbar abdunkeln
+            tf.background_color = "#333333"   # etwas heller als #222, damit der Rahmen sichtbar bleibt
             tf.text_color = "white"
             tf.tint_color = "white"           # Cursor / Auswahl
 
-            # Border wirklich abschalten – erst über Konstante, sonst Fallback auf 0
+            # Border explizit als ROUNDED setzen – das respektiert die background_color
             try:
-                tf.border_style = ui.TEXT_FIELD_BORDER_NONE
+                tf.border_style = ui.TEXT_FIELD_BORDER_ROUNDED
             except AttributeError:
-                tf.border_style = 0
+                tf.border_style = 3  # Fallback-Wert für ROUNDED
 
-            # Corner-Radius nur setzen, wenn vorhanden (Safety)
+            # Corner-Radius leicht anrunden, falls unterstützt
             if hasattr(tf, "corner_radius"):
                 tf.corner_radius = 4.0
+
+            # Optional: etwas Innenabstand, damit der Text nicht an den Rand klatscht
+            if hasattr(tf, "content_inset"):
+                # (links, oben, rechts, unten)
+                tf.content_inset = (4, 2, 4, 2)
 
         y = 10
 
