@@ -71,7 +71,7 @@ PROFILE_DESCRIPTIONS = {
     "overview": "Docs + CI, kompakt, kombiniert",
     "summary": "Docs + zentrale Config + Kern-Code",
     "dev": "Code + Config pro Repo, für PR-Reviews",
-    "max": "Alles, maximal detailreich (vorsicht, groß)",
+    "max": "Alles, maximal detailreich (Vorsicht, groß)",
 }
 
 
