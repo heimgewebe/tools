@@ -211,13 +211,26 @@ class MergerUI(object):
         y += 40
 
         repo_label = ui.Label()
-        repo_label.frame = (10, y, v.width - 20, 20)
+        # Platz lassen für „Alle auswählen“-Button rechts
+        repo_label.frame = (10, y, v.width - 110, 20)
         repo_label.flex = "W"
         repo_label.text = "Repos (Tap to select – None = All):"
         repo_label.text_color = "white"
         repo_label.background_color = "#111111"
         repo_label.font = ("<System>", 13)
         v.add_subview(repo_label)
+
+        select_all_btn = ui.Button()
+        select_all_btn.title = "All"
+        select_all_btn.frame = (v.width - 90, y - 2, 80, 24)
+        select_all_btn.flex = "WL"
+        select_all_btn.background_color = "#333333"
+        select_all_btn.tint_color = "white"
+        select_all_btn.corner_radius = 4.0
+        select_all_btn.action = self.select_all_repos
+        v.add_subview(select_all_btn)
+        self.select_all_button = select_all_btn
+
         y += 22
 
         tv = ui.TableView()
@@ -234,7 +247,8 @@ class MergerUI(object):
 
         ds = ui.ListDataSource(self.repos)
         ds.text_color = "white"
-        ds.highlight_color = "#333333"
+        # deutliche Selektion: kräftiges Blau statt „grau auf schwarz“
+        ds.highlight_color = "#0050ff"
         ds.tableview_cell_for_row = self._tableview_cell
         tv.data_source = ds
         tv.delegate = ds
@@ -383,6 +397,15 @@ class MergerUI(object):
         else:
             self.info_label.text = f"{len(self.repos)} Repos found."
 
+    def select_all_repos(self, sender) -> None:
+        """Markiert alle Repos in der Liste als ausgewählt."""
+        if not self.repos:
+            return
+        tv = self.tv
+        tv.selected_rows = [(0, i) for i in range(len(self.repos))]
+        # Refresh, damit die Highlight-Farbe überall sichtbar wird
+        tv.reload()
+
     def _tableview_cell(self, tableview, section, row):
         cell = ui.TableViewCell()
         cell.background_color = "#111111"
@@ -392,7 +415,8 @@ class MergerUI(object):
         cell.text_label.background_color = "#111111"
 
         selected_bg = ui.View()
-        selected_bg.background_color = "#333333"
+        # gut sichtbarer Selected-Hintergrund
+        selected_bg.background_color = "#0050ff"
         cell.selected_background_view = selected_bg
         return cell
 
@@ -487,8 +511,9 @@ class MergerUI(object):
             max_bytes,
             plan_only,
             split_size,
-            path_contains,
-            extensions or None,
+            debug=False,
+            path_filter=path_contains,
+            ext_filter=extensions or None,
         )
 
         if not out_paths:

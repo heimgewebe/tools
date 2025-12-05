@@ -487,14 +487,19 @@ def build_tree(file_infos: List[FileInfo]) -> str:
     return "\n".join(lines)
 
 def make_output_filename(merges_dir: Path, repo_names: List[str], mode: str, detail: str, part: Optional[int] = None) -> Path:
-    ts = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+    # Zeitstempel ohne Sekunden, damit die Namen ruhiger werden
+    ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
     base = "+".join(repo_names) if repo_names else "no-repos"
     if len(base) > 40:
         base = base[:37] + "..."
     base = base.replace(" ", "-").replace("/", "_")
 
     part_suffix = f"_part{part}" if part else ""
-    return merges_dir / f"merge_v2_{mode}_{base}_{detail}_{ts}{part_suffix}.md"
+    # Neues Schema:
+    #   <repos>_<detail>_<mode>_<YYMMDD-HHMM>[_partX]_merge.md
+    # Beispiel:
+    #   hausKI+wgx_dev_multi_251205-1457_merge.md
+    return merges_dir / f"{base}_{detail}_{mode}_{ts}{part_suffix}_merge.md"
 
 def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[str, bool, str]:
     """
@@ -952,8 +957,8 @@ def write_reports_v2(
             sources.append(s["root"])
 
         # kosmetisches Label im Dateinamen:
-        # nur ein Repo → "single", mehrere → "gesamt"
-        mode_label = "single" if len(repo_names) == 1 else "gesamt"
+        # nur ein Repo → "single", mehrere → "multi"
+        mode_label = "single" if len(repo_names) == 1 else "multi"
         process_and_write(
             all_files,
             sources,
