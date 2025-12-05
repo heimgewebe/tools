@@ -8,6 +8,7 @@ Enhanced AI-optimized reports with strict Pflichtenheft structure.
 
 import sys
 import os
+import json
 import traceback
 from pathlib import Path
 from typing import List
@@ -61,6 +62,17 @@ def force_close_files(paths: List[Path]) -> None:
                 editor.close_file(fpath)
             except Exception:
                 pass
+
+
+# Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
+LAST_STATE_FILENAME = ".wc-merger-state.json"
+
+PROFILE_DESCRIPTIONS = {
+    "overview": "Docs + CI, kompakt, kombiniert",
+    "summary": "Docs + zentrale Config + Kern-Code",
+    "dev": "Code + Config pro Repo, für PR-Reviews",
+    "max": "Alles, maximal detailreich (Vorsicht, groß)",
+}
 
 
 # Import core logic
@@ -138,6 +150,9 @@ class MergerUI(object):
         self.hub = hub
         self.repos = find_repos_in_hub(hub)
 
+        # Pfad zur State-Datei
+        self._state_path = (self.hub / LAST_STATE_FILENAME).resolve()
+
         # Basic argv parsing for UI defaults
         # Expected format: wc-merger.py --level max --mode gesamt ...
         import argparse
@@ -196,6 +211,7 @@ class MergerUI(object):
             tf.autocorrection_type = False
             tf.autocapitalization_type = ui.AUTOCAPITALIZE_NONE
 
+        margin = 10
         y = 10
 
         base_label = ui.Label()
@@ -301,8 +317,22 @@ class MergerUI(object):
         # Use standard iOS blue instead of white for better contrast
         seg_detail.tint_color = "#007aff"
         seg_detail.background_color = "#dddddd"
+        seg_detail.action = self.on_profile_changed
         v.add_subview(seg_detail)
         self.seg_detail = seg_detail
+
+        # Kurzer Text unterhalb der Detail-Presets
+        self.profile_hint = ui.Label(
+            frame=(margin, y + 28, v.width - 2 * margin, 20),
+            flex="W",
+            text="",
+            text_color="white",
+            font=("<system>", 12),
+        )
+        # Direkt unter dem SegmentControl anzeigen, bevor Mode kommt
+        # Wir müssen "y" etwas anpassen, damit Mode weiter runter rutscht
+        v.add_subview(self.profile_hint)
+        y += 24 # Platz für Hint
 
         y += 36  # neue Zeile für Mode
 
@@ -395,7 +425,26 @@ class MergerUI(object):
         self.info_label = info_label
         self._update_repo_info()
 
+        # Initiale Anzeige des Hints
+        self.on_profile_changed(None)
+
         y += 26
+
+        # --- Load State Button ---
+        # Vor dem Run-Button, damit man alte Configs laden kann
+        load_btn = ui.Button()
+        load_btn.title = "Load Last Config"
+        load_btn.font = ("<System>", 14)
+        # Position: gleiche Breite wie Felder, etwas niedriger als Standard-Button
+        load_btn.frame = (10, y, v.width - 20, 32)
+        load_btn.flex = "W"
+        load_btn.background_color = "#333333"
+        load_btn.tint_color = "white"
+        load_btn.corner_radius = 6.0
+        load_btn.action = self.restore_last_state
+        v.add_subview(load_btn)
+
+        y += 42
 
         btn = ui.Button()
         btn.title = "Run Merge"
@@ -415,21 +464,145 @@ class MergerUI(object):
             self.info_label.text = f"{len(self.repos)} Repos found."
 
     def select_all_repos(self, sender) -> None:
-        """Markiert alle Repos in der Liste als ausgewählt."""
+        """Markiert alle Repos in der Liste als ausgewählt (und lässt spätere Abwahlen zu)."""
         if not self.repos:
             return
         tv = self.tv
 
-        # WICHTIG: zuerst reload, sonst ignoriert Pythonista die Auswahl
-        tv.reload()
+        # Bestehende Auswahl bleibt egal – wir überschreiben sie einfach:
+        for row in range(len(self.repos)):
+            try:
+                # section=0, kein Scrollen, keine Animation
+                tv.select_row(row, section=0, animated=False, scroll_to_selection=False)
+            except TypeError:
+                # ältere Pythonista-Version: select_row(row) ohne Keywords
+                tv.select_row(row)
 
-        tv.selected_rows = [(0, i) for i in range(len(self.repos))]
+    def on_profile_changed(self, sender):
+        """Aktualisiert den Hint-Text basierend auf dem gewählten Profil."""
+        idx = self.seg_detail.selected_index
+        if 0 <= idx < len(self.seg_detail.segments):
+            seg_name = self.seg_detail.segments[idx]
+            desc = PROFILE_DESCRIPTIONS.get(seg_name, "")
+            self.profile_hint.text = desc
 
-        # Mini-Delay erzwingen, damit iOS den Zustand übernimmt
-        import time
-        time.sleep(0.01)
+    # --- State-Persistenz -------------------------------------------------
 
-        tv.reload()
+    def _collect_selected_repo_names(self) -> List[str]:
+        """Liest die aktuell in der Liste selektierten Repos aus."""
+        # abhängig davon, wie deine TableView/DataSource arbeitet:
+        ds = self.ds
+        selected: List[str] = []
+        if hasattr(ds, "items"):
+            # Standard ui.ListDataSource
+            for idx, name in enumerate(ds.items):
+                if hasattr(self.tv, "selected_rows"):
+                    # Check if (0, idx) is in selected_rows
+                    # selected_rows is a list of tuples (section, row)
+                    if any(row == idx for sec, row in self.tv.selected_rows):
+                        selected.append(name)
+        return selected
+
+    def _apply_selected_repo_names(self, names: List[str]) -> None:
+        """Setzt die Repo-Auswahl anhand gespeicherter Namen."""
+        ds = self.ds
+        if not hasattr(ds, "items"):
+            return
+
+        name_to_index = {name: i for i, name in enumerate(ds.items)}
+
+        # Manuell selektieren via select_row, damit es in Pythonista zuverlässig ist
+        for name in names:
+            idx = name_to_index.get(name)
+            if idx is not None:
+                try:
+                    self.tv.select_row(idx, section=0, animated=False, scroll_to_selection=False)
+                except TypeError:
+                    self.tv.select_row(idx)
+
+    def save_last_state(self) -> None:
+        """
+        Persistiert den aktuellen UI-Zustand in einer JSON-Datei.
+
+        Speichert die ausgewählten Repositories, Filtereinstellungen, das gewählte Profil,
+        sowie weitere relevante UI-Parameter in einer Datei unter `self._state_path`.
+        Dies ermöglicht das Wiederherstellen des letzten Zustands beim nächsten Start.
+        """
+        if not self.repos:
+            return
+
+        detail_idx = self.seg_detail.selected_index
+        if 0 <= detail_idx < len(self.seg_detail.segments):
+            detail = self.seg_detail.segments[detail_idx]
+        elif self.seg_detail.segments:
+            detail = self.seg_detail.segments[0]
+        else:
+            detail = ""
+
+        data = {
+            "selected_repos": self._collect_selected_repo_names(),
+            "ext_filter": self.ext_field.text or "",
+            "path_filter": self.path_field.text or "",
+            "detail_profile": detail,
+            "max_bytes": self.max_field.text or "",
+            "split_mb": self.split_field.text or "",
+            "plan_only": bool(self.plan_only_switch.value),
+        }
+        try:
+            self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as exc:
+            print(f"[wc-merger] could not persist state: {exc}")
+
+    def restore_last_state(self, sender=None) -> None:
+        try:
+            raw = self._state_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            if sender: # Nur bei Klick Feedback geben
+                if console:
+                    console.alert("wc-merger", "No saved state found.", "OK", hide_cancel_button=True)
+            return
+        except Exception as exc:
+            print(f"[wc-merger] could not read state: {exc!r}")
+            return
+
+        try:
+            data = json.loads(raw)
+        except Exception as exc:
+            print(f"[wc-merger] invalid state JSON: {exc!r}")
+            return
+
+        # Felder setzen
+        profile = data.get("detail_profile")
+        if profile and profile in self.seg_detail.segments:
+            try:
+                self.seg_detail.selected_index = self.seg_detail.segments.index(profile)
+            except ValueError:
+                # If the profile is not found in segments, just skip setting selected_index.
+                pass
+
+        self.ext_field.text = data.get("ext_filter", "")
+        self.path_field.text = data.get("path_filter", "")
+        self.max_field.text = data.get("max_bytes", "")
+        self.split_field.text = data.get("split_mb", "")
+        self.plan_only_switch.value = bool(data.get("plan_only", False))
+
+        # Update hint text to match restored profile
+        self.on_profile_changed(None)
+
+        selected = data.get("selected_repos") or []
+        if selected:
+            # Short delay might be needed if UI is not fully ready, but usually okay here
+            import time
+            ui.delay(lambda: self._apply_selected_repo_names(selected), 0.1)
+
+        if sender and console:
+            # Kurzes Feedback
+             try:
+                 console.hud_alert("Config loaded")
+             except Exception:
+                 # Ignore all exceptions here: HUD alert is non-critical UI feedback.
+                 pass
+
 
     def _tableview_cell(self, tableview, section, row):
         cell = ui.TableViewCell()
@@ -482,6 +655,8 @@ class MergerUI(object):
 
     def run_merge(self, sender) -> None:
         try:
+            # Aktuellen Zustand merken
+            self.save_last_state()
             self._run_merge_inner()
         except Exception as e:
             traceback.print_exc()
