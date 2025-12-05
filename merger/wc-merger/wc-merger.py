@@ -593,9 +593,7 @@ class MergerUI(object):
         if selected:
             # Short delay might be needed if UI is not fully ready, but usually okay here
             import time
-            def _restore_selection():
-                self._apply_selected_repo_names(selected)
-            ui.delay(_restore_selection, 0.1)
+            ui.delay(lambda: self._apply_selected_repo_names(selected), 0.1)
 
         if sender and console:
             # Kurzes Feedback
