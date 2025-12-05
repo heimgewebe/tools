@@ -507,12 +507,18 @@ class MergerUI(object):
         if rows and len(rows) == len(self.repos):
             # alles war ausgewählt → Auswahl löschen (zurück zu „none = all“)
             tv.selected_rows = []
-            tv.reload()
-            self._all_toggle_selected = False
         else:
             tv.selected_rows = [(0, i) for i in range(len(self.repos))]
-            tv.reload()
-            self._all_toggle_selected = True
+        # TableView in Pythonista kennt reload_data(), nicht reload()
+        try:
+            tv.reload_data()
+        except Exception:
+            # Falls wir in einer älteren/anderen Umgebung laufen, lieber still ignorieren
+            pass
+
+        # internen Toggle-Status anhand der tatsächlichen Auswahl setzen
+        rows = tv.selected_rows or []
+        self._all_toggle_selected = bool(rows)
 
         self._update_repo_info()
 
@@ -541,12 +547,11 @@ class MergerUI(object):
         selected: List[str] = []
         if hasattr(ds, "items"):
             # Standard ui.ListDataSource
+            rows = getattr(self.tv, "selected_rows", None) or []
             for idx, name in enumerate(ds.items):
-                if hasattr(self.tv, "selected_rows"):
-                    # Check if (0, idx) is in selected_rows
-                    # selected_rows is a list of tuples (section, row)
-                    if any(row == idx for sec, row in self.tv.selected_rows):
-                        selected.append(name)
+                # selected_rows ist eine Liste von Tupeln (section, row)
+                if any(r == idx for sec, r in rows):
+                    selected.append(name)
         return selected
 
     def _apply_selected_repo_names(self, names: List[str]) -> None:
