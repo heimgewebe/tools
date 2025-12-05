@@ -251,7 +251,7 @@ class MergerUI(object):
 
         tv = ui.TableView()
         # Höhe dynamisch: mind. 160, sonst ca. 45% des Screens
-        list_height = max(160, v.height * 0.45)
+        list_height = max(160, v.height * 0.40)
         tv.frame = (10, y, v.width - 20, list_height)
         tv.flex = "WH"
         tv.background_color = "#111111"
@@ -469,14 +469,19 @@ class MergerUI(object):
             return
         tv = self.tv
 
-        # Bestehende Auswahl bleibt egal – wir überschreiben sie einfach:
-        for row in range(len(self.repos)):
+        # Pythonista-TableView hat i. d. R. selected_rows statt select_row().
+        rows = [(0, i) for i in range(len(self.repos))]
+        try:
+            tv.selected_rows = rows
+        except Exception:
+            # Fallback: wenigstens eine Zeile selektieren, falls multiple selection
+            # nicht sauber funktioniert.
             try:
-                # section=0, kein Scrollen, keine Animation
-                tv.select_row(row, section=0, animated=False, scroll_to_selection=False)
-            except TypeError:
-                # ältere Pythonista-Version: select_row(row) ohne Keywords
-                tv.select_row(row)
+                if rows:
+                    tv.selected_row = rows[0]
+            except Exception:
+                # Dann eben ohne Vorauswahl – aber kein Crash.
+                pass
 
     def on_profile_changed(self, sender):
         """Aktualisiert den Hint-Text basierend auf dem gewählten Profil."""
@@ -511,14 +516,24 @@ class MergerUI(object):
 
         name_to_index = {name: i for i, name in enumerate(ds.items)}
 
-        # Manuell selektieren via select_row, damit es in Pythonista zuverlässig ist
+        rows = []
         for name in names:
             idx = name_to_index.get(name)
             if idx is not None:
-                try:
-                    self.tv.select_row(idx, section=0, animated=False, scroll_to_selection=False)
-                except TypeError:
-                    self.tv.select_row(idx)
+                rows.append((0, idx))
+
+        if not rows:
+            return
+
+        tv = self.tv
+        try:
+            tv.selected_rows = rows
+        except Exception:
+            # Fallback: nur die erste gefundene Zeile selektieren
+            try:
+                tv.selected_row = rows[0]
+            except Exception:
+                pass
 
     def save_last_state(self) -> None:
         """
@@ -591,17 +606,15 @@ class MergerUI(object):
 
         selected = data.get("selected_repos") or []
         if selected:
-            # Short delay might be needed if UI is not fully ready, but usually okay here
-            import time
-            ui.delay(lambda: self._apply_selected_repo_names(selected), 0.1)
+            # Direkt anwenden – ohne ui.delay, das auf manchen Wegen nicht verfügbar ist
+            self._apply_selected_repo_names(selected)
 
         if sender and console:
-            # Kurzes Feedback
-             try:
-                 console.hud_alert("Config loaded")
-             except Exception:
-                 # Ignore all exceptions here: HUD alert is non-critical UI feedback.
-                 pass
+            # Kurzes Feedback, aber niemals hart failen
+            try:
+                console.hud_alert("Config loaded")
+            except Exception:
+                pass
 
 
     def _tableview_cell(self, tableview, section, row):
