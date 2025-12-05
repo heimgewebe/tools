@@ -35,6 +35,29 @@ try:
 except Exception:
     editor = None    # type: ignore
 
+
+def force_close_files(paths: List[Path]) -> None:
+    """
+    Ensures generated files are not left open in the editor.
+    """
+    if editor is None:
+        return
+
+    try:
+        open_files = editor.get_open_files()
+    except Exception:
+        return
+
+    target_names = {p.name for p in paths}
+
+    for fpath in open_files:
+        if os.path.basename(fpath) in target_names:
+            try:
+                editor.close_file(fpath)
+            except Exception:
+                pass
+
+
 # Import core logic
 try:
     from merge_core import (
@@ -458,12 +481,8 @@ class MergerUI(object):
                 print("No report generated.")
             return
 
-        main_report = out_paths[0]
-        if editor:
-            try:
-                editor.open_file(str(main_report))
-            except Exception:
-                pass
+        # Force close any tabs that might have opened
+        force_close_files(out_paths)
 
         msg = f"Generated {len(out_paths)} report(s)."
         if console:
