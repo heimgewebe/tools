@@ -408,7 +408,7 @@ def build_delta_merge_report(
       - Status "changed" und "added" → mit Inhalt
       - Status "removed"             → nur im Manifest / Summary
     """
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     ts = now.strftime("%y%m%d-%H%M")
     fname = f"{repo_name}_{profile}_delta_{ts}_merge.md"
     out_path = merges_dir / fname
