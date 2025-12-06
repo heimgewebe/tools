@@ -233,6 +233,16 @@ HARDCODED_HUB_PATH = (
     "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/wc-hub"
 )
 
+# Semantische Use-Case-Beschreibung pro Profil.
+# Wichtig: das ersetzt NICHT den Repo-Zweck (Declared Purpose),
+# sondern ergänzt ihn um die Rolle des aktuellen Merges.
+PROFILE_USECASE = {
+    "overview": "Tools – Index",
+    "summary": "Tools – Doku/Kontext",
+    "dev": "Tools – Code/Review Snapshot",
+    "max": "Tools – Vollsnapshot",
+}
+
 # Mandatory Repository Order for Multi-Repo Merges (v2.1 Spec)
 REPO_ORDER = [
     "metarepo",
@@ -873,6 +883,10 @@ def iter_report_blocks(
 
     cat_stats = summarize_categories(files)
 
+    # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
+    # um später im Plan pro Repo eine Coverage-Zeile auszugeben
+    included_by_root: Dict[str, int] = {}
+
     # Declared Purpose (Patch C)
     declared_purpose = ""
     try:
@@ -888,6 +902,12 @@ def iter_report_blocks(
     code_folders = set()
     doc_folders = set()
 
+    # Organismus-Rollen (ohne neue Tags/Kategorien):
+    organism_ai_ctx: List[FileInfo] = []
+    organism_contracts: List[FileInfo] = []
+    organism_pipelines: List[FileInfo] = []
+    organism_wgx_profiles: List[FileInfo] = []
+
     for fi in files:
         parts = fi.rel_path.parts
         if ".github" in parts or ".wgx" in parts or "contracts" in parts:
@@ -896,6 +916,21 @@ def iter_report_blocks(
             code_folders.add(parts[0])
         if "docs" in parts:
             doc_folders.add("docs")
+
+        # Organismus-Rollen:
+        if fi.category == "contract":
+            organism_contracts.append(fi)
+        if "ai-context" in (fi.tags or []):
+            organism_ai_ctx.append(fi)
+        if "ci" in (fi.tags or []):
+            organism_pipelines.append(fi)
+        if "wgx-profile" in (fi.tags or []):
+            organism_wgx_profiles.append(fi)
+
+    # jetzt, nachdem processed_files existiert, die Coverage pro Root berechnen
+    for fi, status in processed_files:
+        if status in ("full", "truncated"):
+            included_by_root[fi.root_label] = included_by_root.get(fi.root_label, 0) + 1
 
     # --- 1. Header ---
     header = []
@@ -914,6 +949,12 @@ def iter_report_blocks(
         # 0 / None = kein per-File-Limit – alles wird vollständig gelesen
         header.append("- **Max File Bytes:** unlimited")
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
+
+    # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
+    profile_usecase = PROFILE_USECASE.get(level)
+    if profile_usecase:
+        header.append(f"- **Profile Use-Case:** {profile_usecase}")
+
     header.append(f"- **Declared Purpose:** {declared_purpose}")
 
     # Scope-Zeile: welche Roots/Repos sind beteiligt?
@@ -1012,6 +1053,10 @@ def iter_report_blocks(
     plan.append(f"- **Total Files:** {len(files)} (Text: {len(text_files)})")
     plan.append(f"- **Total Size:** {human_size(total_size)}")
     plan.append(f"- **Included Content:** {included_count} files (full)")
+    if text_files:
+        plan.append(
+            f"- **Coverage:** {included_count}/{len(text_files)} Textdateien mit Inhalt (`full`/`truncated`)"
+        )
     plan.append("")
 
     # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
@@ -1033,9 +1078,10 @@ def iter_report_blocks(
                 and f.category in {"source", "doc", "config", "test", "ci", "contract"}
             )
             root_bytes = sum(f.size for f in root_files)
+            root_included = included_by_root.get(root, 0)
             plan.append(
                 f"- `{root}` → {root_total} files "
-                f"({root_text} relevant text, {human_size(root_bytes)})"
+                f"({root_text} relevant text, {human_size(root_bytes)}, {root_included} with content)"
             )
         plan.append("")
     plan.append("**Folder Highlights:**")
@@ -1043,6 +1089,24 @@ def iter_report_blocks(
     if doc_folders: plan.append(f"- Docs: `{', '.join(sorted(doc_folders))}`")
     if infra_folders: plan.append(f"- Infra: `{', '.join(sorted(infra_folders))}`")
     plan.append("")
+
+    # Organismus-Overview (im Plan, ohne Spec-Reihenfolge zu brechen)
+    plan.append("### Organism Overview")
+    plan.append("")
+    plan.append(
+        f"- AI-Kontext-Organe: {len(organism_ai_ctx)} Datei(en) (`ai-context`)"
+    )
+    plan.append(
+        f"- Contracts: {len(organism_contracts)} Datei(en) (category = `contract`)"
+    )
+    plan.append(
+        f"- Pipelines (CI/CD): {len(organism_pipelines)} Datei(en) (Tag `ci`)"
+    )
+    plan.append(
+        f"- Fleet-/WGX-Profile: {len(organism_wgx_profiles)} Datei(en) (Tag `wgx-profile`)"
+    )
+    plan.append("")
+
     yield "\n".join(plan) + "\n"
 
     if plan_only:
