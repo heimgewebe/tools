@@ -10,13 +10,26 @@ import sys
 import hashlib
 import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Set, Any, Iterator
+from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple
 
 # --- Configuration & Heuristics ---
 
 SPEC_VERSION = "2.3"
 MERGES_DIR_NAME = "merges"
 DEFAULT_MAX_BYTES = 10_000_000  # 10 MB
+
+# Debug-Config (kann später bei Bedarf erweitert werden)
+ALLOWED_CATEGORIES = {"source", "test", "doc", "config", "contract", "other"}
+ALLOWED_TAGS = {
+    "ai-context",
+    "runbook",
+    "lockfile",
+    "script",
+    "ci",
+    "adr",
+    "feed",
+    "wgx-profile",
+}
 
 # Directories to ignore
 SKIP_DIRS = {
@@ -63,6 +76,106 @@ TEXT_EXTENSIONS = {
     ".tf", ".hcl", ".gitignore", ".gitattributes", ".editorconfig", ".cs",
     ".swift", ".adoc", ".ai-context"
 }
+
+
+# --- Debug-Kollektor -------------------------------------------------------
+
+class DebugItem(NamedTuple):
+    level: str   # "info", "warn", "error"
+    code: str    # z. B. "tag-unknown"
+    context: str # kurzer Pfad oder Repo-Name
+    message: str # Menschentext
+
+
+class DebugCollector:
+    """Sammelt Debug-Infos für optionale Report-Sektionen."""
+
+    def __init__(self) -> None:
+        self._items: List[DebugItem] = []
+
+    @property
+    def items(self) -> List[DebugItem]:
+        return list(self._items)
+
+    def info(self, code: str, context: str, msg: str) -> None:
+        self._items.append(DebugItem("info", code, context, msg))
+
+    def warn(self, code: str, context: str, msg: str) -> None:
+        self._items.append(DebugItem("warn", code, context, msg))
+
+    def error(self, code: str, context: str, msg: str) -> None:
+        self._items.append(DebugItem("error", code, context, msg))
+
+    def has_items(self) -> bool:
+        return bool(self._items)
+
+    def render_markdown(self) -> str:
+        """Erzeugt eine optionale ## Debug-Sektion als Markdown-Tabelle."""
+        if not self._items:
+            return ""
+        lines: List[str] = []
+        lines.append("<!-- @debug:start -->")
+        lines.append("## Debug")
+        lines.append("")
+        lines.append("| Level | Code | Kontext | Hinweis |")
+        lines.append("|-------|------|---------|---------|")
+        for it in self._items:
+            lines.append(
+                f"| {it.level} | `{it.code}` | `{it.context}` | {it.message} |"
+            )
+        lines.append("")
+        lines.append("<!-- @debug:end -->")
+        lines.append("")
+        return "\n".join(lines)
+
+
+def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> None:
+    """
+    Leichte, rein lesende Debug-Checks auf Basis der FileInfos.
+    Verändert keine Merge-Logik, liefert nur Hinweise.
+    """
+    # 1. Unbekannte Kategorien / Tags
+    for fi in file_infos:
+        ctx = f"{fi.root_label}/{fi.rel_path.as_posix()}"
+        cat = fi.category or "other"
+        if cat not in ALLOWED_CATEGORIES:
+            debug.warn(
+                "category-unknown",
+                ctx,
+                f"Unbekannte Kategorie '{cat}' – erwartet sind {sorted(ALLOWED_CATEGORIES)}.",
+            )
+        for tag in getattr(fi, "tags", []) or []:
+            if tag not in ALLOWED_TAGS:
+                debug.warn(
+                    "tag-unknown",
+                    ctx,
+                    f"Tag '{tag}' ist nicht im v2.3-Schema registriert.",
+                )
+
+    # 2. Fleet-/Heimgewebe-Checks pro Repo
+    per_root: Dict[str, List["FileInfo"]] = {}
+    for fi in file_infos:
+        per_root.setdefault(fi.root_label, []).append(fi)
+
+    for root, fis in per_root.items():
+        # README-Check
+        if not any(f.rel_path.name.lower() == "readme.md" for f in fis):
+            debug.info(
+                "repo-no-readme",
+                root,
+                "README.md fehlt – Repo ist für KIs schwerer einzuordnen.",
+            )
+        # WGX-Profil-Check
+        if not any(
+            ".wgx" in f.rel_path.parts and str(f.rel_path).endswith("profile.yml")
+            for f in fis
+        ):
+            debug.info(
+                "repo-no-wgx-profile",
+                root,
+                "`.wgx/profile.yml` nicht gefunden – Repo ist nicht vollständig Fleet-konform.",
+            )
+
 
 # Directories considered "noise" (build artifacts etc.)
 NOISY_DIRECTORIES = ("node_modules/", "dist/", "build/", "target/")
@@ -482,15 +595,24 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         "ext_hist": ext_hist,
     }
 
-def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str]]:
+def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
     """
-    Returns a dictionary mapping relative paths to (size, md5).
-    Uses the same ignoring logic as scan_repo to ensure clean diffs.
+    Liefert einen Snapshot des Repos für Diff-Zwecke.
+
+    Rückgabe:
+      Dict[rel_path] -> (size, md5, category)
+
+    Wichtig:
+      - nutzt scan_repo, d. h. dieselben Ignore-Regeln wie der Merger
+      - Category stammt direkt aus classify_file_v2 und ist damit
+        kompatibel zum Manifest (source/doc/config/test/contract/ci/other)
     """
-    snapshot = {}
-    summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=100_000_000) # Large limit for diffs
+    snapshot: Dict[str, Tuple[int, str, str]] = {}
+    summary = scan_repo(
+        repo_root, extensions=None, path_contains=None, max_bytes=100_000_000
+    )  # großes Limit, damit wir verlässliche MD5s haben
     for fi in summary["files"]:
-        snapshot[fi.rel_path.as_posix()] = (fi.size, fi.md5)
+        snapshot[fi.rel_path.as_posix()] = (fi.size, fi.md5, fi.category or "other")
     return snapshot
 
 
