@@ -48,14 +48,9 @@ def load_schema() -> Dict[str, Any]:
 
 def extract_meta(path: Path) -> Dict[str, Any]:
     """
-    Extrahiert den YAML-Block zwischen '@meta' und der nächsten '---'-Zeile.
-    Erwartet ein Format wie:
-
-        @meta
-        merge:
-          spec_version: "2.3"
-          ...
-        ---
+    Extrahiert den YAML-Block.
+    Priorität 1: HTML-Kommentar-Block (<!-- @meta:start --> ... <!-- @meta:end -->)
+    Priorität 2: Legacy Frontmatter-Block (@meta ... ---)
     """
     if yaml is None:
         raise RuntimeError("PyYAML ist nicht installiert (pip install pyyaml).")
@@ -63,22 +58,50 @@ def extract_meta(path: Path) -> Dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
 
+    # Strategy 1: Look for HTML block
     meta_lines: List[str] = []
-    in_meta = False
+    in_html_block = False
+    found_html = False
 
     for line in lines:
-        if line.strip() == "@meta":
-            in_meta = True
+        stripped = line.strip()
+        if stripped == "<!-- @meta:start -->":
+            in_html_block = True
+            found_html = True
             continue
-        if in_meta and line.strip().startswith("---"):
+        if stripped == "<!-- @meta:end -->":
             break
-        if in_meta:
+
+        if in_html_block:
+            # Code fences in the HTML block should be ignored
+            if stripped.startswith("```"):
+                continue
             meta_lines.append(line)
 
-    if not meta_lines:
-        raise RuntimeError(f"Kein @meta-Block in Datei gefunden: {path}")
+    if found_html:
+        return yaml.safe_load("\n".join(meta_lines)) or {}
 
-    return yaml.safe_load("\n".join(meta_lines)) or {}
+    # Strategy 2: Look for Legacy block
+    meta_lines = []
+    in_legacy_block = False
+    found_legacy = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "@meta":
+            in_legacy_block = True
+            found_legacy = True
+            continue
+
+        if in_legacy_block:
+            if stripped.startswith("---"):
+                break
+            meta_lines.append(line)
+
+    if found_legacy:
+        return yaml.safe_load("\n".join(meta_lines)) or {}
+
+    raise RuntimeError(f"Kein @meta-Block in Datei gefunden: {path}")
 
 
 def validate_file(schema: Dict[str, Any], path: Path) -> List[str]:
@@ -117,11 +140,18 @@ def main(argv: List[str]) -> int:
     had_errors = False
     for name in argv:
         path = Path(name)
+        if not path.exists():
+             print(f"[ERROR] Datei nicht gefunden: {path}", file=sys.stderr)
+             had_errors = True
+             continue
+
         try:
             errs = validate_file(schema, path)
         except Exception as exc:
             print(f"[ERROR] {path}: {exc}", file=sys.stderr)
-            return 2
+            had_errors = True
+            continue
+
         for msg in errs:
             print(f"[SCHEMA] {msg}", file=sys.stderr)
         if errs:
