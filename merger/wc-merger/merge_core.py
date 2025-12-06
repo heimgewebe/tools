@@ -700,35 +700,12 @@ def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[
     """
     Reads content.
     Returns (content, truncated, truncation_msg).
-    If truncated, returns head + tail logic.
+    Truncation is disabled in v2.3+ per user request (files are split across parts if needed).
+    max_bytes is ignored here, effectively reading the full file.
     """
     try:
-        if fi.size <= max_bytes:
-            with fi.abs_path.open("r", encoding=encoding, errors="replace") as f:
-                return f.read(), False, ""
-
-        # Truncation logic: Head + Tail
-        head_size = max_bytes // 2
-        tail_size = 4096 # Keep reasonably small tail to catch recent changes/end blocks
-        if tail_size > max_bytes // 4:
-            tail_size = max_bytes // 4
-
         with fi.abs_path.open("r", encoding=encoding, errors="replace") as f:
-            head = f.read(head_size)
-            f.seek(0, 2)
-            f_size = f.tell()
-            if f_size > head_size + tail_size:
-                f.seek(f_size - tail_size)
-                tail = f.read(tail_size)
-                return (
-                    head + f"\n\n> [TRUNCATED] Original size: {human_size(fi.size)}. Included: first {human_size(head_size)} and last {human_size(tail_size)}.\n\n" + tail,
-                    True,
-                    f"Included: first {human_size(head_size)} and last {human_size(tail_size)}."
-                )
-            else:
-                f.seek(0)
-                return f.read(), False, ""
-
+            return f.read(), False, ""
     except OSError as e:
         return f"_Error reading file: {e}_", False, ""
 
@@ -866,8 +843,9 @@ def iter_report_blocks(
                 if fi.size <= max_file_bytes: status = "full"
                 else: status = "omitted"
 
-        if status == "full" and fi.size > max_file_bytes:
-            status = "truncated"
+        # Explicitly removed: automatic downgrade from "full" to "truncated"
+        # if status == "full" and fi.size > max_file_bytes:
+        #    status = "truncated"
 
         processed_files.append((fi, status))
 
@@ -993,11 +971,11 @@ def iter_report_blocks(
         header.append("`dev`")
         header.append("- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll")
         header.append("- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest")
-        header.append("- Lockfiles / Artefakte: ab bestimmter Größe truncated oder meta-only")
+        header.append("- Lockfiles / Artefakte: ab bestimmter Größe meta-only")
     elif level == "max":
         header.append("`max`")
         header.append("- alle Textdateien → voll")
-        header.append("- nur Dateien > Max Bytes → truncated")
+        header.append("- keine Kürzung (Dateien werden ggf. gesplittet)")
     else:
         header.append(f"`{level}` (custom)")
     header.append("")
@@ -1017,7 +995,7 @@ def iter_report_blocks(
     plan.append("")
     plan.append(f"- **Total Files:** {len(files)} (Text: {len(text_files)})")
     plan.append(f"- **Total Size:** {human_size(total_size)}")
-    plan.append(f"- **Included Content:** {included_count} files (full/truncated)")
+    plan.append(f"- **Included Content:** {included_count} files (full)")
     plan.append("")
 
     # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
