@@ -68,39 +68,6 @@ def force_close_files(paths: List[Path]) -> None:
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
 LAST_STATE_FILENAME = ".wc-merger-state.json"
 
-PROFILE_DESCRIPTIONS = {
-    "overview": "Docs + CI, kompakt, kombiniert",
-    "summary": "Docs + zentrale Config + Kern-Code",
-    "dev": "Code + Config pro Repo, für PR-Reviews",
-    "max": "Alles, maximal detailreich (Vorsicht, groß)",
-}
-
-# Voreinstellungen pro Profil:
-# Ziel:
-# - overview  → sehr knapp, kleine Dateien
-# - summary   → mittlere Tiefe
-# - dev       → tief, aber nicht grenzenlos
-# - max       → nutzt das globale DEFAULT_MAX_BYTES (Textfeld leer lassen)
-PROFILE_PRESETS = {
-    "overview": {
-        "max_bytes": 150_000,   # ~150 KB
-        "split_mb": 5,
-    },
-    "summary": {
-        "max_bytes": 250_000,   # ~250 KB
-        "split_mb": 15,
-    },
-    "dev": {
-        "max_bytes": 600_000,   # ~600 KB
-        "split_mb": 25,
-    },
-    "max": {
-        "max_bytes": None,      # leer = DEFAULT_MAX_BYTES
-        "split_mb": 50,
-    },
-}
-
-
 # Import core logic
 try:
     from merge_core import (
@@ -125,6 +92,49 @@ except ImportError:
         write_reports_v2,
         _normalize_ext_list,
     )
+
+PROFILE_DESCRIPTIONS = {
+    # Kurzbeschreibung der Profile für den UI-Hint
+    "overview": (
+        "Index-Profil: Struktur + Manifest. "
+        "Nur README / Runbooks / ai-context mit Inhalt."
+    ),
+    "summary": (
+        "Doku-/Kontext-Profil: Docs, zentrale Config, CI, Contracts voll. "
+        "Code größtenteils nur im Manifest."
+    ),
+    "dev": (
+        "Arbeits-Profil: Code, Tests, Config, CI voll. "
+        "Doku nur für README/Runbooks/ai-context voll."
+    ),
+    "max": (
+        "Vollsnapshot: alle Textdateien mit Inhalt (bis zum Max-Bytes-Limit pro Datei)."
+    ),
+}
+
+# Voreinstellungen pro Profil:
+# - überall: 10 MB Split-Größe (Part-Größe)
+# - kein Gesamtlimit: es werden einfach mehrere Parts erzeugt
+# - Max Bytes/File: bleibt per Default bei DEFAULT_MAX_BYTES (10 MB),
+#   kann im UI/CLI überschrieben werden.
+PROFILE_PRESETS = {
+    "overview": {
+        "max_bytes": DEFAULT_MAX_BYTES,
+        "split_mb": 10,
+    },
+    "summary": {
+        "max_bytes": DEFAULT_MAX_BYTES,
+        "split_mb": 10,
+    },
+    "dev": {
+        "max_bytes": DEFAULT_MAX_BYTES,
+        "split_mb": 10,
+    },
+    "max": {
+        "max_bytes": DEFAULT_MAX_BYTES,
+        "split_mb": 10,
+    },
+}
 
 
 # --- Helper ---
@@ -225,7 +235,8 @@ class MergerUI(object):
         parser.add_argument("--level", default="dev")
         parser.add_argument("--mode", default="gesamt")
         parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
-        parser.add_argument("--split-size", default="0")
+        # Default: ab 10 MB wird gesplittet
+        parser.add_argument("--split-size", default="10")
         # Ignore unknown args
         args, _ = parser.parse_known_args()
 
@@ -449,14 +460,14 @@ class MergerUI(object):
         cy += 36
 
         split_label = ui.Label()
-        split_label.text = "Split Size (MB):"
+        split_label.text = "Total Limit (MB):"
         split_label.text_color = "white"
         split_label.background_color = "#111111"
         split_label.frame = (10, cy, 120, 22)
         bottom_container.add_subview(split_label)
 
         split_field = ui.TextField()
-        split_field.placeholder = "0 = No Split"
+        split_field.placeholder = "0 / empty = No Limit"
         split_field.text = args.split_size if args.split_size != "0" else ""
         split_field.frame = (130, cy - 2, 140, 28)
         split_field.flex = "W"
@@ -659,17 +670,27 @@ class MergerUI(object):
         # Presets anwenden (nur max_bytes + split_mb)
         preset = PROFILE_PRESETS.get(seg_name)
         if preset:
+            # Max Bytes/File:
             max_bytes = preset.get("max_bytes")
-            if max_bytes is None:
-                # Leer = DEFAULT_MAX_BYTES (wird in _parse_max_bytes aufgelöst)
-                self.max_field.text = ""
-            else:
+            if not max_bytes or max_bytes <= 0:
+                max_bytes = DEFAULT_MAX_BYTES
+            try:
                 self.max_field.text = str(int(max_bytes))
+            except Exception:
+                self.max_field.text = str(int(DEFAULT_MAX_BYTES))
 
+            # Gesamtlimit (Total Limit / Split = Part-Größe):
             split_mb = preset.get("split_mb")
-            if split_mb is not None:
-                # UI-Textfeld erwartet MB als Zahl
-                self.split_field.text = str(int(split_mb))
+            # None oder <=0 = kein Split → Feld leer lassen
+            if split_mb is None or (
+                isinstance(split_mb, (int, float)) and split_mb <= 0
+            ):
+                self.split_field.text = ""
+            else:
+                try:
+                    self.split_field.text = str(int(split_mb))
+                except Exception:
+                    self.split_field.text = ""
 
     # --- State-Persistenz -------------------------------------------------
 
@@ -826,15 +847,19 @@ class MergerUI(object):
 
     def _parse_max_bytes(self) -> int:
         txt = (self.max_field.text or "").strip()
+        # Leeres Feld → Standard: DEFAULT_MAX_BYTES (10 MB pro Datei)
         if not txt:
             return DEFAULT_MAX_BYTES
+
+        # Optional: Eingaben wie "10M", "512K", "1G" akzeptieren
         try:
-            val = int(txt)
-            if val <= 0:
-                raise ValueError()
-            return val
+            val = parse_human_size(txt)
         except Exception:
+            val = 0
+
+        if val <= 0:
             return DEFAULT_MAX_BYTES
+        return val
 
     def _parse_split_size(self) -> int:
         txt = (self.split_field.text or "").strip()
@@ -1042,7 +1067,7 @@ def main_cli():
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default="dev")
     parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default="gesamt")
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
-    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)")
+    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="10MB")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
@@ -1081,6 +1106,8 @@ def main_cli():
         summary = scan_repo(src, None, None, args.max_bytes)
         summaries.append(summary)
 
+    # Default: ab 10 MB wird gesplittet, aber kein Gesamtlimit – es werden
+    # beliebig viele Parts erzeugt.
     split_size = 0
     if args.split_size:
         split_size = parse_human_size(args.split_size)
