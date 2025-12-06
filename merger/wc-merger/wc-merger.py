@@ -162,16 +162,39 @@ def parse_human_size(text: str) -> int:
 
 
 def _load_wc_extractor_module():
+    """Dynamically load wc-extractor.py from the same directory.
+
+    In Pythonista ist ``__file__`` nicht immer gesetzt (z. B. bei Ausführung
+    aus bestimmten UI-/Shortcut-Kontexten). In dem Fall fallen wir auf
+    ``sys.argv[0]`` bzw. das aktuelle Arbeitsverzeichnis zurück, statt mit
+    einem ``NameError`` abzustürzen.
     """
-    Lädt wc-extractor.py als Hilfsmodul, um Delta-Merges aus der UI
-    erzeugen zu können, ohne den Dateinamen umzubenennen.
-    """
-    script_path = Path(__file__).resolve()
+    from importlib.machinery import SourceFileLoader
+    import types
+    import sys
+
+    try:
+        # Normalfall: __file__ ist definiert.
+        script_path = Path(__file__).resolve()
+    except NameError:
+        # Eingebetteter / Pythonista-Sonderfall.
+        candidate = None
+        if getattr(sys, "argv", None):
+            candidate = sys.argv[0] or None
+        if candidate:
+            script_path = Path(candidate).resolve()
+        else:
+            # Fallback – besser ein „best guess“ als ein Crash.
+            script_path = Path.cwd() / "wc-merger.py"
+
     extractor_path = script_path.with_name("wc-extractor.py")
     if not extractor_path.exists():
         return None
     try:
-        return SourceFileLoader("wc_extractor_helper", str(extractor_path)).load_module()
+        loader = SourceFileLoader("wc_extractor", str(extractor_path))
+        mod = types.ModuleType(loader.name)
+        loader.exec_module(mod)
+        return mod
     except Exception as exc:
         print(f"[wc-merger] could not load wc-extractor: {exc}")
         return None
