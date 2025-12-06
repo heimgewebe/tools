@@ -78,9 +78,11 @@ Jeder Report muss:
    ```
 
 2. Im `@meta`-Block die Contract-Information maschinenlesbar haben:
+   (Der Block ist in HTML-Kommentare eingebettet, um das Rendering nicht zu stören.)
 
+   ```html
+   <!-- @meta:start -->
    ```yaml
-   @meta
    merge:
      spec_version: "2.3"
      profile: "max"
@@ -93,7 +95,8 @@ Jeder Report muss:
        - tools
      path_filter: null
      ext_filter: null
-   ---
+   ```
+   <!-- @meta:end -->
    ```
 
 Das JSON Schema für diesen Block liegt hier:
@@ -127,18 +130,23 @@ Auf iPad/Pythonista können diese Pakete ebenfalls installiert werden (z. B. per
 
 ## Detailgrade (Profile)
 
-Der wc-merger v2 kennt drei optimierte Profile:
+Der wc-merger v2 kennt vier optimierte Profile:
 
 ### 1. Overview (`overview`)
 - Kopf, Plan, Strukturbaum, Manifest.
 - **Inhalte nur für Prioritätsdateien:** `README.*`, `docs/runbook.*`, `.ai-context.yml`
 - Alle anderen Dateien nur als Metadaten im Manifest (`meta-only`).
 
-### 2. Dev (`dev`)
+### 2. Summary (`summary`)
+- Fokus auf Dokumentation und Kontext.
+- **Vollständig:** `README`, Runbooks, `.ai-context`, `docs/`, `.wgx/`, `.github/workflows/`, zentrale Configs, Contracts.
+- **Meta-Only:** Der eigentliche Source-Code und Tests erscheinen nur im Manifest (außer sie sind Priority-Files).
+
+### 3. Dev (`dev`)
 - **Vollständig:** Source-Code, Docs, CI/CD, Contracts, Configs.
 - **Zusammengefasst:** Große Lockfiles.
 
-### 3. Max (`max`)
+### 4. Max (`max`)
 - Inhalte **aller Textdateien** (bis zum Limit).
 - Maximale Tiefe.
 
@@ -149,14 +157,14 @@ Der wc-merger v2 kennt drei optimierte Profile:
 ### CLI-Nutzung:
 
 ```bash
-# Overview-Profil
-python3 wc-merger.py --cli --repos repo1,repo2 --level overview
+# Overview-Profil (Scannt aktuelles Verzeichnis oder nutzt --hub)
+python3 wc-merger.py repo1 repo2 --level overview
 
-# Dev-Profil
-python3 wc-merger.py --cli --repos myrepo --level dev --mode batch
+# Dev-Profil, einzelner Merge pro Repo
+python3 wc-merger.py myrepo --level dev --mode pro-repo
 
-# Max-Profil mit Split
-python3 wc-merger.py --cli --repos myrepo --level max --split-size 20
+# Max-Profil mit Split (z. B. 20MB)
+python3 wc-merger.py myrepo --level max --split-size 20MB
 ```
 
 ### Nutzung in iOS Shortcuts (Headless)

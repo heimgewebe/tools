@@ -73,7 +73,7 @@ Im Abschnitt **Source & Profile**:
 - `Contract: wc-merge-report`
 - `Contract-Version: 2.3`
 
-Im `@meta`-Block:
+Im `@meta`-Block (eingebettet in HTML-Kommentare `<!-- @meta:start -->` ... `<!-- @meta:end -->`):
 
 ```yaml
 merge:
@@ -110,8 +110,9 @@ Erlaubte Werte:
 - config
 - test
 - contract
-- ci
 - other
+
+(Hinweis: `ci` ist als Tag implementiert, nicht als eigene Kategorie.)
 
 Neue Kategorien dürfen nicht entstehen.
 
@@ -254,14 +255,11 @@ Mindestinformationen:
 
 ## 12. Strict Validator
 
-Jede Ausgabe wird geprüft:
+Jede Ausgabe wird auf folgende strukturelle Integrität geprüft:
 - Abschnittsreihenfolge
-- vollständige Manifest-Anker
-- vollständige Content-Anker
-- nur erlaubte Kategorien
-- nur erlaubte Tags
-- Spec-Version vorhanden
-- Contract-Felder vorhanden (`contract`, `contract_version`)
-- keine verbotenen Schlüsselwörter oder Strukturen
+- Spec-Version & Contract-Header vorhanden
+- Manifest-Anker vorhanden
 
-Fehler → kein Merge wird geschrieben.
+Erweiterte Prüfungen (z.B. unbekannte Tags/Kategorien, fehlende Anker) erfolgen im **Debug-Modus** oder als Warnungen und verhindern im Standardbetrieb nicht zwingend die Ausgabe, sollten aber behoben werden.
+
+Fehler in der Grundstruktur → kein Merge wird geschrieben.
