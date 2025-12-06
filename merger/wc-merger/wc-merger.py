@@ -547,7 +547,14 @@ class MergerUI(object):
 
         btn = ui.Button()
         btn.title = "Run Merge"
-        btn.frame = (10, y, v.width - 20, 40)
+        # Button nicht direkt an den unteren Rand kleben, damit er
+        # vom iOS-Home-Handle nicht halb verdeckt wird.
+        bottom_margin = 24
+        button_height = 40
+        safe_y = v.height - bottom_margin - button_height
+        if safe_y < y:
+            y = safe_y
+        btn.frame = (10, y, v.width - 20, button_height)
         btn.flex = "W"
         btn.background_color = "#007aff"
         btn.tint_color = "white"
