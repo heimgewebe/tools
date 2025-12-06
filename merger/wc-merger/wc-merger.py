@@ -298,7 +298,7 @@ class MergerUI(object):
         close_btn.title = "Close"
         # etwas mehr Rand nach rechts: ca. 20pt Abstand
         close_btn.frame = (v.width - 80, y + 3, 60, 28)
-        close_btn.flex = "WL"
+        close_btn.flex = "L"
         close_btn.background_color = "#333333"
         close_btn.tint_color = "white"
         close_btn.corner_radius = 4.0
@@ -321,7 +321,7 @@ class MergerUI(object):
         select_all_btn = ui.Button()
         select_all_btn.title = "All"
         select_all_btn.frame = (v.width - 90, y - 2, 80, 24)
-        select_all_btn.flex = "WL"
+        select_all_btn.flex = "L"
         select_all_btn.background_color = "#333333"
         select_all_btn.tint_color = "white"
         select_all_btn.corner_radius = 4.0
@@ -343,6 +343,8 @@ class MergerUI(object):
 
         # We need a temporary container to add subviews to, but we'll attach it to v later
         bottom_container = ui.View()
+        # Set initial width so subview flex calculations (right margin) work correctly
+        bottom_container.frame = (0, 0, cw, 100)
         bottom_container.background_color = "#111111" # Same as v
 
         ext_field = ui.TextField()
