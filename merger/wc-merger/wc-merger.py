@@ -74,6 +74,31 @@ PROFILE_DESCRIPTIONS = {
     "max": "Alles, maximal detailreich (Vorsicht, groß)",
 }
 
+# Voreinstellungen pro Profil:
+# Ziel:
+# - overview  → sehr knapp, kleine Dateien
+# - summary   → mittlere Tiefe
+# - dev       → tief, aber nicht grenzenlos
+# - max       → nutzt das globale DEFAULT_MAX_BYTES (Textfeld leer lassen)
+PROFILE_PRESETS = {
+    "overview": {
+        "max_bytes": 150_000,   # ~150 KB
+        "split_mb": 5,
+    },
+    "summary": {
+        "max_bytes": 250_000,   # ~250 KB
+        "split_mb": 15,
+    },
+    "dev": {
+        "max_bytes": 600_000,   # ~600 KB
+        "split_mb": 25,
+    },
+    "max": {
+        "max_bytes": None,      # leer = DEFAULT_MAX_BYTES
+        "split_mb": 50,
+    },
+}
+
 
 # Import core logic
 try:
@@ -524,12 +549,37 @@ class MergerUI(object):
             pass
 
     def on_profile_changed(self, sender):
-        """Aktualisiert den Hint-Text basierend auf dem gewählten Profil."""
+        """
+        Aktualisiert den Hint-Text und setzt sinnvolle Defaults
+        für max_bytes / split_size basierend auf dem gewählten Profil.
+
+        Wichtig: Pfad- und Extension-Filter bleiben unverändert, damit
+        man sie frei kombinieren kann (Profil + eigener Filter).
+        """
         idx = self.seg_detail.selected_index
-        if 0 <= idx < len(self.seg_detail.segments):
-            seg_name = self.seg_detail.segments[idx]
-            desc = PROFILE_DESCRIPTIONS.get(seg_name, "")
-            self.profile_hint.text = desc
+        if not (0 <= idx < len(self.seg_detail.segments)):
+            return
+
+        seg_name = self.seg_detail.segments[idx]
+
+        # Hint-Text aktualisieren
+        desc = PROFILE_DESCRIPTIONS.get(seg_name, "")
+        self.profile_hint.text = desc
+
+        # Presets anwenden (nur max_bytes + split_mb)
+        preset = PROFILE_PRESETS.get(seg_name)
+        if preset:
+            max_bytes = preset.get("max_bytes")
+            if max_bytes is None:
+                # Leer = DEFAULT_MAX_BYTES (wird in _parse_max_bytes aufgelöst)
+                self.max_field.text = ""
+            else:
+                self.max_field.text = str(int(max_bytes))
+
+            split_mb = preset.get("split_mb")
+            if split_mb is not None:
+                # UI-Textfeld erwartet MB als Zahl
+                self.split_field.text = str(int(split_mb))
 
     # --- State-Persistenz -------------------------------------------------
 

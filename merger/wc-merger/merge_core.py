@@ -320,24 +320,39 @@ def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
     tags = []
 
     # Tag Patterns - Strict match
+    # KI-Kontext-Dateien
     if name.endswith(".ai-context.yml"):
         tags.append("ai-context")
+
+    # CI-Workflows
     if ".github" in parts and "workflows" in parts and ext in [".yml", ".yaml"]:
         tags.append("ci")
-    if "contracts" in parts and ext == ".json":
-        tags.append("contract")
+
+    # Contracts:
+    # Nur als Kategorie, nicht mehr als Tag – Spec sieht kein 'contract'-Tag vor.
+    # (Die Zuordnung passiert weiter unten über die Category-Logik.)
+
     if "docs" in parts and "adr" in parts and ext == ".md":
         tags.append("adr")
     if name.startswith("runbook") and ext == ".md":
         tags.append("runbook")
-    if "scripts" in parts and ext == ".sh":
+
+    # Skripte: Shell und Python unter scripts/ oder bin/ als 'script' markieren
+    if (("scripts" in parts) or ("bin" in parts)) and ext in (".sh", ".py"):
         tags.append("script")
+
     if "export" in parts and ext == ".jsonl":
         tags.append("feed")
-    if "lock" in name: # *lock* pattern
+
+    # Lockfiles (package-lock, Cargo.lock, pnpm-lock, etc.)
+    if "lock" in name:
         tags.append("lockfile")
+
+    # README: Spec-konform als KI-Kontext markieren, kein eigener 'readme'-Tag
     if name == "readme.md":
-        tags.append("readme")
+        tags.append("ai-context")
+
+    # WGX-Profile
     if ".wgx" in parts and name.startswith("profile"):
         tags.append("wgx-profile")
 
