@@ -16,7 +16,11 @@ from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple
 
 SPEC_VERSION = "2.3"
 MERGES_DIR_NAME = "merges"
-DEFAULT_MAX_BYTES = 10_000_000  # 10 MB
+# Ab v2.3+: 0 = "kein Limit pro Datei".
+# max_file_bytes wirkt nur noch als optionales Soft-Limit / Hint,
+# nicht mehr als harte Abschneide-Grenze. Große Dateien werden
+# vollständig gelesen und nur über die Split-Logik in Parts verteilt.
+DEFAULT_MAX_BYTES = 0
 
 # Debug-Config (kann später bei Bedarf erweitert werden)
 ALLOWED_CATEGORIES = {"source", "test", "doc", "config", "contract", "other"}
@@ -563,10 +567,18 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             is_text = is_probably_text(abs_path, size)
             category, tags = classify_file_v2(rel_path, ext)
 
-            # MD5 calculation
+            # MD5 calculation:
+            # - Textdateien: immer kompletter MD5
+            # - Binärdateien: nur, falls ein positives Limit gesetzt ist
+            #   und die Datei kleiner/gleich diesem Limit ist.
             md5 = ""
-            if is_text or size <= max_bytes:
-                md5 = compute_md5(abs_path, max_bytes)
+            # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
+            limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
+            if is_text:
+                md5 = compute_md5(abs_path, limit_bytes)
+            else:
+                if limit_bytes is not None and size <= limit_bytes:
+                    md5 = compute_md5(abs_path, limit_bytes)
 
             fi = FileInfo(
                 root_label=root_label,
@@ -896,7 +908,11 @@ def iter_report_blocks(
     header.append(f"- **Source:** {', '.join(source_names)}")
     header.append(f"- **Profile:** `{level}`")
     header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)")
-    header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
+    if max_file_bytes and max_file_bytes > 0:
+        header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
+    else:
+        # 0 / None = kein per-File-Limit – alles wird vollständig gelesen
+        header.append("- **Max File Bytes:** unlimited")
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
     header.append(f"- **Declared Purpose:** {declared_purpose}")
 

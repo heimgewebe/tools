@@ -113,25 +113,26 @@ PROFILE_DESCRIPTIONS = {
 }
 
 # Voreinstellungen pro Profil:
-# - überall: 10 MB Split-Größe (Part-Größe)
-# - kein Gesamtlimit: es werden einfach mehrere Parts erzeugt
-# - Max Bytes/File: bleibt per Default bei DEFAULT_MAX_BYTES (10 MB),
-#   kann im UI/CLI überschrieben werden.
+# - Split-Größe (Part-Größe): standardmäßig 10 MB, d. h. große Merges
+#   werden in mehrere Dateien aufgeteilt – es gibt aber kein Gesamtlimit.
+# - Max Bytes/File: 0 = unbegrenzt (volle Dateien), Limit nur,
+#   wenn explizit gesetzt.
 PROFILE_PRESETS = {
     "overview": {
-        "max_bytes": DEFAULT_MAX_BYTES,
+        # 0 → „kein per-File-Limit“
+        "max_bytes": 0,
         "split_mb": 10,
     },
     "summary": {
-        "max_bytes": DEFAULT_MAX_BYTES,
+        "max_bytes": 0,
         "split_mb": 10,
     },
     "dev": {
-        "max_bytes": DEFAULT_MAX_BYTES,
+        "max_bytes": 0,
         "split_mb": 10,
     },
     "max": {
-        "max_bytes": DEFAULT_MAX_BYTES,
+        "max_bytes": 0,
         "split_mb": 10,
     },
 }
@@ -234,7 +235,8 @@ class MergerUI(object):
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--level", default="dev")
         parser.add_argument("--mode", default="gesamt")
-        parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+        # 0 = unbegrenzt
+        parser.add_argument("--max-bytes", type=int, default=0)
         # Default: ab 10 MB wird gesplittet
         parser.add_argument("--split-size", default="10")
         # Ignore unknown args
@@ -449,9 +451,14 @@ class MergerUI(object):
         bottom_container.add_subview(max_label)
 
         max_field = ui.TextField()
-        max_field.text = str(args.max_bytes)
+        # 0 oder kleiner = „unbegrenzt“ → Feld leer lassen
+        if args.max_bytes and args.max_bytes > 0:
+            max_field.text = str(args.max_bytes)
+        else:
+            max_field.text = ""
         max_field.frame = (130, cy - 2, 140, 28)
         max_field.flex = "W"
+        max_field.placeholder = "0 / empty = unlimited"
         _style_textfield(max_field)
         max_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
         _wrap_textfield_in_dark_bg(bottom_container, max_field)
@@ -460,14 +467,18 @@ class MergerUI(object):
         cy += 36
 
         split_label = ui.Label()
-        split_label.text = "Total Limit (MB):"
+        # Globale Split-Größe:
+        # steuert optional, ob der Merge in mehrere Dateien aufgeteilt wird,
+        # ist aber **kein** harter Global-Limit-Cut.
+        split_label.text = "Split Size (MB):"
         split_label.text_color = "white"
         split_label.background_color = "#111111"
         split_label.frame = (10, cy, 120, 22)
         bottom_container.add_subview(split_label)
 
         split_field = ui.TextField()
-        split_field.placeholder = "0 / empty = No Limit"
+        # Leer oder 0 = kein Split → ein Merge ohne globales Größenlimit.
+        split_field.placeholder = "leer/0 = kein Split"
         split_field.text = args.split_size if args.split_size != "0" else ""
         split_field.frame = (130, cy - 2, 140, 28)
         split_field.flex = "W"
@@ -671,13 +682,16 @@ class MergerUI(object):
         preset = PROFILE_PRESETS.get(seg_name)
         if preset:
             # Max Bytes/File:
-            max_bytes = preset.get("max_bytes")
-            if not max_bytes or max_bytes <= 0:
-                max_bytes = DEFAULT_MAX_BYTES
-            try:
-                self.max_field.text = str(int(max_bytes))
-            except Exception:
-                self.max_field.text = str(int(DEFAULT_MAX_BYTES))
+            # 0 oder None = unbegrenzt → Feld leer lassen
+            max_bytes = preset.get("max_bytes", 0)
+            if max_bytes is None or max_bytes <= 0:
+                self.max_field.text = ""
+            else:
+                try:
+                    self.max_field.text = str(int(max_bytes))
+                except Exception:
+                    # Fallback: lieber „unlimited“ als ein falscher Wert
+                    self.max_field.text = ""
 
             # Gesamtlimit (Total Limit / Split = Part-Größe):
             split_mb = preset.get("split_mb")
@@ -847,9 +861,9 @@ class MergerUI(object):
 
     def _parse_max_bytes(self) -> int:
         txt = (self.max_field.text or "").strip()
-        # Leeres Feld → Standard: DEFAULT_MAX_BYTES (10 MB pro Datei)
+        # Leeres Feld → Standard: unbegrenzt (0 = „no limit“)
         if not txt:
-            return DEFAULT_MAX_BYTES
+            return 0
 
         # Optional: Eingaben wie "10M", "512K", "1G" akzeptieren
         try:
@@ -857,8 +871,9 @@ class MergerUI(object):
         except Exception:
             val = 0
 
+        # <=0 interpretieren wir bewusst als „kein Limit“
         if val <= 0:
-            return DEFAULT_MAX_BYTES
+            return 0
         return val
 
     def _parse_split_size(self) -> int:
@@ -1066,7 +1081,8 @@ def main_cli():
     parser.add_argument("--hub", help="Base directory (wc-hub)")
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default="dev")
     parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default="gesamt")
-    parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
+    # 0 = unbegrenzt pro Datei
+    parser.add_argument("--max-bytes", type=int, default=0)
     parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="10MB")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")

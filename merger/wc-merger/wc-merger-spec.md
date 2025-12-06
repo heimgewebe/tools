@@ -32,6 +32,25 @@ Header muss enthalten:
 
 - Spec-Version: 2.3
 
+---
+
+## 3a. Größenlimits (Size Behaviour)
+
+- Es gibt **kein hartes globales Merge-Size-Limit**.
+- `max_file_bytes` begrenzt ausschließlich die **einzelne Datei**
+  (Trunkierung bzw. optionales Splitting auf Dateiebene).
+- `split_size` steuert optional die **Aufteilung des Merges in mehrere Dateien**:
+  - `split_size <= 0` → kein Split (ein einziger Merge).
+  - `split_size > 0` → Multi-File-Merge, Inhalt wird nur über mehrere Dateien verteilt,
+    aber nicht zusätzlich gekürzt.
+
+Konsequenz:
+
+> „Wenn Inhalt fehlt, liegt das an Profil-/Dateifiltern oder `max_file_bytes`, **nicht** an einem globalen Hard-Limit.“
+
+KIs dürfen davon ausgehen, dass es auf Merge-Ebene keine „unsichtbare Schere“ gibt,
+sondern nur explizit deklarierte Filter und Limits.
+
 Optional:
 
 - Spec-Checksum: <sha256>
