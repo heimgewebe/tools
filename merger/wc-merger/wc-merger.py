@@ -279,6 +279,7 @@ class MergerUI(object):
         margin = 10
         y = 10
 
+        # --- TOP HEADER ---
         base_label = ui.Label()
         # etwas Platz rechts für den Close-Button lassen
         base_label.frame = (10, y, v.width - 80, 34)
@@ -331,12 +332,238 @@ class MergerUI(object):
         self._all_toggle_selected = False
 
         y += 22
+        top_header_height = y
 
+        # --- BOTTOM SETTINGS & ACTIONS ---
+        # Container view for all controls that should stick to the bottom
+        # Layout calculation inside the container (starts at y=0)
+        cy = 10
+        cw = v.width
+        # We'll set the container height at the end
+
+        # We need a temporary container to add subviews to, but we'll attach it to v later
+        bottom_container = ui.View()
+        bottom_container.background_color = "#111111" # Same as v
+
+        ext_field = ui.TextField()
+        ext_field.frame = (10, cy, cw - 20, 28)
+        ext_field.flex = "W"
+        ext_field.placeholder = ".md,.yml,.rs (empty = all)"
+        ext_field.text = ""
+        _style_textfield(ext_field)
+        _wrap_textfield_in_dark_bg(bottom_container, ext_field)
+        self.ext_field = ext_field
+
+        cy += 34
+
+        path_field = ui.TextField()
+        path_field.frame = (10, cy, cw - 20, 28)
+        path_field.flex = "W"
+        path_field.placeholder = "Path contains (e.g. docs/ or .github/)"
+        _style_textfield(path_field)
+        path_field.autocorrection_type = False
+        path_field.spellchecking_type = False
+        _wrap_textfield_in_dark_bg(bottom_container, path_field)
+        self.path_field = path_field
+
+        cy += 36
+
+        # --- Detail: eigene Zeile ---
+        detail_label = ui.Label()
+        detail_label.text = "Detail:"
+        detail_label.text_color = "white"
+        detail_label.background_color = "#111111"
+        detail_label.frame = (10, cy, 60, 22)
+        bottom_container.add_subview(detail_label)
+
+        seg_detail = ui.SegmentedControl()
+        seg_detail.segments = ["overview", "summary", "dev", "max"]
+        try:
+            seg_detail.selected_index = seg_detail.segments.index(args.level)
+        except ValueError:
+            seg_detail.selected_index = 2  # Default dev
+        seg_detail.frame = (70, cy - 2, cw - 80, 28)
+        seg_detail.flex = "W"
+        # Use standard iOS blue instead of white for better contrast
+        seg_detail.tint_color = "#007aff"
+        seg_detail.background_color = "#dddddd"
+        seg_detail.action = self.on_profile_changed
+        bottom_container.add_subview(seg_detail)
+        self.seg_detail = seg_detail
+
+        # Kurzer Text unterhalb der Detail-Presets
+        self.profile_hint = ui.Label(
+            frame=(margin, cy + 28, cw - 2 * margin, 20),
+            flex="W",
+            text="",
+            text_color="white",
+            font=("<system>", 12),
+        )
+        bottom_container.add_subview(self.profile_hint)
+        cy += 24 # Platz für Hint
+
+        cy += 36  # neue Zeile für Mode
+
+        # --- Mode: darunter, eigene Zeile ---
+        mode_label = ui.Label()
+        mode_label.text = "Mode:"
+        mode_label.text_color = "white"
+        mode_label.background_color = "#111111"
+        mode_label.frame = (10, cy, 60, 22)
+        bottom_container.add_subview(mode_label)
+
+        seg_mode = ui.SegmentedControl()
+        seg_mode.segments = ["combined", "per repo"]
+        if args.mode == "pro-repo":
+            seg_mode.selected_index = 1
+        else:
+            seg_mode.selected_index = 0
+        seg_mode.frame = (70, cy - 2, cw - 80, 28)
+        seg_mode.flex = "W"
+        # Same accent color as detail segmented control
+        seg_mode.tint_color = "#007aff"
+        seg_mode.background_color = "#dddddd"
+        bottom_container.add_subview(seg_mode)
+        self.seg_mode = seg_mode
+
+        cy += 36
+
+        max_label = ui.Label()
+        max_label.text = "Max Bytes/File:"
+        max_label.text_color = "white"
+        max_label.background_color = "#111111"
+        max_label.frame = (10, cy, 120, 22)
+        bottom_container.add_subview(max_label)
+
+        max_field = ui.TextField()
+        max_field.text = str(args.max_bytes)
+        max_field.frame = (130, cy - 2, 140, 28)
+        max_field.flex = "W"
+        _style_textfield(max_field)
+        max_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
+        _wrap_textfield_in_dark_bg(bottom_container, max_field)
+        self.max_field = max_field
+
+        cy += 36
+
+        split_label = ui.Label()
+        split_label.text = "Split Size (MB):"
+        split_label.text_color = "white"
+        split_label.background_color = "#111111"
+        split_label.frame = (10, cy, 120, 22)
+        bottom_container.add_subview(split_label)
+
+        split_field = ui.TextField()
+        split_field.placeholder = "0 = No Split"
+        split_field.text = args.split_size if args.split_size != "0" else ""
+        split_field.frame = (130, cy - 2, 140, 28)
+        split_field.flex = "W"
+        _style_textfield(split_field)
+        split_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
+        _wrap_textfield_in_dark_bg(bottom_container, split_field)
+        self.split_field = split_field
+
+        cy += 36
+
+        # --- Plan Only Switch ---
+        plan_label = ui.Label()
+        plan_label.text = "Plan only:"
+        plan_label.text_color = "white"
+        plan_label.background_color = "#111111"
+        plan_label.frame = (10, cy, 120, 22)
+        bottom_container.add_subview(plan_label)
+
+        plan_switch = ui.Switch()
+        plan_switch.frame = (130, cy - 2, 60, 32)
+        plan_switch.flex = "W"
+        plan_switch.value = False
+        bottom_container.add_subview(plan_switch)
+        self.plan_only_switch = plan_switch
+
+        cy += 36
+
+        info_label = ui.Label()
+        info_label.text_color = "white"
+        info_label.background_color = "#111111"
+        info_label.font = ("<System>", 11)
+        info_label.number_of_lines = 1
+        info_label.frame = (10, cy, cw - 20, 18)
+        info_label.flex = "W"
+        bottom_container.add_subview(info_label)
+        self.info_label = info_label
+        self._update_repo_info()
+
+        # Initiale Anzeige des Hints
+        self.on_profile_changed(None)
+
+        cy += 26
+
+        # --- Buttons am unteren Rand (innerhalb des Containers) ---
+
+        cy += 10 # Gap
+
+        small_btn_height = 32
+
+        # --- Load State Button ---
+        load_btn = ui.Button()
+        load_btn.title = "Load Last Config"
+        load_btn.font = ("<System>", 14)
+        load_btn.frame = (10, cy, cw - 20, small_btn_height)
+        load_btn.flex = "W"
+        load_btn.background_color = "#333333"
+        load_btn.tint_color = "white"
+        load_btn.corner_radius = 6.0
+        load_btn.action = self.restore_last_state
+        bottom_container.add_subview(load_btn)
+
+        cy += small_btn_height + 10 # Gap
+
+        # --- Delta Button ---
+        delta_btn = ui.Button()
+        delta_btn.title = "Delta from Last Import"
+        delta_btn.font = ("<System>", 14)
+        delta_btn.frame = (10, cy, cw - 20, small_btn_height)
+        delta_btn.flex = "W"
+        delta_btn.background_color = "#444444"
+        delta_btn.tint_color = "white"
+        delta_btn.corner_radius = 6.0
+        delta_btn.action = self.run_delta_from_last_import
+        bottom_container.add_subview(delta_btn)
+        self.delta_button = delta_btn
+
+        cy += small_btn_height + 10 # Gap
+
+        # --- Run Button ---
+        run_height = 40
+        btn = ui.Button()
+        btn.title = "Run Merge"
+        btn.frame = (10, cy, cw - 20, run_height)
+        btn.flex = "W"
+        btn.background_color = "#007aff"
+        btn.tint_color = "white"
+        btn.corner_radius = 6.0
+        btn.action = self.run_merge
+        bottom_container.add_subview(btn)
+        self.run_button = btn
+
+        cy += run_height + 24 # Bottom margin inside container
+
+        container_height = cy
+
+        # Now place the container at the bottom of the main view
+        bottom_container.frame = (0, v.height - container_height, v.width, container_height)
+        bottom_container.flex = "WT" # Width flex, Top margin flex (stays at bottom)
+        v.add_subview(bottom_container)
+
+        # --- REPO LIST ---
+        # The list fills the space between header and bottom container
         tv = ui.TableView()
-        # Höhe dynamisch: mind. 160, sonst ca. 45% des Screens
-        list_height = max(160, v.height * 0.40)
-        tv.frame = (10, y, v.width - 20, list_height)
-        tv.flex = "WH"
+
+        # Calculate height: available space between top header and bottom container
+        list_height = v.height - top_header_height - container_height
+
+        tv.frame = (10, top_header_height, v.width - 20, list_height)
+        tv.flex = "WH" # Width flex, Height flex (fills space)
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
         tv.row_height = 32
@@ -356,221 +583,6 @@ class MergerUI(object):
         v.add_subview(tv)
         self.tv = tv
         self.ds = ds
-
-        # Alle folgenden Elemente direkt UNTER die Liste setzen
-        y = tv.frame.y + tv.frame.height + 10
-
-        ext_field = ui.TextField()
-        ext_field.frame = (10, y, v.width - 20, 28)
-        ext_field.flex = "W"
-        ext_field.placeholder = ".md,.yml,.rs (empty = all)"
-        ext_field.text = ""
-        _style_textfield(ext_field)
-        _wrap_textfield_in_dark_bg(v, ext_field)
-        self.ext_field = ext_field
-
-        y += 34
-
-        path_field = ui.TextField()
-        path_field.frame = (10, y, v.width - 20, 28)
-        path_field.flex = "W"
-        path_field.placeholder = "Path contains (e.g. docs/ or .github/)"
-        _style_textfield(path_field)
-        path_field.autocorrection_type = False
-        path_field.spellchecking_type = False
-        _wrap_textfield_in_dark_bg(v, path_field)
-        self.path_field = path_field
-
-        y += 36
-
-        # --- Detail: eigene Zeile ---
-        detail_label = ui.Label()
-        detail_label.text = "Detail:"
-        detail_label.text_color = "white"
-        detail_label.background_color = "#111111"
-        detail_label.frame = (10, y, 60, 22)
-        v.add_subview(detail_label)
-
-        seg_detail = ui.SegmentedControl()
-        seg_detail.segments = ["overview", "summary", "dev", "max"]
-        try:
-            seg_detail.selected_index = seg_detail.segments.index(args.level)
-        except ValueError:
-            seg_detail.selected_index = 2  # Default dev
-        seg_detail.frame = (70, y - 2, v.width - 80, 28)
-        seg_detail.flex = "W"
-        # Use standard iOS blue instead of white for better contrast
-        seg_detail.tint_color = "#007aff"
-        seg_detail.background_color = "#dddddd"
-        seg_detail.action = self.on_profile_changed
-        v.add_subview(seg_detail)
-        self.seg_detail = seg_detail
-
-        # Kurzer Text unterhalb der Detail-Presets
-        self.profile_hint = ui.Label(
-            frame=(margin, y + 28, v.width - 2 * margin, 20),
-            flex="W",
-            text="",
-            text_color="white",
-            font=("<system>", 12),
-        )
-        # Direkt unter dem SegmentControl anzeigen, bevor Mode kommt
-        # Wir müssen "y" etwas anpassen, damit Mode weiter runter rutscht
-        v.add_subview(self.profile_hint)
-        y += 24 # Platz für Hint
-
-        y += 36  # neue Zeile für Mode
-
-        # --- Mode: darunter, eigene Zeile ---
-        mode_label = ui.Label()
-        mode_label.text = "Mode:"
-        mode_label.text_color = "white"
-        mode_label.background_color = "#111111"
-        mode_label.frame = (10, y, 60, 22)
-        v.add_subview(mode_label)
-
-        seg_mode = ui.SegmentedControl()
-        seg_mode.segments = ["combined", "per repo"]
-        if args.mode == "pro-repo":
-            seg_mode.selected_index = 1
-        else:
-            seg_mode.selected_index = 0
-        seg_mode.frame = (70, y - 2, v.width - 80, 28)
-        seg_mode.flex = "W"
-        # Same accent color as detail segmented control
-        seg_mode.tint_color = "#007aff"
-        seg_mode.background_color = "#dddddd"
-        v.add_subview(seg_mode)
-        self.seg_mode = seg_mode
-
-        y += 36
-
-        max_label = ui.Label()
-        max_label.text = "Max Bytes/File:"
-        max_label.text_color = "white"
-        max_label.background_color = "#111111"
-        max_label.frame = (10, y, 120, 22)
-        v.add_subview(max_label)
-
-        max_field = ui.TextField()
-        max_field.text = str(args.max_bytes)
-        max_field.frame = (130, y - 2, 140, 28)
-        max_field.flex = "W"
-        _style_textfield(max_field)
-        max_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
-        _wrap_textfield_in_dark_bg(v, max_field)
-        self.max_field = max_field
-
-        y += 36
-
-        split_label = ui.Label()
-        split_label.text = "Split Size (MB):"
-        split_label.text_color = "white"
-        split_label.background_color = "#111111"
-        split_label.frame = (10, y, 120, 22)
-        v.add_subview(split_label)
-
-        split_field = ui.TextField()
-        split_field.placeholder = "0 = No Split"
-        split_field.text = args.split_size if args.split_size != "0" else ""
-        split_field.frame = (130, y - 2, 140, 28)
-        split_field.flex = "W"
-        _style_textfield(split_field)
-        split_field.keyboard_type = ui.KEYBOARD_NUMBER_PAD
-        _wrap_textfield_in_dark_bg(v, split_field)
-        self.split_field = split_field
-
-        y += 36
-
-        # --- Plan Only Switch ---
-        plan_label = ui.Label()
-        plan_label.text = "Plan only:"
-        plan_label.text_color = "white"
-        plan_label.background_color = "#111111"
-        plan_label.frame = (10, y, 120, 22)
-        v.add_subview(plan_label)
-
-        plan_switch = ui.Switch()
-        plan_switch.frame = (130, y - 2, 60, 32)
-        plan_switch.flex = "W"
-        plan_switch.value = False
-        v.add_subview(plan_switch)
-        self.plan_only_switch = plan_switch
-
-        y += 36
-
-        info_label = ui.Label()
-        info_label.text_color = "white"
-        info_label.background_color = "#111111"
-        info_label.font = ("<System>", 11)
-        info_label.number_of_lines = 1
-        info_label.frame = (10, y, v.width - 20, 18)
-        info_label.flex = "W"
-        v.add_subview(info_label)
-        self.info_label = info_label
-        self._update_repo_info()
-
-        # Initiale Anzeige des Hints
-        self.on_profile_changed(None)
-
-        y += 26
-
-        # --- Buttons am unteren Rand ---
-
-        # Wir richten die drei Buttons (Load, Delta, Run) von unten her aus,
-        # damit sie sich nicht gegenseitig verdecken.
-        # Reihenfolge von unten:
-        # 1. Run Merge
-        # 2. Delta
-        # 3. Load Last Config
-
-        bottom_margin = 24
-        run_height = 40
-        small_btn_height = 32
-        gap = 10
-
-        # Berechnete Y-Positionen von unten
-        run_y = v.height - bottom_margin - run_height
-        delta_y = run_y - gap - small_btn_height
-        load_y = delta_y - gap - small_btn_height
-
-        # --- Load State Button ---
-        load_btn = ui.Button()
-        load_btn.title = "Load Last Config"
-        load_btn.font = ("<System>", 14)
-        load_btn.frame = (10, load_y, v.width - 20, small_btn_height)
-        # Fixiert am unteren Rand (Top-Margin flexibel)
-        load_btn.flex = "WT"
-        load_btn.background_color = "#333333"
-        load_btn.tint_color = "white"
-        load_btn.corner_radius = 6.0
-        load_btn.action = self.restore_last_state
-        v.add_subview(load_btn)
-
-        # --- Delta Button ---
-        delta_btn = ui.Button()
-        delta_btn.title = "Delta from Last Import"
-        delta_btn.font = ("<System>", 14)
-        delta_btn.frame = (10, delta_y, v.width - 20, small_btn_height)
-        delta_btn.flex = "WT"
-        delta_btn.background_color = "#444444"
-        delta_btn.tint_color = "white"
-        delta_btn.corner_radius = 6.0
-        delta_btn.action = self.run_delta_from_last_import
-        v.add_subview(delta_btn)
-        self.delta_button = delta_btn
-
-        # --- Run Button ---
-        btn = ui.Button()
-        btn.title = "Run Merge"
-        btn.frame = (10, run_y, v.width - 20, run_height)
-        btn.flex = "WT"
-        btn.background_color = "#007aff"
-        btn.tint_color = "white"
-        btn.corner_radius = 6.0
-        btn.action = self.run_merge
-        v.add_subview(btn)
-        self.run_button = btn
 
     def _on_repo_selection_changed(self, sender) -> None:
         """Callback des ListDataSource – hält die Info-Zeile in Sync."""
