@@ -41,7 +41,7 @@ Für die Weiterentwicklung (und speziell für Agenten wie Jules) gelten folgende
 
 4.  **KI-Safety:**
     *   Timestamps immer in UTC (`YYYY-MM-DD HH:MM:SS (UTC)`).
-    *   `Spec-Version: 2.1` Header immer setzen.
+    *   `Spec-Version: 2.3` Header immer setzen.
 
 ---
 
@@ -90,7 +90,7 @@ Jeder Report muss:
      contract_version: "2.3"
      plan_only: false
      max_file_bytes: 0
-     scope: "single repo: `tools`"
+     scope: "single repo `tools`"
      source_repos:
        - tools
      path_filter: null
@@ -143,12 +143,14 @@ Der wc-merger v2 kennt vier optimierte Profile:
 - **Meta-Only:** Der eigentliche Source-Code und Tests erscheinen nur im Manifest (außer sie sind Priority-Files).
 
 ### 3. Dev (`dev`)
-- **Vollständig:** Source-Code, Docs, CI/CD, Contracts, Configs.
-- **Zusammengefasst:** Große Lockfiles.
+- **Vollständig:** Source-Code, Tests, zentrale Configs, CI/CD, Contracts, ai-context, `.wgx/profile`.
+- **Vollständig bei Doku:** nur README, Runbooks und `.ai-context`-Dateien.
+- **Zusammengefasst:** große Lockfiles (nur Manifest).
 
 ### 4. Max (`max`)
 - Inhalte **aller Textdateien** (bis zum Limit).
 - Maximale Tiefe.
+- Keine Kürzung auf Merge-Ebene, nur optionaler Split in mehrere Dateien.
 
 ---
 
