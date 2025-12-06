@@ -24,7 +24,7 @@ import shutil
 import zipfile
 import datetime
 from pathlib import Path
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional, List, Any
 
 try:
     import console  # type: ignore
@@ -225,9 +225,26 @@ def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
 
 
 def import_zip_wrapper(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
-    """Wraps import_zip with finally cleanup."""
+    """Wraps import_zip, erzeugt optional Delta-Merge und sorgt für Cleanup."""
+    diff_path: Optional[Path] = None
     try:
-        return import_zip(zip_path, hub, merges_dir)
+        # Normalen Import + Diff laufen lassen
+        diff_path = import_zip(zip_path, hub, merges_dir)
+
+        # Automatisch Delta-Merge erzeugen, wenn ein Diff existiert
+        if diff_path is not None:
+            repo_name = zip_path.stem
+            repo_root = hub / repo_name
+            if repo_root.exists():
+                try:
+                    delta_path = create_delta_merge_from_diff(
+                        diff_path, repo_root, merges_dir, profile="delta-full"
+                    )
+                    print(f"  Delta-Merge: {delta_path}")
+                except Exception as e:
+                    print(f"  Warnung: Konnte Delta-Merge nicht erzeugen ({e}).")
+
+        return diff_path
     except Exception:
         raise
     finally:
@@ -300,7 +317,7 @@ def main() -> int:
 # Diff-Parser (Prototyp)
 # ---------------------------------------------------------------------------
 
-def parse_import_diff_table(text):
+def parse_import_diff_table(text: str) -> List[Dict[str, Any]]:
     """
     Parst die „Dateiliste (Manifest-Stil)“-Tabelle aus einem Import-Diff.
 
@@ -396,7 +413,7 @@ def parse_import_diff_table(text):
 def build_delta_merge_report(
     repo_root: Path,
     repo_name: str,
-    diff_rows,
+    diff_rows: List[Dict[str, Any]],
     merges_dir: Path,
     profile: str = "delta-full",
 ) -> Path:
