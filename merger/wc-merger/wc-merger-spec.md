@@ -201,7 +201,7 @@ Vor dem Manifest:
 - [Config](#cat-config)
 - [Contracts](#cat-contract)
 - [Tests](#cat-test)
-- [CI](#cat-ci)
+- [CI Pipelines](#tag-ci)
 - [WGX Profiles](#tag-wgx-profile)
 ```
 
@@ -209,6 +209,13 @@ Für jede Kategorie:
 
 ```markdown
 ## Category: source {#cat-source}
+- [file](#file-...)
+```
+
+Für Tags (z. B. CI):
+
+```markdown
+## Tag: ci {#tag-ci}
 - [file](#file-...)
 ```
 

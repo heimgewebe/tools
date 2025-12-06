@@ -819,8 +819,10 @@ def iter_report_blocks(
         fi.anchor = anchor
 
         # Debug checks
-        if fi.category == "other" or fi.category not in ["source", "doc", "config", "test", "contract", "ci", "other"]:
-             unknown_categories.add(fi.category)
+        # Kategorien strikt gemäß Spec v2.3:
+        # {source, doc, config, test, contract, other}
+        if fi.category == "other" or fi.category not in ["source", "doc", "config", "test", "contract", "other"]:
+            unknown_categories.add(fi.category)
 
         status = "omitted"
         if fi.is_text:
@@ -1137,11 +1139,13 @@ def iter_report_blocks(
     index_blocks.append("## Index")
 
     # List of categories to index
-    cats_to_idx = ["source", "doc", "config", "contract", "test", "ci"]
+    # CI ist ein Tag, keine eigene Kategorie – wird separat indiziert.
+    cats_to_idx = ["source", "doc", "config", "contract", "test"]
     for c in cats_to_idx:
         index_blocks.append(f"- [{c.capitalize()}](#cat-{c})")
 
     # Tags can be indexed too if needed, e.g. wgx-profile
+    index_blocks.append("- [CI Pipelines](#tag-ci)")
     index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
     index_blocks.append("")
 
@@ -1153,6 +1157,14 @@ def iter_report_blocks(
             for f in cat_files:
                 index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
             index_blocks.append("")
+
+    # Tag Lists – CI-Pipelines
+    ci_files = [f for f in files if "ci" in (f.tags or [])]
+    if ci_files:
+        index_blocks.append("## Tag: ci {#tag-ci}")
+        for f in ci_files:
+            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+        index_blocks.append("")
 
     # Tag Lists (example)
     wgx_files = [f for f in files if "wgx-profile" in f.tags]
