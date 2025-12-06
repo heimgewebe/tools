@@ -57,6 +57,51 @@ Optional:
 
 ---
 
+## 3b. Merge-Contract
+
+Jeder wc-merger-Report implementiert einen formalen „Merge-Contract“.
+Ziel:
+
+- eindeutige Identifikation des Formats,
+- maschinenlesbare Versionierung,
+- Basis für externe Validatoren und CI-Checks.
+
+Pflichtfelder:
+
+Im Abschnitt **Source & Profile**:
+
+- `Contract: wc-merge-report`
+- `Contract-Version: 2.3`
+
+Im `@meta`-Block:
+
+```yaml
+merge:
+  contract: "wc-merge-report"
+  contract_version: "2.3"
+```
+
+- Es gibt **kein hartes globales Merge-Size-Limit**.
+- `max_file_bytes` begrenzt ausschließlich die **einzelne Datei**
+  (Trunkierung bzw. optionales Splitting auf Dateiebene).
+- `split_size` steuert optional die **Aufteilung des Merges in mehrere Dateien**:
+  - `split_size <= 0` → kein Split (ein einziger Merge).
+  - `split_size > 0` → Multi-File-Merge, Inhalt wird nur über mehrere Dateien verteilt,
+    aber nicht zusätzlich gekürzt.
+
+Konsequenz:
+
+> „Wenn Inhalt fehlt, liegt das an Profil-/Dateifiltern oder `max_file_bytes`, **nicht** an einem globalen Hard-Limit.“
+
+KIs dürfen davon ausgehen, dass es auf Merge-Ebene keine „unsichtbare Schere“ gibt,
+sondern nur explizit deklarierte Filter und Limits.
+
+Optional:
+
+- Spec-Checksum: <sha256>
+
+---
+
 ## 4. Kategorien
 
 Erlaubte Werte:
@@ -216,6 +261,7 @@ Jede Ausgabe wird geprüft:
 - nur erlaubte Kategorien
 - nur erlaubte Tags
 - Spec-Version vorhanden
+- Contract-Felder vorhanden (`contract`, `contract_version`)
 - keine verbotenen Schlüsselwörter oder Strukturen
 
 Fehler → kein Merge wird geschrieben.

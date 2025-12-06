@@ -16,6 +16,13 @@ from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple
 
 SPEC_VERSION = "2.3"
 MERGES_DIR_NAME = "merges"
+
+# Formale Contract-Deklaration für alle wc-merger-Reports.
+# Name/Version können von nachgelagerten Tools verwendet werden,
+# um das Format eindeutig zu erkennen.
+MERGE_CONTRACT_NAME = "wc-merge-report"
+MERGE_CONTRACT_VERSION = SPEC_VERSION
+
 # Ab v2.3+: 0 = "kein Limit pro Datei".
 # max_file_bytes wirkt nur noch als optionales Soft-Limit / Hint,
 # nicht mehr als harte Abschneide-Grenze. Große Dateien werden
@@ -949,6 +956,8 @@ def iter_report_blocks(
         # 0 / None = kein per-File-Limit – alles wird vollständig gelesen
         header.append("- **Max File Bytes:** unlimited")
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
+    header.append(f"- **Contract:** {MERGE_CONTRACT_NAME}")
+    header.append(f"- **Contract-Version:** {MERGE_CONTRACT_VERSION}")
 
     # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
     profile_usecase = PROFILE_USECASE.get(level)
@@ -992,6 +1001,8 @@ def iter_report_blocks(
     meta.append("merge:")
     meta.append(f"  spec_version: \"{SPEC_VERSION}\"")
     meta.append(f"  profile: \"{level}\"")
+    meta.append(f"  contract: \"{MERGE_CONTRACT_NAME}\"")
+    meta.append(f"  contract_version: \"{MERGE_CONTRACT_VERSION}\"")
     meta.append(f"  plan_only: {str(plan_only).lower()}")
     meta.append(f"  max_file_bytes: {max_file_bytes}")
     meta.append(f"  scope: \"{scope_desc}\"")
