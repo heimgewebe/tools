@@ -840,13 +840,26 @@ def iter_report_blocks(
                     else:
                         status = "meta-only"
             elif level == "dev":
+                # Dev-Profil: Fokus auf arbeitsrelevante Dateien.
+                # - Source/Tests/Config/CI/Contracts → voll
+                # - Lockfiles: ab bestimmter Größe nur Manifest
+                # - Doku: nur Prioritätsdateien (README, Runbooks, ai-context) voll,
+                #         Rest Manifest
+                # - Sonstiges: Manifest
                 if "lockfile" in fi.tags:
-                    if fi.size > 20000:
+                    if fi.size > 20_000:
                         status = "meta-only"
                     else:
                         status = "full"
-                else:
+                elif fi.category in ["source", "test", "config", "ci", "contract"]:
                     status = "full"
+                elif fi.category == "doc":
+                    if is_priority_file(fi):
+                        status = "full"
+                    else:
+                        status = "meta-only"
+                else:
+                    status = "meta-only"
             elif level == "max":
                 status = "full"
             else:
@@ -978,8 +991,9 @@ def iter_report_blocks(
         header.append("- Code & Tests: Manifest + Struktur; nur Prioritätsdateien (README, Runbooks, ai-context) voll")
     elif level == "dev":
         header.append("`dev`")
-        header.append("- Alles relevante (Code, Tests, CI, Contracts, ai-context, wgx-profile) → voll")
-        header.append("- Lockfiles / Artefakte: truncated oder meta-only")
+        header.append("- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll")
+        header.append("- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest")
+        header.append("- Lockfiles / Artefakte: ab bestimmter Größe truncated oder meta-only")
     elif level == "max":
         header.append("`max`")
         header.append("- alle Textdateien → voll")
