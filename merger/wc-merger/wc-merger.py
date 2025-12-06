@@ -306,6 +306,8 @@ class MergerUI(object):
 
         ds = ui.ListDataSource(self.repos)
         ds.text_color = "white"
+        # Bei Auswahl/Deselektion die Statuszeile aktualisieren
+        ds.action = self._on_repo_selection_changed
         # deutliche Selektion: kräftiges Blau statt „grau auf schwarz“
         ds.highlight_color = "#0050ff"
         ds.tableview_cell_for_row = self._tableview_cell
@@ -500,6 +502,10 @@ class MergerUI(object):
         v.add_subview(btn)
         self.run_button = btn
 
+    def _on_repo_selection_changed(self, sender) -> None:
+        """Callback des ListDataSource – hält die Info-Zeile in Sync."""
+        self._update_repo_info()
+
     def _update_repo_info(self) -> None:
         """Zeigt unten an, wie viele Repos es gibt und wie viele ausgewählt sind."""
         if not self.repos:
@@ -514,8 +520,8 @@ class MergerUI(object):
 
         rows = tv.selected_rows or []
         if not rows:
-            # None = All – das explizit kenntlich machen
-            self.info_label.text = f"{total} Repos found (none selected = all)."
+            # Semantik „none = all“ steht bereits in der Überschrift über der Liste.
+            self.info_label.text = f"{total} Repos found."
         else:
             self.info_label.text = f"{total} Repos found ({len(rows)} selected)."
 
