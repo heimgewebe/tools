@@ -12,6 +12,7 @@ import json
 import traceback
 from pathlib import Path
 from typing import List
+from importlib.machinery import SourceFileLoader
 
 try:
     import appex  # type: ignore
@@ -158,6 +159,22 @@ def parse_human_size(text: str) -> int:
             except ValueError:
                 return 0
     return 0
+
+
+def _load_wc_extractor_module():
+    """
+    Lädt wc-extractor.py als Hilfsmodul, um Delta-Merges aus der UI
+    erzeugen zu können, ohne den Dateinamen umzubenennen.
+    """
+    script_path = Path(__file__).resolve()
+    extractor_path = script_path.with_name("wc-extractor.py")
+    if not extractor_path.exists():
+        return None
+    try:
+        return SourceFileLoader("wc_extractor_helper", str(extractor_path)).load_module()
+    except Exception as exc:
+        print(f"[wc-merger] could not load wc-extractor: {exc}")
+        return None
 
 
 # --- UI Class (Pythonista) ---
@@ -488,6 +505,20 @@ class MergerUI(object):
         load_btn.corner_radius = 6.0
         load_btn.action = self.restore_last_state
         v.add_subview(load_btn)
+        y += 38
+
+        # Neuer Komfort-Button: Delta-Merge aus letztem Import-Diff
+        delta_btn = ui.Button()
+        delta_btn.title = "Delta from Last Import"
+        delta_btn.font = ("<System>", 14)
+        delta_btn.frame = (10, y, v.width - 20, 32)
+        delta_btn.flex = "W"
+        delta_btn.background_color = "#444444"
+        delta_btn.tint_color = "white"
+        delta_btn.corner_radius = 6.0
+        delta_btn.action = self.run_delta_from_last_import
+        v.add_subview(delta_btn)
+        self.delta_button = delta_btn
 
         y += 42
 
@@ -763,6 +794,94 @@ class MergerUI(object):
             return parse_human_size(txt)
         except Exception:
             return 0
+
+    def run_delta_from_last_import(self, sender) -> None:
+        """
+        Erzeugt einen Delta-Merge aus dem neuesten Import-Diff im merges-Ordner.
+        Nutzt die Delta-Helfer aus wc-extractor.py (falls verfügbar).
+        """
+        merges_dir = get_merges_dir(self.hub)
+        try:
+            candidates = list(merges_dir.glob("*-import-diff-*.md"))
+        except Exception as exc:
+            print(f"[wc-merger] could not scan merges dir: {exc}")
+            candidates = []
+
+        if not candidates:
+            if console:
+                console.alert(
+                    "wc-merger",
+                    "No import diff found.",
+                    "OK",
+                    hide_cancel_button=True,
+                )
+            else:
+                print("[wc-merger] No import diff found.")
+            return
+
+        # jüngstes Diff wählen
+        try:
+            diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
+        except Exception as exc:
+            if console:
+                console.alert(
+                    "wc-merger",
+                    f"Failed to select latest diff: {exc}",
+                    "OK",
+                    hide_cancel_button=True,
+                )
+            else:
+                print(f"[wc-merger] Failed to select latest diff: {exc}")
+            return
+
+        name = diff_path.name
+        prefix = "-import-diff-"
+        if prefix in name:
+            repo_name = name.split(prefix, 1)[0]
+        else:
+            repo_name = name
+
+        repo_root = self.hub / repo_name
+        if not repo_root.exists():
+            msg = f"Repo root not found for diff {diff_path.name}"
+            if console:
+                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+            else:
+                print(f"[wc-merger] {msg}")
+            return
+
+        mod = _load_wc_extractor_module()
+        if mod is None or not hasattr(mod, "create_delta_merge_from_diff"):
+            msg = "Delta helper (wc-extractor) not available."
+            if console:
+                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+            else:
+                print(f"[wc-merger] {msg}")
+            return
+
+        try:
+            delta_path = mod.create_delta_merge_from_diff(
+                diff_path, repo_root, merges_dir, profile="delta-full"
+            )
+        except Exception as exc:
+            msg = f"Delta merge failed: {exc}"
+            if console:
+                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+            else:
+                print(f"[wc-merger] {msg}")
+            return
+
+        # Eventuell im Editor automatisch geöffnete Dateien wieder schließen
+        force_close_files([delta_path])
+
+        msg = f"Delta report: {delta_path.name}"
+        if console:
+            try:
+                console.hud_alert(msg)
+            except Exception:
+                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+        else:
+            print(f"[wc-merger] {msg}")
 
     def run_merge(self, sender) -> None:
         try:
