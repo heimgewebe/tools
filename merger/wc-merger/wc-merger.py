@@ -515,27 +515,44 @@ class MergerUI(object):
 
         y += 26
 
+        # --- Buttons am unteren Rand ---
+
+        # Wir richten die drei Buttons (Load, Delta, Run) von unten her aus,
+        # damit sie sich nicht gegenseitig verdecken.
+        # Reihenfolge von unten:
+        # 1. Run Merge
+        # 2. Delta
+        # 3. Load Last Config
+
+        bottom_margin = 24
+        run_height = 40
+        small_btn_height = 32
+        gap = 10
+
+        # Berechnete Y-Positionen von unten
+        run_y = v.height - bottom_margin - run_height
+        delta_y = run_y - gap - small_btn_height
+        load_y = delta_y - gap - small_btn_height
+
         # --- Load State Button ---
-        # Vor dem Run-Button, damit man alte Configs laden kann
         load_btn = ui.Button()
         load_btn.title = "Load Last Config"
         load_btn.font = ("<System>", 14)
-        # Position: gleiche Breite wie Felder, etwas niedriger als Standard-Button
-        load_btn.frame = (10, y, v.width - 20, 32)
-        load_btn.flex = "W"
+        load_btn.frame = (10, load_y, v.width - 20, small_btn_height)
+        # Fixiert am unteren Rand (Top-Margin flexibel)
+        load_btn.flex = "WT"
         load_btn.background_color = "#333333"
         load_btn.tint_color = "white"
         load_btn.corner_radius = 6.0
         load_btn.action = self.restore_last_state
         v.add_subview(load_btn)
-        y += 38
 
-        # Neuer Komfort-Button: Delta-Merge aus letztem Import-Diff
+        # --- Delta Button ---
         delta_btn = ui.Button()
         delta_btn.title = "Delta from Last Import"
         delta_btn.font = ("<System>", 14)
-        delta_btn.frame = (10, y, v.width - 20, 32)
-        delta_btn.flex = "W"
+        delta_btn.frame = (10, delta_y, v.width - 20, small_btn_height)
+        delta_btn.flex = "WT"
         delta_btn.background_color = "#444444"
         delta_btn.tint_color = "white"
         delta_btn.corner_radius = 6.0
@@ -543,19 +560,11 @@ class MergerUI(object):
         v.add_subview(delta_btn)
         self.delta_button = delta_btn
 
-        y += 42
-
+        # --- Run Button ---
         btn = ui.Button()
         btn.title = "Run Merge"
-        # Button nicht direkt an den unteren Rand kleben, damit er
-        # vom iOS-Home-Handle nicht halb verdeckt wird.
-        bottom_margin = 24
-        button_height = 40
-        safe_y = v.height - bottom_margin - button_height
-        if safe_y < y:
-            y = safe_y
-        btn.frame = (10, y, v.width - 20, button_height)
-        btn.flex = "W"
+        btn.frame = (10, run_y, v.width - 20, run_height)
+        btn.flex = "WT"
         btn.background_color = "#007aff"
         btn.tint_color = "white"
         btn.corner_radius = 6.0
