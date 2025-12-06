@@ -819,8 +819,26 @@ def iter_report_blocks(
         status = "omitted"
         if fi.is_text:
             if level == "overview":
-                if is_priority_file(fi): status = "full"
-                else: status = "meta-only"
+                if is_priority_file(fi):
+                    status = "full"
+                else:
+                    status = "meta-only"
+            elif level == "summary":
+                # Summary: Dokumentation und Konfiguration voll,
+                # Code/Test eher manifest-orientiert – außer Prioritätsdateien.
+                if fi.category in ["doc", "config", "contract", "ci"] or "ai-context" in fi.tags or "wgx-profile" in fi.tags:
+                    status = "full"
+                elif fi.category in ["source", "test"]:
+                    if is_priority_file(fi):
+                        status = "full"
+                    else:
+                        status = "meta-only"
+                else:
+                    # Fallback: wie overview – wichtiges voll, Rest meta-only
+                    if is_priority_file(fi):
+                        status = "full"
+                    else:
+                        status = "meta-only"
             elif level == "dev":
                 if "lockfile" in fi.tags:
                     if fi.size > 20000:
@@ -919,12 +937,45 @@ def iter_report_blocks(
         header.append("- **Extension Filter:** `none (all text types)`")
     header.append("")
 
-    # --- 3. Profile Description ---
+    # --- 3. Machine-readable Meta Block (für KIs) ---
+    meta: List[str] = []
+    meta.append("<!-- @meta:start -->")
+    meta.append("```yaml")
+    meta.append("merge:")
+    meta.append(f"  spec_version: \"{SPEC_VERSION}\"")
+    meta.append(f"  profile: \"{level}\"")
+    meta.append(f"  plan_only: {str(plan_only).lower()}")
+    meta.append(f"  max_file_bytes: {max_file_bytes}")
+    meta.append(f"  scope: \"{scope_desc}\"")
+    if roots:
+        roots_list = ", ".join(repr(r) for r in roots)
+        meta.append(f"  source_repos: [{roots_list}]")
+    else:
+        meta.append("  source_repos: []")
+    if path_filter:
+        meta.append(f"  path_filter: {path_filter!r}")
+    else:
+        meta.append("  path_filter: null")
+    if ext_filter:
+        exts_list = ", ".join(repr(e) for e in sorted(ext_filter))
+        meta.append(f"  ext_filter: [{exts_list}]")
+    else:
+        meta.append("  ext_filter: null")
+    meta.append("```")
+    meta.append("<!-- @meta:end -->")
+    meta.append("")
+    header.extend(meta)
+
+    # --- 4. Profile Description ---
     header.append("## Profile Description")
     if level == "overview":
         header.append("`overview`")
         header.append("- Nur: README (voll), Runbook (voll), ai-context (voll)")
         header.append("- Andere Dateien: Included = meta-only")
+    elif level == "summary":
+        header.append("`summary`")
+        header.append("- Voll: README, Runbooks, ai-context, docs/, .wgx/, .github/workflows/, zentrale Config, Contracts")
+        header.append("- Code & Tests: Manifest + Struktur; nur Prioritätsdateien (README, Runbooks, ai-context) voll")
     elif level == "dev":
         header.append("`dev`")
         header.append("- Alles relevante (Code, Tests, CI, Contracts, ai-context, wgx-profile) → voll")
