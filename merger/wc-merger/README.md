@@ -53,6 +53,75 @@ Ein idealer wc-merge erfüllt:
 - macht die **Struktur** des Repos sichtbar,
 - zeigt **Zusammenhänge** (Workflows, Contracts, Tools, Tests),
 - ermöglicht KIs, auf Basis des Merges so zu arbeiten, als hätten sie das Repo lokal ausgecheckt – nur ohne Binärmüll und ohne sensible Daten.
+- hält strikt die in `wc-merger-spec.md` definierte Struktur ein,
+- deklariert seine `Spec-Version` und den verwendeten Merge-Contract,
+- gibt KIs eine klare Aussage über Profil/Use-Case (Index, Doku, Dev, Vollsnapshot),
+- und ist maschinenlesbar validierbar.
+
+---
+
+## Meta-Contract & Schema (`wc-merge-report`)
+
+Ab Spec-Version `2.3` existiert ein formaler Merge-Contract:
+
+- **Contract-Name:** `wc-merge-report`
+- **Contract-Version:** `2.3`
+
+Jeder Report muss:
+
+1. Im Header (Block „Source & Profile“) diese Felder tragen:
+
+   ```markdown
+   - **Spec-Version:** 2.3
+   - **Contract:** wc-merge-report
+   - **Contract-Version:** 2.3
+   ```
+
+2. Im `@meta`-Block die Contract-Information maschinenlesbar haben:
+
+   ```yaml
+   @meta
+   merge:
+     spec_version: "2.3"
+     profile: "max"
+     contract: "wc-merge-report"
+     contract_version: "2.3"
+     plan_only: false
+     max_file_bytes: 0
+     scope: "single repo: `tools`"
+     source_repos:
+       - tools
+     path_filter: null
+     ext_filter: null
+   ---
+   ```
+
+Das JSON Schema für diesen Block liegt hier:
+
+- `merger/wc-merger/wc-merge-report.schema.json`
+
+---
+
+## Lokale Validierung (`validate_merge_meta.py`)
+
+Optionales Helfer-Script, um den `@meta`-Block gegen das Schema zu prüfen:
+
+```bash
+cd merger/wc-merger
+python validate_merge_meta.py ../../merges/tools_max_part1.md
+```
+
+- Exit-Code `0` → Meta-Block ist gültig.
+- Exit-Code `1` → Schema-Verletzung (Details auf STDERR).
+- Exit-Code `2` → technischer Fehler (z. B. `jsonschema`/`pyyaml` fehlt).
+
+### Abhängigkeiten
+
+- Python 3.x
+- [`PyYAML`](https://pyyaml.org/) (`pip install pyyaml`)
+- [`jsonschema`](https://github.com/python-jsonschema/jsonschema) (`pip install jsonschema`)
+
+Auf iPad/Pythonista können diese Pakete ebenfalls installiert werden (z. B. per `pip` in der integrierten Konsole).
 
 ---
 

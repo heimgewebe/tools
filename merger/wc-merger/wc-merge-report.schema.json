@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/wc-merge-report.schema.json",
+  "title": "wc-merger Report Contract (wc-merge-report v2.3)",
+  "description": "JSON Schema für den maschinenlesbaren Meta-Block (`merge:`) in WC-Merger-Reports (Spec 2.3, Contract `wc-merge-report`).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["merge"],
+  "properties": {
+    "merge": {
+      "type": "object",
+      "description": "Meta-Informationen zu diesem Merge-Report (Contract `wc-merge-report`).",
+      "additionalProperties": false,
+      "required": [
+        "spec_version",
+        "profile",
+        "contract",
+        "contract_version",
+        "plan_only",
+        "max_file_bytes",
+        "scope",
+        "source_repos",
+        "path_filter",
+        "ext_filter"
+      ],
+      "properties": {
+        "spec_version": {
+          "type": "string",
+          "description": "Version der WC-Merger-Spezifikation.",
+          "const": "2.3"
+        },
+        "profile": {
+          "type": "string",
+          "description": "Profil / Detailgrad des Merges.",
+          "enum": ["overview", "summary", "dev", "max"]
+        },
+        "contract": {
+          "type": "string",
+          "description": "Fester Contract-Name dieses Merge-Typs.",
+          "const": "wc-merge-report"
+        },
+        "contract_version": {
+          "type": "string",
+          "description": "Version des Merge-Contracts. Entspricht der Spec-Version für v2.3.",
+          "const": "2.3"
+        },
+        "plan_only": {
+          "type": "boolean",
+          "description": "true = nur Kopf/Plan/Struktur, kein Content-Block."
+        },
+        "max_file_bytes": {
+          "type": "integer",
+          "description": "Per-File-Limit in Bytes (0 = kein Limit / „unlimited“).",
+          "minimum": 0
+        },
+        "scope": {
+          "type": "string",
+          "description": "Menschlich lesbare Beschreibung des Scopes (z. B. `single repo `tools`` oder `3 repos: `wgx`, `metarepo`, …`).",
+          "minLength": 1
+        },
+        "source_repos": {
+          "type": "array",
+          "description": "Liste der beteiligten Repos (Root-Label), in der Reihenfolge des Merges.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "path_filter": {
+          "description": "Optionaler Pfad-Filter (z. B. `docs/`), ansonsten null.",
+          "type": ["string", "null"]
+        },
+        "ext_filter": {
+          "description": "Optionaler Extension-Filter (z. B. [\".md\", \".yml\"]) oder null.",
+          "type": ["array", "null"],
+          "items": {
+            "type": "string",
+            "pattern": "^\\.[A-Za-z0-9._-]+$"
+          }
+        }
+      }
+    }
+  }
+}
