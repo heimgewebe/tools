@@ -79,6 +79,7 @@ try:
         scan_repo,
         write_reports_v2,
         _normalize_ext_list,
+        ExtrasConfig,
     )
 except ImportError:
     sys.path.append(str(Path(__file__).parent))
@@ -91,6 +92,7 @@ except ImportError:
         scan_repo,
         write_reports_v2,
         _normalize_ext_list,
+        ExtrasConfig,
     )
 
 PROFILE_DESCRIPTIONS = {
@@ -239,8 +241,17 @@ class MergerUI(object):
         parser.add_argument("--max-bytes", type=int, default=0)
         # Default: ab 10 MB wird gesplittet
         parser.add_argument("--split-size", default="10")
+        parser.add_argument("--extras", default="none")
         # Ignore unknown args
         args, _ = parser.parse_known_args()
+
+        # Initiale Extras aus CLI args
+        self.extras_config = ExtrasConfig()
+        if args.extras and args.extras.lower() != "none":
+            for part in args.extras.split(","):
+                part = part.strip().lower()
+                if hasattr(self.extras_config, part):
+                    setattr(self.extras_config, part, True)
 
         v = ui.View()
         v.name = "WC-Merger"
@@ -528,6 +539,20 @@ class MergerUI(object):
 
         small_btn_height = 32
 
+        # --- Extras Button ---
+        extras_btn = ui.Button()
+        extras_btn.title = "Extras..."
+        extras_btn.font = ("<System>", 14)
+        extras_btn.frame = (10, cy, cw - 20, small_btn_height)
+        extras_btn.flex = "W"
+        extras_btn.background_color = "#333333"
+        extras_btn.tint_color = "white"
+        extras_btn.corner_radius = 6.0
+        extras_btn.action = self.show_extras_sheet
+        bottom_container.add_subview(extras_btn)
+
+        cy += small_btn_height + 10 # Gap
+
         # --- Load State Button ---
         load_btn = ui.Button()
         load_btn.title = "Load Last Config"
@@ -660,6 +685,65 @@ class MergerUI(object):
             # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven
             pass
 
+    def show_extras_sheet(self, sender):
+        """Zeigt ein Sheet zur Konfiguration der Extras."""
+        s = ui.View()
+        s.name = "Extras"
+        s.background_color = "#222222"
+        s.frame = (0, 0, 300, 340)
+
+        y = 20
+        margin = 20
+        w = 300 - 2 * margin
+
+        lbl = ui.Label(frame=(margin, y, w, 40))
+        lbl.text = "Optionale Zusatzanalysen\n(Health, Organism, etc.)"
+        lbl.number_of_lines = 2
+        lbl.text_color = "white"
+        lbl.alignment = ui.ALIGN_CENTER
+        s.add_subview(lbl)
+        y += 50
+
+        # Helper for switches
+        def add_switch(key, title):
+            nonlocal y
+            sw = ui.Switch()
+            sw.value = getattr(self.extras_config, key)
+            sw.name = key
+            # Action: direkt in self.extras_config schreiben
+            def action(sender):
+                setattr(self.extras_config, key, sender.value)
+            sw.action = action
+            sw.frame = (w - 60, y, 60, 32)
+
+            l = ui.Label(frame=(margin, y, w - 70, 32))
+            l.text = title
+            l.text_color = "white"
+
+            s.add_subview(l)
+            s.add_subview(sw)
+            y += 40
+
+        add_switch("health", "Repo Health Checks")
+        add_switch("organism_index", "Organism Index")
+        add_switch("fleet_panorama", "Fleet Panorama (Multi-Repo)")
+        add_switch("delta_reports", "Delta Reports (wenn Diff verfügbar)")
+        add_switch("augment_sidecar", "Augment Sidecar (Playbooks)")
+
+        # Close button
+        y += 20
+        btn = ui.Button(frame=(margin, y, w, 40))
+        btn.title = "Done"
+        btn.background_color = "#007aff"
+        btn.tint_color = "white"
+        btn.corner_radius = 6
+        def close_action(sender):
+            s.close()
+        btn.action = close_action
+        s.add_subview(btn)
+
+        s.present("sheet")
+
     def on_profile_changed(self, sender):
         """
         Aktualisiert den Hint-Text und setzt sinnvolle Defaults
@@ -776,6 +860,13 @@ class MergerUI(object):
             "max_bytes": self.max_field.text or "",
             "split_mb": self.split_field.text or "",
             "plan_only": bool(self.plan_only_switch.value),
+            "extras": {
+                "health": self.extras_config.health,
+                "organism_index": self.extras_config.organism_index,
+                "fleet_panorama": self.extras_config.fleet_panorama,
+                "delta_reports": self.extras_config.delta_reports,
+                "augment_sidecar": self.extras_config.augment_sidecar,
+            }
         }
         try:
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -814,6 +905,15 @@ class MergerUI(object):
         self.max_field.text = data.get("max_bytes", "")
         self.split_field.text = data.get("split_mb", "")
         self.plan_only_switch.value = bool(data.get("plan_only", False))
+
+        # Restore Extras
+        extras_data = data.get("extras", {})
+        if extras_data:
+            self.extras_config.health = extras_data.get("health", False)
+            self.extras_config.organism_index = extras_data.get("organism_index", False)
+            self.extras_config.fleet_panorama = extras_data.get("fleet_panorama", False)
+            self.extras_config.delta_reports = extras_data.get("delta_reports", False)
+            self.extras_config.augment_sidecar = extras_data.get("augment_sidecar", False)
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
@@ -1041,6 +1141,7 @@ class MergerUI(object):
             debug=False,
             path_filter=path_contains,
             ext_filter=extensions or None,
+            extras=self.extras_config,
         )
 
         if not out_paths:
@@ -1087,6 +1188,7 @@ def main_cli():
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
+    parser.add_argument("--extras", help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar) or 'none'", default="none")
 
     args = parser.parse_args()
 
@@ -1129,6 +1231,15 @@ def main_cli():
         split_size = parse_human_size(args.split_size)
         print(f"Splitting at {split_size} bytes")
 
+    extras_config = ExtrasConfig()
+    if args.extras and args.extras.lower() != "none":
+        for part in args.extras.split(","):
+            part = part.strip().lower()
+            if hasattr(extras_config, part):
+                setattr(extras_config, part, True)
+            else:
+                print(f"Warning: Unknown extra '{part}' ignored.")
+
     merges_dir = get_merges_dir(hub)
     out_paths = write_reports_v2(
         merges_dir,
@@ -1142,6 +1253,7 @@ def main_cli():
         debug=args.debug,
         path_filter=None,
         ext_filter=None,
+        extras=extras_config,
     )
 
     print(f"Generated {len(out_paths)} report(s):")
