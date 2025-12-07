@@ -1,3 +1,14 @@
+# WC-Merge Report (Part 2/3)
+
+<a id="file-test-f2-py"></a>
+### `f2.py`
+- Category: source
+- Tags: -
+- Size: 48.59 KB
+- Included: full
+- MD5: md5
+
+```python
 # -*- coding: utf-8 -*-
 
 """
@@ -961,7 +972,7 @@ def iter_report_blocks(
 
     # --- 1. Header ---
     header = []
-    header.append(f"# WC-Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
+    header.append(f"# WC-Merger Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
     # --- 2. Source & Profile ---
@@ -1359,9 +1370,6 @@ def write_reports_v2(
             # - Jetzt (nach allen flushes) können wir die Header 1/1, 1/3, 2/3, … sauber setzen.
             total_parts = len(local_out_paths)
             if total_parts >= 1:
-                prefix_part = "# WC-Merge Report (Part "
-                prefix_main = "# WC-Merge Report"
-
                 for idx, path in enumerate(local_out_paths, start=1):
                     try:
                         text = path.read_text(encoding="utf-8")
@@ -1373,24 +1381,18 @@ def write_reports_v2(
                     if not lines:
                         continue
 
-                    # Robuste Header-Erkennung: BOM und Whitespace tolerieren
-                    header_idx = None
-                    for i, line in enumerate(lines):
-                        stripped = line.lstrip("\ufeff")  # Remove BOM if present
-                        if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
-                            header_idx = i
-                            break
+                    # Anpassung: Auch den Standard-Header (Part 1) erkennen
+                    prefix_part = "# WC-Merge Report (Part "
+                    prefix_main = "# WC-Merger Report"
 
-                    if header_idx is None:
-                        continue
-
-                    # Nur die Header-Zeile ersetzen, Rest unverändert lassen.
-                    lines[header_idx] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
-                    try:
-                        path.write_text("".join(lines), encoding="utf-8")
-                    except Exception:
-                        # Schreibfehler nicht fatal machen.
-                        pass
+                    if lines[0].startswith(prefix_part) or lines[0].startswith(prefix_main):
+                        # Nur die erste Zeile ersetzen, Rest unverändert lassen.
+                        lines[0] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
+                        try:
+                            path.write_text("".join(lines), encoding="utf-8")
+                        except Exception:
+                            # Schreibfehler nicht fatal machen.
+                            pass
 
             out_paths.extend(local_out_paths)
 
@@ -1428,3 +1430,7 @@ def write_reports_v2(
             process_and_write(s_files, [s_root], lambda part=None: make_output_filename(merges_dir, [s_name], "repo", detail, part))
 
     return out_paths
+
+```
+
+[↑ Zurück zum Manifest](#manifest)
