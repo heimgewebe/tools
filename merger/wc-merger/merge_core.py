@@ -48,6 +48,9 @@ ALLOWED_TAGS = {
     "wgx-profile",
 }
 
+# Delta Report configuration
+MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
+
 # Directories to ignore
 SKIP_DIRS = {
     ".git",
@@ -199,14 +202,16 @@ class HealthCollector:
         )
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
         has_contracts = any(f.category == "contract" for f in files)
-        # Enhanced AI context detection: check tags and file paths
-        has_ai_context = any(
-            "ai-context" in (f.tags or []) or 
-            "ai-context" in str(f.rel_path).lower() or
-            str(f.rel_path).endswith(".ai-context.yml") or
-            "ai-context" in f.rel_path.parts
-            for f in files
-        )
+        # Enhanced AI context detection: check tags and file paths (cached to avoid repeated conversions)
+        has_ai_context = False
+        for f in files:
+            if "ai-context" in (f.tags or []):
+                has_ai_context = True
+                break
+            path_lower = str(f.rel_path).lower()
+            if "ai-context" in path_lower or path_lower.endswith(".ai-context.yml") or "ai-context" in f.rel_path.parts:
+                has_ai_context = True
+                break
 
         # Check for unknown categories/tags
         unknown_categories = []
@@ -688,8 +693,8 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
         if "runbook" in fi.tags:
             roles.append("execution")
     
-    # Role from path patterns
-    path_str = str(fi.rel_path).replace("\\", "/").lower()
+    # Role from path patterns (cache normalized path)
+    path_str = fi.rel_path.as_posix().lower()
     
     # Contracts directory
     if "contracts/" in path_str and fi.ext in {".json", ".yaml", ".yml"}:
@@ -711,9 +716,9 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
         if "ai-context" not in roles:
             roles.append("ai-context")
     
-    # Governance files (metarepo, policies, ADRs)
-    if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
-        if "policy" not in roles:
+    # Governance files (metarepo, policies, ADRs) - check role first to avoid expensive pattern matching
+    if "policy" not in roles:
+        if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
             roles.append("policy")
     
     # Documentation role
@@ -1211,23 +1216,23 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
     # Detail sections
     if added:
         lines.append("### Added Files")
-        for f in added[:10]:  # Limit to first 10
+        for f in added[:MAX_DELTA_FILES]:
             lines.append(f"- `{f}`")
-        if len(added) > 10:
-            lines.append(f"- _(and {len(added) - 10} more)_")
+        if len(added) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(added) - MAX_DELTA_FILES} more)_")
         lines.append("")
     
     if removed:
         lines.append("### Removed Files")
-        for f in removed[:10]:  # Limit to first 10
+        for f in removed[:MAX_DELTA_FILES]:
             lines.append(f"- `{f}`")
-        if len(removed) > 10:
-            lines.append(f"- _(and {len(removed) - 10} more)_")
+        if len(removed) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(removed) - MAX_DELTA_FILES} more)_")
         lines.append("")
     
     if changed:
         lines.append("### Changed Files")
-        for f in changed[:10]:  # Limit to first 10
+        for f in changed[:MAX_DELTA_FILES]:
             if isinstance(f, dict):
                 path = f.get("path", "unknown")
                 size_delta = f.get("size_delta", 0)
@@ -1239,8 +1244,8 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
                     lines.append(f"- `{path}`")
             else:
                 lines.append(f"- `{f}`")
-        if len(changed) > 10:
-            lines.append(f"- _(and {len(changed) - 10} more)_")
+        if len(changed) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(changed) - MAX_DELTA_FILES} more)_")
         lines.append("")
     
     lines.append("<!-- @delta:end -->")
