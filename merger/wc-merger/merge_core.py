@@ -48,6 +48,9 @@ ALLOWED_TAGS = {
     "wgx-profile",
 }
 
+# Delta Report configuration
+MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
+
 # Directories to ignore
 SKIP_DIRS = {
     ".git",
@@ -199,7 +202,16 @@ class HealthCollector:
         )
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
         has_contracts = any(f.category == "contract" for f in files)
-        has_ai_context = any("ai-context" in (f.tags or []) for f in files)
+        # Enhanced AI context detection: check tags and file paths (cached to avoid repeated conversions)
+        has_ai_context = False
+        for f in files:
+            if "ai-context" in (f.tags or []):
+                has_ai_context = True
+                break
+            path_lower = str(f.rel_path).lower()
+            if "ai-context" in path_lower or path_lower.endswith(".ai-context.yml") or "ai-context" in f.rel_path.parts:
+                has_ai_context = True
+                break
 
         # Check for unknown categories/tags
         unknown_categories = []
@@ -328,6 +340,33 @@ class HealthCollector:
         lines.append("<!-- @health:end -->")
         lines.append("")
         return "\n".join(lines)
+
+
+def _build_extras_meta(extras: "ExtrasConfig") -> Dict[str, bool]:
+    """
+    Hilfsfunktion: baut den extras-Block für den @meta-Contract.
+    Nur aktivierte Flags werden gesetzt, damit das Schema schlank bleibt.
+    """
+    extras_meta: Dict[str, bool] = {}
+    if extras.health:
+        extras_meta["health"] = True
+    if extras.organism_index:
+        extras_meta["organism_index"] = True
+    if extras.fleet_panorama:
+        extras_meta["fleet_panorama"] = True
+    if extras.augment_sidecar:
+        extras_meta["augment_sidecar"] = True
+    if extras.delta_reports:
+        extras_meta["delta_reports"] = True
+    return extras_meta
+
+
+def _build_augment_meta(sources: List[Path]) -> Optional[Dict[str, Any]]:
+    """
+    Nutzt dieselbe Logik wie der Augment-Block, um das Sidecar im Meta zu verlinken.
+    """
+    sidecar = _find_augment_file_for_sources(sources)
+    return {"sidecar": sidecar.name} if sidecar else None
 
 
 def _find_augment_file_for_sources(sources: List[Path]) -> Optional[Path]:
@@ -621,9 +660,72 @@ class FileInfo(object):
         self.reason = reason
         self.content = content
         self.anchor = "" # Will be set during report generation
+        self.roles = [] # Will be computed during report generation
 
 
 # --- Utilities ---
+
+def compute_file_roles(fi: "FileInfo") -> List[str]:
+    """
+    Compute semantic roles for a file based on category, tags, and path.
+    Roles help AI agents understand the purpose/function of files.
+    
+    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, governance, doc
+    """
+    roles = []
+    
+    # Role from category
+    if fi.category == "contract":
+        roles.append("contract")
+    
+    # Roles from tags
+    if fi.tags:
+        if "ai-context" in fi.tags:
+            roles.append("ai-context")
+        if "ci" in fi.tags:
+            roles.append("ci")
+        if "wgx-profile" in fi.tags:
+            roles.append("wgx-profile")
+        if "adr" in fi.tags:
+            roles.append("policy")
+        if "script" in fi.tags:
+            roles.append("tool")
+        if "runbook" in fi.tags:
+            roles.append("execution")
+    
+    # Role from path patterns (cache normalized path)
+    path_str = fi.rel_path.as_posix().lower()
+    
+    # Contracts directory
+    if "contracts/" in path_str and fi.ext in {".json", ".yaml", ".yml"}:
+        if "contract" not in roles:
+            roles.append("contract")
+    
+    # CI/CD pipelines
+    if ".github/workflows/" in path_str:
+        if "ci" not in roles:
+            roles.append("ci")
+    
+    # WGX profiles
+    if ".wgx/" in path_str and "profile" in path_str:
+        if "wgx-profile" not in roles:
+            roles.append("wgx-profile")
+    
+    # AI context files
+    if "ai-context" in path_str or path_str.endswith(".ai-context.yml"):
+        if "ai-context" not in roles:
+            roles.append("ai-context")
+    
+    # Governance files (metarepo, policies, ADRs) - check role first to avoid expensive pattern matching
+    if "policy" not in roles:
+        if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
+            roles.append("policy")
+    
+    # Documentation role
+    if fi.category == "doc" and "doc" not in roles:
+        roles.append("doc")
+    
+    return roles
 
 def is_noise_file(fi: "FileInfo") -> bool:
     """
@@ -1082,6 +1184,74 @@ def is_priority_file(fi: FileInfo) -> bool:
     if fi.rel_path.name.lower() == "readme.md": return True
     return False
 
+def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
+    """
+    Render Delta Report block from delta metadata.
+    Shows what changed between base and current import.
+    """
+    lines = []
+    lines.append("<!-- @delta:start -->")
+    lines.append("## ♻ Delta Report")
+    lines.append("")
+    
+    # Extract info from delta_meta
+    base_ts = delta_meta.get("base_timestamp", "unknown")
+    current_ts = delta_meta.get("current_timestamp", "unknown")
+    
+    lines.append(f"- **Base Import:** {base_ts}")
+    lines.append(f"- **Current:** {current_ts}")
+    lines.append("")
+    
+    # Summary
+    added = delta_meta.get("files_added", [])
+    removed = delta_meta.get("files_removed", [])
+    changed = delta_meta.get("files_changed", [])
+    
+    lines.append("**Summary:**")
+    lines.append(f"- Files added: {len(added)}")
+    lines.append(f"- Files removed: {len(removed)}")
+    lines.append(f"- Files changed: {len(changed)}")
+    lines.append("")
+    
+    # Detail sections
+    if added:
+        lines.append("### Added Files")
+        for f in added[:MAX_DELTA_FILES]:
+            lines.append(f"- `{f}`")
+        if len(added) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(added) - MAX_DELTA_FILES} more)_")
+        lines.append("")
+    
+    if removed:
+        lines.append("### Removed Files")
+        for f in removed[:MAX_DELTA_FILES]:
+            lines.append(f"- `{f}`")
+        if len(removed) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(removed) - MAX_DELTA_FILES} more)_")
+        lines.append("")
+    
+    if changed:
+        lines.append("### Changed Files")
+        for f in changed[:MAX_DELTA_FILES]:
+            if isinstance(f, dict):
+                path = f.get("path", "unknown")
+                size_delta = f.get("size_delta", 0)
+                if size_delta > 0:
+                    lines.append(f"- `{path}` (+{size_delta} bytes)")
+                elif size_delta < 0:
+                    lines.append(f"- `{path}` ({size_delta} bytes)")
+                else:
+                    lines.append(f"- `{path}`")
+            else:
+                lines.append(f"- `{f}`")
+        if len(changed) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(changed) - MAX_DELTA_FILES} more)_")
+        lines.append("")
+    
+    lines.append("<!-- @delta:end -->")
+    lines.append("")
+    return "\n".join(lines)
+
 def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
     """
     Checks for objective inconsistencies specified in the spec.
@@ -1137,6 +1307,7 @@ def iter_report_blocks(
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
+    delta_meta: Optional[Dict[str, Any]] = None,
 ) -> Iterator[str]:
     if extras is None:
         extras = ExtrasConfig.none()
@@ -1159,6 +1330,9 @@ def iter_report_blocks(
         rel_id = fi.rel_path.as_posix().replace("/", "-").replace(".", "-")
         anchor = f"file-{fi.root_label}-{rel_id}"
         fi.anchor = anchor
+        
+        # Compute file roles
+        fi.roles = compute_file_roles(fi)
 
         # Debug checks
         # Kategorien strikt gemäß Spec v2.3:
@@ -1278,10 +1452,28 @@ def iter_report_blocks(
         if "wgx-profile" in (fi.tags or []):
             organism_wgx_profiles.append(fi)
 
+    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
+    # Re-calculate or re-use existing categorization?
+    # We need files_by_root NOW for Health Check, before Header.
+    # It was originally calculated later (at Plan block).
+    # So we move the calculation here.
+    files_by_root: Dict[str, List[FileInfo]] = {}
+    for fi in files:
+        files_by_root.setdefault(fi.root_label, []).append(fi)
+
     # jetzt, nachdem processed_files existiert, die Coverage pro Root berechnen
     for fi, status in processed_files:
         if status in ("full", "truncated"):
             included_by_root[fi.root_label] = included_by_root.get(fi.root_label, 0) + 1
+
+    # Pre-Calculation for Health (needed for Meta Block)
+    health_collector = None
+    if extras.health:
+        health_collector = HealthCollector()
+        # Analyze each repo
+        for root in sorted(files_by_root.keys()):
+            root_files = files_by_root[root]
+            health_collector.analyze_repo(root, root_files)
 
     # --- 1. Header ---
     header = []
@@ -1336,126 +1528,91 @@ def iter_report_blocks(
         )
     else:
         header.append("- **Extension Filter:** `none (all text types)`")
+    
+    # Coverage in header (for quick AI assessment)
+    if text_files:
+        coverage_pct = int((included_count / len(text_files)) * 100)
+        header.append(f"- **Coverage:** {coverage_pct}% ({included_count}/{len(text_files)} text files with content)")
+    
     header.append("")
+    
+    # Prepare filter descriptions for meta block
+    path_filter_desc = path_filter if path_filter else "none (full tree)"
+    ext_filter_desc = ", ".join(sorted(ext_filter)) if ext_filter else "none (all text types)"
 
     # --- 3. Machine-readable Meta Block (für KIs) ---
-    meta: List[str] = []
-    meta.append("<!-- @meta:start -->")
-    meta.append("```yaml")
-    meta.append("merge:")
-    meta.append(f"  spec_version: \"{SPEC_VERSION}\"")
-    meta.append(f"  profile: \"{level}\"")
-    meta.append(f"  contract: \"{MERGE_CONTRACT_NAME}\"")
-    meta.append(f"  contract_version: \"{MERGE_CONTRACT_VERSION}\"")
-    meta.append(f"  plan_only: {str(plan_only).lower()}")
-    meta.append(f"  max_file_bytes: {max_file_bytes}")
-    meta.append(f"  scope: \"{scope_desc}\"")
-    if roots:
-        roots_list = ", ".join(repr(r) for r in roots)
-        meta.append(f"  source_repos: [{roots_list}]")
-    else:
-        meta.append("  source_repos: []")
-    if path_filter:
-        meta.append(f"  path_filter: {path_filter!r}")
-    else:
-        meta.append("  path_filter: null")
-    if ext_filter:
-        exts_list = ", ".join(repr(e) for e in sorted(ext_filter))
-        meta.append(f"  ext_filter: [{exts_list}]")
-    else:
-        meta.append("  ext_filter: null")
+    # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
+    if not plan_only:
+        meta_lines: List[str] = []
+        meta_lines.append("<!-- @meta:start -->")
+        meta_lines.append("```yaml")
 
-    # Extras Configuration (optional)
-    if extras and any(asdict(extras).values()):
-        meta.append("  extras:")
-        for k, v in asdict(extras).items():
-            meta.append(f"    {k}: {str(v).lower()}")
+        meta_dict: Dict[str, Any] = {
+            "merge": {
+                "spec_version": SPEC_VERSION,
+                "profile": level,
+                "contract": MERGE_CONTRACT_NAME,
+                "contract_version": MERGE_CONTRACT_VERSION,
+                "plan_only": plan_only,
+                "max_file_bytes": max_file_bytes,
+                "scope": scope_desc,
+                "source_repos": sorted([s.name for s in sources]) if sources else [],
+                "path_filter": path_filter_desc,
+                "ext_filter": ext_filter_desc,
+            }
+        }
 
-    # Health metadata (if health checks are enabled)
-    if extras and extras.health:
-        # We'll compute health status here for the meta block
-        # Group files by root for health analysis
-        temp_files_by_root: Dict[str, List[FileInfo]] = {}
-        for fi in files:
-            temp_files_by_root.setdefault(fi.root_label, []).append(fi)
-        
-        # Quick health check for overall status
-        health_statuses = []
-        missing_items = []
-        for root in sorted(temp_files_by_root.keys()):
-            root_files = temp_files_by_root[root]
-            has_readme = any(f.rel_path.name.lower() == "readme.md" for f in root_files)
-            has_wgx = any(".wgx" in f.rel_path.parts and str(f.rel_path).endswith("profile.yml") for f in root_files)
-            has_ci = any("ci" in (f.tags or []) for f in root_files)
-            has_contracts = any(f.category == "contract" for f in root_files)
-            
-            warnings = 0
-            if not has_readme: warnings += 1
-            if not has_wgx: warnings += 1
-            if not has_ci: warnings += 1
-            
-            if warnings >= 2:
-                health_statuses.append("warn")
+        # Extras-Flags
+        if extras:
+            extras_meta = _build_extras_meta(extras)
+            if extras_meta:
+                meta_dict["merge"]["extras"] = extras_meta
+
+        # Health-Status
+        if extras and extras.health and health_collector:
+            # Determine overall status from collector results
+            all_health = health_collector.get_all_health()
+            if any(h.status == "critical" for h in all_health):
+                overall = "critical"
+            elif any(h.status == "warn" for h in all_health):
+                overall = "warning"
             else:
-                health_statuses.append("ok")
-            
-            if not has_contracts:
-                if "contracts" not in missing_items:
-                    missing_items.append("contracts")
-            if not has_ci:
-                if "ci" not in missing_items:
-                    missing_items.append("ci")
-        
-        # Overall status
-        if "warn" in health_statuses:
-            overall_status = "warning"
+                overall = "ok"
+
+            missing_set = set()
+            for h in all_health:
+                # Naive mapping logic for 'missing' based on recommendations/warnings
+                if not h.has_contracts: missing_set.add("contracts")
+                if not h.has_ci_workflows: missing_set.add("ci")
+                if not h.has_wgx_profile: missing_set.add("wgx-profile")
+
+            meta_dict["merge"]["health"] = {
+                "status": overall,
+                "missing": sorted(list(missing_set)),
+            }
+
+        # Delta-Metadaten
+        if extras and extras.delta_reports and delta_meta:
+             meta_dict["merge"]["delta"] = delta_meta
+
+        # Augment-Metadaten
+        if extras and extras.augment_sidecar:
+            augment_meta = _build_augment_meta(sources)
+            if augment_meta:
+                meta_dict["merge"]["augment"] = augment_meta
+
+        # Dump to YAML
+        if "yaml" in globals():
+            meta_yaml = yaml.safe_dump(meta_dict, sort_keys=False)
+            for line in meta_yaml.rstrip("\n").splitlines():
+                meta_lines.append(line)
         else:
-            overall_status = "ok"
-        
-        meta.append("  health:")
-        meta.append(f"    status: \"{overall_status}\"")
-        if missing_items:
-            meta.append(f"    missing: [{', '.join(repr(m) for m in missing_items)}]")
+             meta_lines.append("# YAML support missing")
 
-    # Delta metadata (Stage 3: placeholder for delta reports)
-    if extras and extras.delta_reports:
-        # Delta information would be populated if comparing against a base snapshot
-        # For now, just mark that delta is enabled
-        meta.append("  delta:")
-        meta.append("    enabled: true")
-        meta.append("    # Delta details populated when comparing snapshots")
-
-    # Augment metadata (Stage 4: placeholder for augment sidecar)
-    if extras and extras.augment_sidecar:
-        # Check if augment sidecar file exists
-        # Convention: {repo_name}_augment.yml in the repo directory or parent
-        augment_file = None
-        for source in sources:
-            try:
-                # Try in the repo directory itself
-                potential_augment = source / f"{source.name}_augment.yml"
-                if potential_augment.exists():
-                    augment_file = f"{source.name}_augment.yml"
-                    break
-                # Try in parent directory
-                potential_augment = source.parent / f"{source.name}_augment.yml"
-                if potential_augment.exists():
-                    augment_file = f"../{source.name}_augment.yml"
-                    break
-            except (OSError, PermissionError):
-                # Skip this source if we can't access it
-                continue
-        
-        meta.append("  augment:")
-        if augment_file:
-            meta.append(f"    sidecar: \"{augment_file}\"")
-        else:
-            meta.append("    sidecar: null")
-
-    meta.append("```")
-    meta.append("<!-- @meta:end -->")
-    meta.append("")
-    header.extend(meta)
+        meta_lines.append("```")
+        meta_lines.append("<!-- @meta:end -->")
+        meta_lines.append("")
+        header.extend(meta_lines)
 
     # --- 4. Profile Description ---
     header.append("## Profile Description")
@@ -1503,9 +1660,7 @@ def iter_report_blocks(
     plan.append("")
 
     # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    files_by_root: Dict[str, List[FileInfo]] = {}
-    for fi in files:
-        files_by_root.setdefault(fi.root_label, []).append(fi)
+    # files_by_root was calculated earlier for Health Check
 
     if files_by_root:
         plan.append("### Repo Snapshots")
@@ -1553,13 +1708,8 @@ def iter_report_blocks(
     yield "\n".join(plan) + "\n"
 
     # --- Health Report (Stage 1: Repo Doctor) ---
-    if extras.health:
-        health_collector = HealthCollector()
-        # Analyze each repo
-        for root in sorted(files_by_root.keys()):
-            root_files = files_by_root[root]
-            health_collector.analyze_repo(root, root_files)
-        
+    # Note: health_collector was already populated before header generation
+    if extras.health and health_collector:
         health_report = health_collector.render_markdown()
         if health_report:
             yield health_report
@@ -1660,6 +1810,12 @@ def iter_report_blocks(
         augment_block = _render_augment_block(sources)
         if augment_block:
             yield augment_block
+    
+    # --- Delta Report (Stage 3: Content) ---
+    if extras.delta_reports and delta_meta:
+        delta_block = _render_delta_block(delta_meta)
+        if delta_block:
+            yield delta_block
 
     if plan_only:
         return
@@ -1719,10 +1875,11 @@ def iter_report_blocks(
     manifest: List[str] = []
     manifest.append("## 🧾 Manifest {#manifest}")
     manifest.append("")
-    manifest.append("| Root | Path | Category | Tags | Size | Included | MD5 |")
-    manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
+    manifest.append("| Root | Path | Category | Tags | Roles | Size | Included | MD5 |")
+    manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
     for fi, status in processed_files:
         tags_str = ", ".join(fi.tags) if fi.tags else "-"
+        roles_str = ", ".join(fi.roles) if fi.roles else "-"
         # Noise kennzeichnen, ohne das Schema zu ändern
         included_label = status
         if is_noise_file(fi):
@@ -1731,7 +1888,7 @@ def iter_report_blocks(
         # Link in Manifest
         path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
         manifest.append(
-            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | "
+            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
             f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
         )
     manifest.append("")
@@ -1795,8 +1952,9 @@ def generate_report_content(
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
+    delta_meta: Optional[Dict[str, Any]] = None,
 ) -> str:
-    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug, path_filter, ext_filter, extras))
+    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta))
     if plan_only:
         return report
     try:
@@ -1823,6 +1981,7 @@ def write_reports_v2(
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
+    delta_meta: Optional[Dict[str, Any]] = None,
 ) -> List[Path]:
     out_paths = []
 
@@ -1854,7 +2013,7 @@ def write_reports_v2(
                 else:
                     current_size = 0
 
-            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras)
+            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta)
 
             for block in iterator:
                 block_len = len(block.encode('utf-8'))
@@ -1910,7 +2069,7 @@ def write_reports_v2(
 
         else:
             # Standard single file
-            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras)
+            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta)
             out_path = output_filename_base_func(part=None)
             out_path.write_text(content, encoding="utf-8")
             out_paths.append(out_path)
