@@ -173,7 +173,7 @@ class RepoHealth:
 
 
 class HealthCollector:
-    """Sammelt Health-Checks für Repos (Stage 1: Repo Doctor)."""
+    """Collects health checks for repositories (Stage 1: Repo Doctor)."""
 
     def __init__(self) -> None:
         self._repo_health: Dict[str, RepoHealth] = {}
@@ -1278,16 +1278,20 @@ def iter_report_blocks(
         # Convention: {repo_name}_augment.yml in the repo directory or parent
         augment_file = None
         for source in sources:
-            # Try in the repo directory itself
-            potential_augment = source / f"{source.name}_augment.yml"
-            if potential_augment.exists():
-                augment_file = f"{source.name}_augment.yml"
-                break
-            # Try in parent directory
-            potential_augment = source.parent / f"{source.name}_augment.yml"
-            if potential_augment.exists():
-                augment_file = f"../{source.name}_augment.yml"
-                break
+            try:
+                # Try in the repo directory itself
+                potential_augment = source / f"{source.name}_augment.yml"
+                if potential_augment.exists():
+                    augment_file = f"{source.name}_augment.yml"
+                    break
+                # Try in parent directory
+                potential_augment = source.parent / f"{source.name}_augment.yml"
+                if potential_augment.exists():
+                    augment_file = f"../{source.name}_augment.yml"
+                    break
+            except (OSError, PermissionError):
+                # Skip this source if we can't access it
+                continue
         
         meta.append("  augment:")
         if augment_file:
@@ -1415,7 +1419,7 @@ def iter_report_blocks(
         organism_index.append("")
         
         if organism_ai_ctx:
-            organism_index.append("**AI-Kontext:**")
+            organism_index.append("**AI-Context:**")
             for fi in organism_ai_ctx:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
