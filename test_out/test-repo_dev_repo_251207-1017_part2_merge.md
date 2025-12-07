@@ -1,3 +1,14 @@
+# WC-Merge Report (Part 2/3)
+
+<a id="file-test-f2-py"></a>
+### `f2.py`
+- Category: source
+- Tags: -
+- Size: 48.59 KB
+- Included: full
+- MD5: md5
+
+```python
 # -*- coding: utf-8 -*-
 
 """
@@ -1419,3 +1430,7 @@ def write_reports_v2(
             process_and_write(s_files, [s_root], lambda part=None: make_output_filename(merges_dir, [s_name], "repo", detail, part))
 
     return out_paths
+
+```
+
+[↑ Zurück zum Manifest](#manifest)

@@ -34,6 +34,43 @@ Header muss enthalten:
 
 ---
 
+### TODO: Super-Merger / Extras (für google-labs-jules[bot])
+
+Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
+
+1. **Extras-Schalter in der UI implementieren**
+   - Flags in `MergerUI`:
+     - Repo Health Checks
+     - Organism Index
+     - Fleet Panorama (Multi-Repo)
+     - Delta Reports (wenn Diff vorhanden)
+     - Augment Sidecar (Playground-Block)
+   - Alle Extras müssen rein additive Textblöcke sein.
+     Nichts an der Kernstruktur (Source & Profile → … → Content) entfernen oder umsortieren.
+
+2. **Header / Meta konsistent machen**
+   - `Declared Purpose` je Profil korrekt setzen:
+     - overview → `Tools – Index`
+     - summary → `Tools – Doku/Kontext`
+     - dev → `Tools – Code/Review Snapshot`
+     - max → `Tools – Vollsnapshot`
+   - Coverage-Zeile ergänzen, z. B.:
+     - `Coverage: 17/35 Dateien mit vollem Inhalt`
+   - Im `@meta`-Block:
+     - `merge.extras.*`-Flags für alle aktivierten Extras ergänzen.
+     - Schema `wc-merge-report.schema.json` entsprechend erweitern.
+
+3. **Multi-Part-Merges klar kennzeichnen**
+   - Dateinamen bleiben im bisherigen Schema (`…_part1_merge.md`, `…_part2_merge.md`, …).
+   - Im Header jeder Datei:
+     - `# WC-Merge Report (Part N/M)` setzen (bei Single-Part-Merges `1/1`).
+
+4. **Validierung**
+   - Alle Änderungen strikt gegen `wc-merge-report.schema.json` und die oben definierte Abschnittsreihenfolge prüfen.
+   - Keine neuen Kategorien/Tags einführen, solange die Spec nicht explizit erweitert wird.
+
+---
+
 ## 3a. Größenlimits (Size Behaviour)
 
 - Es gibt **kein hartes globales Merge-Size-Limit**.

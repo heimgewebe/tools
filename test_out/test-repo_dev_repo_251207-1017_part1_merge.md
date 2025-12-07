@@ -1,3 +1,110 @@
+# WC-Merge Report (Part 1/3)
+
+## Source & Profile
+- **Source:**
+- **Profile:** `dev`
+- **Generated At:** 2025-12-07 10:17:36 (UTC)
+- **Max File Bytes:** unlimited
+- **Spec-Version:** 2.3
+- **Contract:** wc-merge-report
+- **Contract-Version:** 2.3
+- **Profile Use-Case:** Tools – Code/Review Snapshot
+- **Declared Purpose:** Tools – Index
+- **Scope:** single repo `test`
+- **Path Filter:** `none (full tree)`
+- **Extension Filter:** `none (all text types)`
+
+<!-- @meta:start -->
+```yaml
+merge:
+  spec_version: "2.3"
+  profile: "dev"
+  contract: "wc-merge-report"
+  contract_version: "2.3"
+  plan_only: false
+  max_file_bytes: 0
+  scope: "single repo `test`"
+  source_repos: ['test']
+  path_filter: null
+  ext_filter: null
+```
+<!-- @meta:end -->
+
+## Profile Description
+`dev`
+- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll
+- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest
+- Lockfiles / Artefakte: ab bestimmter Größe meta-only
+
+## Reading Plan
+1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`
+2. Danach: `Structure` -> `Manifest` -> `Content`
+3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“
+
+## Plan
+
+- **Total Files:** 3 (Text: 3)
+- **Total Size:** 145.76 KB
+- **Included Content:** 3 files (full)
+- **Coverage:** 3/3 Textdateien mit Inhalt (`full`/`truncated`)
+
+### Repo Snapshots
+
+- `test` → 3 files (3 relevant text, 145.76 KB, 3 with content)
+
+**Folder Highlights:**
+
+### Organism Overview
+
+- AI-Kontext-Organe: 0 Datei(en) (`ai-context`)
+- Contracts: 0 Datei(en) (category = `contract`)
+- Pipelines (CI/CD): 0 Datei(en) (Tag `ci`)
+- Fleet-/WGX-Profile: 0 Datei(en) (Tag `wgx-profile`)
+
+## 📁 Structure
+
+```
+📁 test/
+    📄 f1.py
+    📄 f2.py
+    📄 f3.py
+```
+
+## Index
+- [Source](#cat-source)
+- [Doc](#cat-doc)
+- [Config](#cat-config)
+- [Contract](#cat-contract)
+- [Test](#cat-test)
+- [CI Pipelines](#tag-ci)
+- [WGX Profiles](#tag-wgx-profile)
+
+## Category: source {#cat-source}
+- [`f1.py`](#file-test-f1-py)
+- [`f2.py`](#file-test-f2-py)
+- [`f3.py`](#file-test-f3-py)
+
+## 🧾 Manifest {#manifest}
+
+| Root | Path | Category | Tags | Size | Included | MD5 |
+| --- | --- | --- | --- | ---: | --- | --- |
+| `test` | [`f1.py`](#file-test-f1-py) | `source` | - | 48.59 KB | `full` | `md5` |
+| `test` | [`f2.py`](#file-test-f2-py) | `source` | - | 48.59 KB | `full` | `md5` |
+| `test` | [`f3.py`](#file-test-f3-py) | `source` | - | 48.59 KB | `full` | `md5` |
+
+## 📄 Content
+
+## 📦 test {#repo-test}
+
+<a id="file-test-f1-py"></a>
+### `f1.py`
+- Category: source
+- Tags: -
+- Size: 48.59 KB
+- Included: full
+- MD5: md5
+
+```python
 # -*- coding: utf-8 -*-
 
 """
@@ -1419,3 +1526,7 @@ def write_reports_v2(
             process_and_write(s_files, [s_root], lambda part=None: make_output_filename(merges_dir, [s_name], "repo", detail, part))
 
     return out_paths
+
+```
+
+[↑ Zurück zum Manifest](#manifest)
