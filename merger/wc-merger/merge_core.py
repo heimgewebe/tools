@@ -1376,7 +1376,7 @@ def write_reports_v2(
                     # Robuste Header-Erkennung: BOM und Whitespace tolerieren
                     header_idx = None
                     for i, line in enumerate(lines):
-                        stripped = line.lstrip("\ufeff")  # BOM entfernen
+                        stripped = line.lstrip("\ufeff")  # Remove BOM if present
                         if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
                             header_idx = i
                             break
