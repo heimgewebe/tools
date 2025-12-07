@@ -154,6 +154,177 @@ class DebugCollector:
         return "\n".join(lines)
 
 
+@dataclass
+class RepoHealth:
+    """Health status for a single repository."""
+    repo_name: str
+    status: str  # "ok", "warn", "critical"
+    total_files: int
+    category_counts: Dict[str, int]
+    has_readme: bool
+    has_wgx_profile: bool
+    has_ci_workflows: bool
+    has_contracts: bool
+    has_ai_context: bool
+    unknown_categories: List[str]
+    unknown_tags: List[str]
+    warnings: List[str]
+    recommendations: List[str]
+
+
+class HealthCollector:
+    """Sammelt Health-Checks für Repos (Stage 1: Repo Doctor)."""
+
+    def __init__(self) -> None:
+        self._repo_health: Dict[str, RepoHealth] = {}
+
+    def analyze_repo(self, root_label: str, files: List["FileInfo"]) -> RepoHealth:
+        """Analyze health of a single repository."""
+        # Count files per category
+        category_counts: Dict[str, int] = {}
+        for fi in files:
+            cat = fi.category or "other"
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        # Check for key files
+        has_readme = any(f.rel_path.name.lower() == "readme.md" for f in files)
+        has_wgx_profile = any(
+            ".wgx" in f.rel_path.parts and str(f.rel_path).endswith("profile.yml")
+            for f in files
+        )
+        has_ci_workflows = any("ci" in (f.tags or []) for f in files)
+        has_contracts = any(f.category == "contract" for f in files)
+        has_ai_context = any("ai-context" in (f.tags or []) for f in files)
+
+        # Check for unknown categories/tags
+        unknown_categories = []
+        unknown_tags = []
+        for fi in files:
+            cat = fi.category or "other"
+            if cat not in ALLOWED_CATEGORIES:
+                if cat not in unknown_categories:
+                    unknown_categories.append(cat)
+            for tag in fi.tags or []:
+                if tag not in ALLOWED_TAGS:
+                    if tag not in unknown_tags:
+                        unknown_tags.append(tag)
+
+        # Generate warnings and recommendations
+        warnings = []
+        recommendations = []
+
+        if not has_readme:
+            warnings.append("No README.md found")
+            recommendations.append("Add README.md for better AI/human navigation")
+
+        if not has_wgx_profile:
+            warnings.append("No .wgx/profile.yml found")
+            recommendations.append("Create .wgx/profile.yml for Fleet conformance")
+
+        if not has_ci_workflows:
+            warnings.append("No CI workflows found")
+            recommendations.append("Add .github/workflows for CI/CD")
+
+        if not has_contracts:
+            warnings.append("No contracts found")
+            recommendations.append("Consider adding contract schemas")
+
+        if not has_ai_context:
+            warnings.append("No AI context files found")
+            recommendations.append("Add .ai-context.yml files for better AI understanding")
+
+        if unknown_categories:
+            warnings.append(f"Unknown categories: {', '.join(unknown_categories)}")
+
+        if unknown_tags:
+            warnings.append(f"Unknown tags: {', '.join(unknown_tags)}")
+
+        # Determine overall status
+        if len(warnings) >= 4:
+            status = "critical"
+        elif len(warnings) >= 2:
+            status = "warn"
+        else:
+            status = "ok"
+
+        health = RepoHealth(
+            repo_name=root_label,
+            status=status,
+            total_files=len(files),
+            category_counts=category_counts,
+            has_readme=has_readme,
+            has_wgx_profile=has_wgx_profile,
+            has_ci_workflows=has_ci_workflows,
+            has_contracts=has_contracts,
+            has_ai_context=has_ai_context,
+            unknown_categories=unknown_categories,
+            unknown_tags=unknown_tags,
+            warnings=warnings,
+            recommendations=recommendations,
+        )
+
+        self._repo_health[root_label] = health
+        return health
+
+    def get_all_health(self) -> List[RepoHealth]:
+        """Get all repo health reports."""
+        return list(self._repo_health.values())
+
+    def render_markdown(self) -> str:
+        """Render health report as markdown."""
+        if not self._repo_health:
+            return ""
+
+        lines: List[str] = []
+        lines.append("<!-- @health:start -->")
+        lines.append("## 🩺 Repo Health")
+        lines.append("")
+
+        for health in sorted(self._repo_health.values(), key=lambda h: h.repo_name):
+            # Status emoji
+            status_emoji = {
+                "ok": "✅",
+                "warn": "⚠️",
+                "critical": "🔴",
+            }.get(health.status, "❓")
+
+            lines.append(f"### {status_emoji} `{health.repo_name}` – {health.status.upper()}")
+            lines.append("")
+            lines.append(f"- **Total Files:** {health.total_files}")
+            
+            # Category breakdown
+            if health.category_counts:
+                cat_parts = [f"{cat}={count}" for cat, count in sorted(health.category_counts.items())]
+                lines.append(f"- **Categories:** {', '.join(cat_parts)}")
+
+            # Key indicators
+            indicators = []
+            indicators.append(f"README: {'yes' if health.has_readme else 'no'}")
+            indicators.append(f"WGX Profile: {'yes' if health.has_wgx_profile else 'no'}")
+            indicators.append(f"CI: {'yes' if health.has_ci_workflows else 'no'}")
+            indicators.append(f"Contracts: {'yes' if health.has_contracts else 'no'}")
+            indicators.append(f"AI Context: {'yes' if health.has_ai_context else 'no'}")
+            lines.append(f"- **Indicators:** {', '.join(indicators)}")
+
+            # Warnings
+            if health.warnings:
+                lines.append("- **Warnings:**")
+                for warning in health.warnings:
+                    lines.append(f"  - {warning}")
+
+            # Recommendations
+            if health.recommendations:
+                lines.append("- **Recommendations:**")
+                for rec in health.recommendations:
+                    lines.append(f"  - {rec}")
+
+            lines.append("")
+
+        lines.append("<!-- @health:end -->")
+        lines.append("")
+        return "\n".join(lines)
+
+
 def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> None:
     """
     Leichte, rein lesende Debug-Checks auf Basis der FileInfos.
@@ -1047,6 +1218,52 @@ def iter_report_blocks(
         for k, v in asdict(extras).items():
             meta.append(f"    {k}: {str(v).lower()}")
 
+    # Health metadata (if health checks are enabled)
+    if extras and extras.health:
+        # We'll compute health status here for the meta block
+        # Group files by root for health analysis
+        temp_files_by_root: Dict[str, List[FileInfo]] = {}
+        for fi in files:
+            temp_files_by_root.setdefault(fi.root_label, []).append(fi)
+        
+        # Quick health check for overall status
+        health_statuses = []
+        missing_items = []
+        for root in sorted(temp_files_by_root.keys()):
+            root_files = temp_files_by_root[root]
+            has_readme = any(f.rel_path.name.lower() == "readme.md" for f in root_files)
+            has_wgx = any(".wgx" in f.rel_path.parts and str(f.rel_path).endswith("profile.yml") for f in root_files)
+            has_ci = any("ci" in (f.tags or []) for f in root_files)
+            has_contracts = any(f.category == "contract" for f in root_files)
+            
+            warnings = 0
+            if not has_readme: warnings += 1
+            if not has_wgx: warnings += 1
+            if not has_ci: warnings += 1
+            
+            if warnings >= 2:
+                health_statuses.append("warn")
+            else:
+                health_statuses.append("ok")
+            
+            if not has_contracts:
+                if "contracts" not in missing_items:
+                    missing_items.append("contracts")
+            if not has_ci:
+                if "ci" not in missing_items:
+                    missing_items.append("ci")
+        
+        # Overall status
+        if "warn" in health_statuses:
+            overall_status = "warning"
+        else:
+            overall_status = "ok"
+        
+        meta.append("  health:")
+        meta.append(f"    status: \"{overall_status}\"")
+        if missing_items:
+            meta.append(f"    missing: [{', '.join(repr(m) for m in missing_items)}]")
+
     meta.append("```")
     meta.append("<!-- @meta:end -->")
     meta.append("")
@@ -1146,6 +1363,18 @@ def iter_report_blocks(
     plan.append("")
 
     yield "\n".join(plan) + "\n"
+
+    # --- Health Report (Stage 1: Repo Doctor) ---
+    if extras.health:
+        health_collector = HealthCollector()
+        # Analyze each repo
+        for root in sorted(files_by_root.keys()):
+            root_files = files_by_root[root]
+            health_collector.analyze_repo(root, root_files)
+        
+        health_report = health_collector.render_markdown()
+        if health_report:
+            yield health_report
 
     if plan_only:
         return
