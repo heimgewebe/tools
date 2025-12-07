@@ -77,6 +77,67 @@
             "type": "string",
             "pattern": "^\\.[A-Za-z0-9._-]+$"
           }
+        },
+        "extras": {
+          "type": "object",
+          "description": "Optional extras configuration for super-merger features.",
+          "properties": {
+            "health": {
+              "type": "boolean",
+              "description": "Enable health checks (Stage 1: Repo Doctor)."
+            },
+            "organism_index": {
+              "type": "boolean",
+              "description": "Enable organism index for single repo (Stage 2)."
+            },
+            "fleet_panorama": {
+              "type": "boolean",
+              "description": "Enable fleet panorama for multi-repo (Stage 2)."
+            },
+            "augment_sidecar": {
+              "type": "boolean",
+              "description": "Enable augment sidecar intelligence (Stage 4)."
+            },
+            "delta_reports": {
+              "type": "boolean",
+              "description": "Enable delta reports (Stage 3)."
+            }
+          }
+        },
+        "health": {
+          "type": "object",
+          "description": "Health check results (Stage 1).",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["ok", "warning", "critical"]
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "delta": {
+          "type": "object",
+          "description": "Delta information (Stage 3).",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "augment": {
+          "type": "object",
+          "description": "Augment sidecar information (Stage 4).",
+          "properties": {
+            "sidecar": {
+              "type": ["string", "null"],
+              "description": "Path to augment sidecar file or null if not found."
+            }
+          }
         }
       }
     }
