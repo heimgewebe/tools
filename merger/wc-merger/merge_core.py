@@ -11,6 +11,7 @@ import hashlib
 import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple
+from dataclasses import dataclass, asdict
 
 # --- Configuration & Heuristics ---
 
@@ -96,6 +97,19 @@ class DebugItem(NamedTuple):
     code: str    # z. B. "tag-unknown"
     context: str # kurzer Pfad oder Repo-Name
     message: str # Menschentext
+
+
+@dataclass
+class ExtrasConfig:
+    health: bool = False
+    organism_index: bool = False
+    fleet_panorama: bool = False
+    augment_sidecar: bool = False
+    delta_reports: bool = False
+
+    @classmethod
+    def none(cls):
+        return cls()
 
 
 class DebugCollector:
@@ -798,7 +812,11 @@ def iter_report_blocks(
     debug: bool = False,
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
+    extras: Optional[ExtrasConfig] = None,
 ) -> Iterator[str]:
+    if extras is None:
+        extras = ExtrasConfig.none()
+
     # UTC Timestamp
     now = datetime.datetime.utcnow()
 
@@ -1022,6 +1040,13 @@ def iter_report_blocks(
         meta.append(f"  ext_filter: [{exts_list}]")
     else:
         meta.append("  ext_filter: null")
+
+    # Extras Configuration (optional)
+    if extras and any(asdict(extras).values()):
+        meta.append("  extras:")
+        for k, v in asdict(extras).items():
+            meta.append(f"    {k}: {str(v).lower()}")
+
     meta.append("```")
     meta.append("<!-- @meta:end -->")
     meta.append("")
@@ -1255,8 +1280,9 @@ def generate_report_content(
     debug: bool = False,
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
+    extras: Optional[ExtrasConfig] = None,
 ) -> str:
-    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug, path_filter, ext_filter))
+    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug, path_filter, ext_filter, extras))
     if plan_only:
         return report
     try:
@@ -1282,6 +1308,7 @@ def write_reports_v2(
     debug: bool = False,
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
+    extras: Optional[ExtrasConfig] = None,
 ) -> List[Path]:
     out_paths = []
 
@@ -1312,7 +1339,7 @@ def write_reports_v2(
                 else:
                     current_size = 0
 
-            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter)
+            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras)
 
             for block in iterator:
                 block_len = len(block.encode('utf-8'))
@@ -1327,7 +1354,7 @@ def write_reports_v2(
 
         else:
             # Standard single file
-            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter)
+            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras)
             out_path = output_filename_base_func(part=None)
             out_path.write_text(content, encoding="utf-8")
             out_paths.append(out_path)
