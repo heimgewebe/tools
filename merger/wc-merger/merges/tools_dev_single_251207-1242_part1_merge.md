@@ -3,7 +3,7 @@
 ## Source & Profile
 - **Source:** tools
 - **Profile:** `dev`
-- **Generated At:** 2025-12-07 12:32:03 (UTC)
+- **Generated At:** 2025-12-07 12:42:03 (UTC)
 - **Max File Bytes:** unlimited
 - **Spec-Version:** 2.3
 - **Contract:** wc-merge-report
@@ -28,14 +28,13 @@ merge:
   path_filter: null
   ext_filter: null
   extras:
-    health: true
-    organism_index: true
+    health: false
+    organism_index: false
     fleet_panorama: false
-    augment_sidecar: false
+    augment_sidecar: true
     delta_reports: false
-  health:
-    status: "ok"
-    missing: ['contracts']
+  augment:
+    sidecar: "tools_augment.yml"
 ```
 <!-- @meta:end -->
 
@@ -52,14 +51,14 @@ merge:
 
 ## Plan
 
-- **Total Files:** 40 (Text: 40)
-- **Total Size:** 457.95 KB
-- **Included Content:** 34 files (full)
-- **Coverage:** 34/40 Textdateien mit Inhalt (`full`/`truncated`)
+- **Total Files:** 42 (Text: 42)
+- **Total Size:** 464.83 KB
+- **Included Content:** 36 files (full)
+- **Coverage:** 36/42 Textdateien mit Inhalt (`full`/`truncated`)
 
 ### Repo Snapshots
 
-- `tools` → 40 files (40 relevant text, 457.95 KB, 34 with content)
+- `tools` → 42 files (42 relevant text, 464.83 KB, 36 with content)
 
 **Folder Highlights:**
 - Code: `scripts`
@@ -72,40 +71,3 @@ merge:
 - Pipelines (CI/CD): 6 Datei(en) (Tag `ci`)
 - Fleet-/WGX-Profile: 2 Datei(en) (Tag `wgx-profile`)
 
-<!-- @health:start -->
-## 🩺 Repo Health
-
-### ✅ `tools` – OK
-
-- **Total Files:** 40
-- **Categories:** config=12, doc=10, source=18
-- **Indicators:** README: yes, WGX Profile: yes, CI: yes, Contracts: no, AI Context: yes
-- **Warnings:**
-  - No contracts found
-- **Recommendations:**
-  - Consider adding contract schemas
-
-<!-- @health:end -->
-<!-- @organism-index:start -->
-## 🧬 Organism Index
-
-**AI-Kontext:**
-- `.ai-context.yml`
-- `merger/repomerger/heimgewebe-merge/README.md`
-- `merger/wc-merger/README.md`
-- `README.md`
-- `scripts/README.md`
-
-**CI & Pipelines:**
-- `.github/workflows/ai-context-guard.yml`
-- `.github/workflows/contracts-validate.yml`
-- `.github/workflows/metrics.yml`
-- `.github/workflows/pr-heimgewebe-commands.yml`
-- `.github/workflows/validate-merges.yml`
-- `.github/workflows/wgx-guard.yml`
-
-**WGX-Profile:**
-- `.wgx/profile.example.yml`
-- `.wgx/profile.yml`
-
-<!-- @organism-index:end -->

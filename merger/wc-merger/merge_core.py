@@ -1264,6 +1264,37 @@ def iter_report_blocks(
         if missing_items:
             meta.append(f"    missing: [{', '.join(repr(m) for m in missing_items)}]")
 
+    # Delta metadata (Stage 3: placeholder for delta reports)
+    if extras and extras.delta_reports:
+        # Delta information would be populated if comparing against a base snapshot
+        # For now, just mark that delta is enabled
+        meta.append("  delta:")
+        meta.append("    enabled: true")
+        meta.append("    # Delta details populated when comparing snapshots")
+
+    # Augment metadata (Stage 4: placeholder for augment sidecar)
+    if extras and extras.augment_sidecar:
+        # Check if augment sidecar file exists
+        # Convention: {repo_name}_augment.yml in the repo directory or parent
+        augment_file = None
+        for source in sources:
+            # Try in the repo directory itself
+            potential_augment = source / f"{source.name}_augment.yml"
+            if potential_augment.exists():
+                augment_file = f"{source.name}_augment.yml"
+                break
+            # Try in parent directory
+            potential_augment = source.parent / f"{source.name}_augment.yml"
+            if potential_augment.exists():
+                augment_file = f"../{source.name}_augment.yml"
+                break
+        
+        meta.append("  augment:")
+        if augment_file:
+            meta.append(f"    sidecar: \"{augment_file}\"")
+        else:
+            meta.append("    sidecar: null")
+
     meta.append("```")
     meta.append("<!-- @meta:end -->")
     meta.append("")
