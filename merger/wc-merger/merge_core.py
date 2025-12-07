@@ -1376,6 +1376,97 @@ def iter_report_blocks(
         if health_report:
             yield health_report
 
+    # --- Organism Index (Stage 2: Single Repo) ---
+    if extras.organism_index and len(roots) == 1:
+        organism_index = []
+        organism_index.append("<!-- @organism-index:start -->")
+        organism_index.append("## 🧬 Organism Index")
+        organism_index.append("")
+        
+        if organism_ai_ctx:
+            organism_index.append("**AI-Kontext:**")
+            for fi in organism_ai_ctx:
+                organism_index.append(f"- `{fi.rel_path}`")
+            organism_index.append("")
+        
+        if organism_contracts:
+            organism_index.append("**Contracts:**")
+            for fi in organism_contracts:
+                organism_index.append(f"- `{fi.rel_path}`")
+            organism_index.append("")
+        
+        if organism_pipelines:
+            organism_index.append("**CI & Pipelines:**")
+            for fi in organism_pipelines:
+                organism_index.append(f"- `{fi.rel_path}`")
+            organism_index.append("")
+        
+        if organism_wgx_profiles:
+            organism_index.append("**WGX-Profile:**")
+            for fi in organism_wgx_profiles:
+                organism_index.append(f"- `{fi.rel_path}`")
+            organism_index.append("")
+        
+        organism_index.append("<!-- @organism-index:end -->")
+        organism_index.append("")
+        yield "\n".join(organism_index)
+
+    # --- Fleet Panorama (Stage 2: Multi-Repo) ---
+    if extras.fleet_panorama and len(roots) > 1:
+        fleet_panorama = []
+        fleet_panorama.append("<!-- @fleet-panorama:start -->")
+        fleet_panorama.append("## 🛰 Fleet Panorama")
+        fleet_panorama.append("")
+        fleet_panorama.append(f"**Summary:** {len(roots)} repos, {human_size(total_size)}, {len(files)} files")
+        fleet_panorama.append("")
+        
+        for root in sorted(files_by_root.keys()):
+            root_files = files_by_root[root]
+            root_total = len(root_files)
+            root_bytes = sum(f.size for f in root_files)
+            
+            # Count categories for this repo
+            root_cat_counts: Dict[str, int] = {}
+            for fi in root_files:
+                cat = fi.category or "other"
+                root_cat_counts[cat] = root_cat_counts.get(cat, 0) + 1
+            
+            cat_parts = [f"{cat}={count}" for cat, count in sorted(root_cat_counts.items())]
+            
+            # Check for key indicators
+            has_wgx = any(".wgx" in f.rel_path.parts for f in root_files)
+            has_ci = any("ci" in (f.tags or []) for f in root_files)
+            
+            fleet_panorama.append(f"**`{root}`:**")
+            fleet_panorama.append(f"- Files: {root_total}")
+            fleet_panorama.append(f"- Size: {human_size(root_bytes)}")
+            fleet_panorama.append(f"- Categories: {', '.join(cat_parts)}")
+            
+            # Role determination
+            role = "utility"
+            if "metarepo" in root.lower():
+                role = "governance"
+            elif "contract" in root.lower():
+                role = "schema authority"
+            elif "tool" in root.lower():
+                role = "tooling"
+            
+            fleet_panorama.append(f"- Role: {role}")
+            
+            indicators = []
+            if has_wgx:
+                indicators.append("WGX")
+            if has_ci:
+                indicators.append("CI")
+            if indicators:
+                fleet_panorama.append(f"- Indicators: {', '.join(indicators)}")
+            
+            fleet_panorama.append("")
+        
+        fleet_panorama.append("<!-- @fleet-panorama:end -->")
+        fleet_panorama.append("")
+        yield "\n".join(fleet_panorama)
+
     if plan_only:
         return
 

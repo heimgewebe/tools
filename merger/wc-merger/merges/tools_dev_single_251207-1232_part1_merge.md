@@ -3,7 +3,7 @@
 ## Source & Profile
 - **Source:** tools
 - **Profile:** `dev`
-- **Generated At:** 2025-12-07 12:30:50 (UTC)
+- **Generated At:** 2025-12-07 12:32:03 (UTC)
 - **Max File Bytes:** unlimited
 - **Spec-Version:** 2.3
 - **Contract:** wc-merge-report
@@ -29,7 +29,7 @@ merge:
   ext_filter: null
   extras:
     health: true
-    organism_index: false
+    organism_index: true
     fleet_panorama: false
     augment_sidecar: false
     delta_reports: false
@@ -53,13 +53,13 @@ merge:
 ## Plan
 
 - **Total Files:** 40 (Text: 40)
-- **Total Size:** 454.36 KB
+- **Total Size:** 457.95 KB
 - **Included Content:** 34 files (full)
 - **Coverage:** 34/40 Textdateien mit Inhalt (`full`/`truncated`)
 
 ### Repo Snapshots
 
-- `tools` → 40 files (40 relevant text, 454.36 KB, 34 with content)
+- `tools` → 40 files (40 relevant text, 457.95 KB, 34 with content)
 
 **Folder Highlights:**
 - Code: `scripts`
@@ -86,3 +86,26 @@ merge:
   - Consider adding contract schemas
 
 <!-- @health:end -->
+<!-- @organism-index:start -->
+## 🧬 Organism Index
+
+**AI-Kontext:**
+- `.ai-context.yml`
+- `merger/repomerger/heimgewebe-merge/README.md`
+- `merger/wc-merger/README.md`
+- `README.md`
+- `scripts/README.md`
+
+**CI & Pipelines:**
+- `.github/workflows/ai-context-guard.yml`
+- `.github/workflows/contracts-validate.yml`
+- `.github/workflows/metrics.yml`
+- `.github/workflows/pr-heimgewebe-commands.yml`
+- `.github/workflows/validate-merges.yml`
+- `.github/workflows/wgx-guard.yml`
+
+**WGX-Profile:**
+- `.wgx/profile.example.yml`
+- `.wgx/profile.yml`
+
+<!-- @organism-index:end -->
