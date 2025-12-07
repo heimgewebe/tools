@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple
 from dataclasses import dataclass, asdict
 
+try:
+    import yaml
+except ImportError:
+    pass
+
 # --- Configuration & Heuristics ---
 
 SPEC_VERSION = "2.3"
@@ -323,6 +328,154 @@ class HealthCollector:
         lines.append("<!-- @health:end -->")
         lines.append("")
         return "\n".join(lines)
+
+
+def _find_augment_file_for_sources(sources: List[Path]) -> Optional[Path]:
+    """
+    Locate an augment sidecar YAML file for the given sources.
+    Convention: {repo_name}_augment.yml either in the repo root or its parent.
+    """
+    for source in sources:
+        try:
+            # Try in the repo directory itself
+            candidate = source / f"{source.name}_augment.yml"
+            if candidate.exists():
+                return candidate
+
+            # Try in parent directory
+            candidate_parent = source.parent / f"{source.name}_augment.yml"
+            if candidate_parent.exists():
+                return candidate_parent
+        except (OSError, PermissionError):
+            # If we cannot access this source, skip it
+            continue
+    return None
+
+
+def _render_augment_block(sources: List[Path]) -> str:
+    """
+    Render the Augment Intelligence block based on an augment sidecar, if present.
+    The expected structure matches tools_augment.yml (augment.hotspots, suggestions, risks, dependencies, priorities, context).
+    """
+    # yaml is optional; if not available, we cannot render the block
+    try:
+        yaml  # type: ignore[name-defined]
+    except NameError:
+        return ""
+
+    augment_path = _find_augment_file_for_sources(sources)
+    if not augment_path:
+        return ""
+
+    try:
+        raw = augment_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+
+    try:
+        data = yaml.safe_load(raw)  # type: ignore[name-defined]
+    except Exception:
+        # If the augment file is malformed, fail silently and do not break the merge
+        return ""
+
+    if not isinstance(data, dict):
+        return ""
+
+    augment = data.get("augment") or {}
+    if not isinstance(augment, dict):
+        return ""
+
+    lines: List[str] = []
+    lines.append("<!-- @augment:start -->")
+    lines.append("## 🧩 Augment Intelligence")
+    lines.append("")
+    lines.append(f"**Sidecar:** `{augment_path.name}`")
+    lines.append("")
+
+    hotspots = augment.get("hotspots") or []
+    if isinstance(hotspots, list) and hotspots:
+        lines.append("### Hotspots")
+        for hs in hotspots:
+            if not isinstance(hs, dict):
+                continue
+            path = hs.get("path") or "?"
+            reason = hs.get("reason") or ""
+            severity = hs.get("severity") or ""
+            line_range = hs.get("lines")
+            details = []
+            if severity:
+                details.append(f"Severity: {severity}")
+            if line_range:
+                details.append(f"Lines: {line_range}")
+            suffix = f" ({'; '.join(details)})" if details else ""
+            if reason:
+                lines.append(f"- `{path}` – {reason}{suffix}")
+            else:
+                lines.append(f"- `{path}`{suffix}")
+        lines.append("")
+
+    suggestions = augment.get("suggestions") or []
+    if isinstance(suggestions, list) and suggestions:
+        lines.append("### Suggestions")
+        for s in suggestions:
+            if isinstance(s, str):
+                lines.append(f"- {s}")
+        lines.append("")
+
+    risks = augment.get("risks") or []
+    if isinstance(risks, list) and risks:
+        lines.append("### Risks")
+        for r in risks:
+            if isinstance(r, str):
+                lines.append(f"- {r}")
+        lines.append("")
+
+    dependencies = augment.get("dependencies") or []
+    if isinstance(dependencies, list) and dependencies:
+        lines.append("### Dependencies")
+        for dep in dependencies:
+            if not isinstance(dep, dict):
+                continue
+            name = dep.get("name") or "unknown"
+            required = dep.get("required")
+            purpose = dep.get("purpose") or ""
+            req_txt = ""
+            if isinstance(required, bool):
+                req_txt = "required" if required else "optional"
+            parts = [name]
+            if req_txt:
+                parts.append(f"({req_txt})")
+            if purpose:
+                parts.append(f"– {purpose}")
+            lines.append(f"- {' '.join(parts)}")
+        lines.append("")
+
+    priorities = augment.get("priorities") or []
+    if isinstance(priorities, list) and priorities:
+        lines.append("### Priorities")
+        for pr in priorities:
+            if not isinstance(pr, dict):
+                continue
+            prio = pr.get("priority")
+            task = pr.get("task") or ""
+            status = pr.get("status") or ""
+            head = f"P{prio}: {task}" if prio is not None else task
+            if status:
+                lines.append(f"- {head} ({status})")
+            else:
+                lines.append(f"- {head}")
+        lines.append("")
+
+    context = augment.get("context") or {}
+    if isinstance(context, dict) and context:
+        lines.append("### Context")
+        for key, value in context.items():
+            lines.append(f"- **{key}:** {value}")
+        lines.append("")
+
+    lines.append("<!-- @augment:end -->")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> None:
@@ -1501,6 +1654,12 @@ def iter_report_blocks(
         fleet_panorama.append("<!-- @fleet-panorama:end -->")
         fleet_panorama.append("")
         yield "\n".join(fleet_panorama)
+
+    # --- Augment Intelligence (Stage 4: Sidecar) ---
+    if extras.augment_sidecar:
+        augment_block = _render_augment_block(sources)
+        if augment_block:
+            yield augment_block
 
     if plan_only:
         return
