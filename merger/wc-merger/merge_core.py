@@ -1601,9 +1601,9 @@ def iter_report_blocks(
             if augment_meta:
                 meta_dict["merge"]["augment"] = augment_meta
 
-        # Dump to YAML
+        # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
         if "yaml" in globals():
-            meta_yaml = yaml.safe_dump(meta_dict, sort_keys=False)
+            meta_yaml = yaml.safe_dump(meta_dict)
             for line in meta_yaml.rstrip("\n").splitlines():
                 meta_lines.append(line)
         else:
