@@ -48,6 +48,9 @@ ALLOWED_TAGS = {
     "wgx-profile",
 }
 
+# Delta Report configuration
+MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
+
 # Directories to ignore
 SKIP_DIRS = {
     ".git",
@@ -199,7 +202,16 @@ class HealthCollector:
         )
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
         has_contracts = any(f.category == "contract" for f in files)
-        has_ai_context = any("ai-context" in (f.tags or []) for f in files)
+        # Enhanced AI context detection: check tags and file paths (cached to avoid repeated conversions)
+        has_ai_context = False
+        for f in files:
+            if "ai-context" in (f.tags or []):
+                has_ai_context = True
+                break
+            path_lower = str(f.rel_path).lower()
+            if "ai-context" in path_lower or path_lower.endswith(".ai-context.yml") or "ai-context" in f.rel_path.parts:
+                has_ai_context = True
+                break
 
         # Check for unknown categories/tags
         unknown_categories = []
@@ -648,9 +660,72 @@ class FileInfo(object):
         self.reason = reason
         self.content = content
         self.anchor = "" # Will be set during report generation
+        self.roles = [] # Will be computed during report generation
 
 
 # --- Utilities ---
+
+def compute_file_roles(fi: "FileInfo") -> List[str]:
+    """
+    Compute semantic roles for a file based on category, tags, and path.
+    Roles help AI agents understand the purpose/function of files.
+    
+    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, governance, doc
+    """
+    roles = []
+    
+    # Role from category
+    if fi.category == "contract":
+        roles.append("contract")
+    
+    # Roles from tags
+    if fi.tags:
+        if "ai-context" in fi.tags:
+            roles.append("ai-context")
+        if "ci" in fi.tags:
+            roles.append("ci")
+        if "wgx-profile" in fi.tags:
+            roles.append("wgx-profile")
+        if "adr" in fi.tags:
+            roles.append("policy")
+        if "script" in fi.tags:
+            roles.append("tool")
+        if "runbook" in fi.tags:
+            roles.append("execution")
+    
+    # Role from path patterns (cache normalized path)
+    path_str = fi.rel_path.as_posix().lower()
+    
+    # Contracts directory
+    if "contracts/" in path_str and fi.ext in {".json", ".yaml", ".yml"}:
+        if "contract" not in roles:
+            roles.append("contract")
+    
+    # CI/CD pipelines
+    if ".github/workflows/" in path_str:
+        if "ci" not in roles:
+            roles.append("ci")
+    
+    # WGX profiles
+    if ".wgx/" in path_str and "profile" in path_str:
+        if "wgx-profile" not in roles:
+            roles.append("wgx-profile")
+    
+    # AI context files
+    if "ai-context" in path_str or path_str.endswith(".ai-context.yml"):
+        if "ai-context" not in roles:
+            roles.append("ai-context")
+    
+    # Governance files (metarepo, policies, ADRs) - check role first to avoid expensive pattern matching
+    if "policy" not in roles:
+        if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
+            roles.append("policy")
+    
+    # Documentation role
+    if fi.category == "doc" and "doc" not in roles:
+        roles.append("doc")
+    
+    return roles
 
 def is_noise_file(fi: "FileInfo") -> bool:
     """
@@ -1109,6 +1184,74 @@ def is_priority_file(fi: FileInfo) -> bool:
     if fi.rel_path.name.lower() == "readme.md": return True
     return False
 
+def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
+    """
+    Render Delta Report block from delta metadata.
+    Shows what changed between base and current import.
+    """
+    lines = []
+    lines.append("<!-- @delta:start -->")
+    lines.append("## ♻ Delta Report")
+    lines.append("")
+    
+    # Extract info from delta_meta
+    base_ts = delta_meta.get("base_timestamp", "unknown")
+    current_ts = delta_meta.get("current_timestamp", "unknown")
+    
+    lines.append(f"- **Base Import:** {base_ts}")
+    lines.append(f"- **Current:** {current_ts}")
+    lines.append("")
+    
+    # Summary
+    added = delta_meta.get("files_added", [])
+    removed = delta_meta.get("files_removed", [])
+    changed = delta_meta.get("files_changed", [])
+    
+    lines.append("**Summary:**")
+    lines.append(f"- Files added: {len(added)}")
+    lines.append(f"- Files removed: {len(removed)}")
+    lines.append(f"- Files changed: {len(changed)}")
+    lines.append("")
+    
+    # Detail sections
+    if added:
+        lines.append("### Added Files")
+        for f in added[:MAX_DELTA_FILES]:
+            lines.append(f"- `{f}`")
+        if len(added) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(added) - MAX_DELTA_FILES} more)_")
+        lines.append("")
+    
+    if removed:
+        lines.append("### Removed Files")
+        for f in removed[:MAX_DELTA_FILES]:
+            lines.append(f"- `{f}`")
+        if len(removed) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(removed) - MAX_DELTA_FILES} more)_")
+        lines.append("")
+    
+    if changed:
+        lines.append("### Changed Files")
+        for f in changed[:MAX_DELTA_FILES]:
+            if isinstance(f, dict):
+                path = f.get("path", "unknown")
+                size_delta = f.get("size_delta", 0)
+                if size_delta > 0:
+                    lines.append(f"- `{path}` (+{size_delta} bytes)")
+                elif size_delta < 0:
+                    lines.append(f"- `{path}` ({size_delta} bytes)")
+                else:
+                    lines.append(f"- `{path}`")
+            else:
+                lines.append(f"- `{f}`")
+        if len(changed) > MAX_DELTA_FILES:
+            lines.append(f"- _(and {len(changed) - MAX_DELTA_FILES} more)_")
+        lines.append("")
+    
+    lines.append("<!-- @delta:end -->")
+    lines.append("")
+    return "\n".join(lines)
+
 def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
     """
     Checks for objective inconsistencies specified in the spec.
@@ -1187,6 +1330,9 @@ def iter_report_blocks(
         rel_id = fi.rel_path.as_posix().replace("/", "-").replace(".", "-")
         anchor = f"file-{fi.root_label}-{rel_id}"
         fi.anchor = anchor
+        
+        # Compute file roles
+        fi.roles = compute_file_roles(fi)
 
         # Debug checks
         # Kategorien strikt gemäß Spec v2.3:
@@ -1382,7 +1528,17 @@ def iter_report_blocks(
         )
     else:
         header.append("- **Extension Filter:** `none (all text types)`")
+    
+    # Coverage in header (for quick AI assessment)
+    if text_files:
+        coverage_pct = int((included_count / len(text_files)) * 100)
+        header.append(f"- **Coverage:** {coverage_pct}% ({included_count}/{len(text_files)} text files with content)")
+    
     header.append("")
+    
+    # Prepare filter descriptions for meta block
+    path_filter_desc = path_filter if path_filter else "none (full tree)"
+    ext_filter_desc = ", ".join(sorted(ext_filter)) if ext_filter else "none (all text types)"
 
     # --- 3. Machine-readable Meta Block (für KIs) ---
     # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
@@ -1654,6 +1810,12 @@ def iter_report_blocks(
         augment_block = _render_augment_block(sources)
         if augment_block:
             yield augment_block
+    
+    # --- Delta Report (Stage 3: Content) ---
+    if extras.delta_reports and delta_meta:
+        delta_block = _render_delta_block(delta_meta)
+        if delta_block:
+            yield delta_block
 
     if plan_only:
         return
@@ -1713,10 +1875,11 @@ def iter_report_blocks(
     manifest: List[str] = []
     manifest.append("## 🧾 Manifest {#manifest}")
     manifest.append("")
-    manifest.append("| Root | Path | Category | Tags | Size | Included | MD5 |")
-    manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
+    manifest.append("| Root | Path | Category | Tags | Roles | Size | Included | MD5 |")
+    manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
     for fi, status in processed_files:
         tags_str = ", ".join(fi.tags) if fi.tags else "-"
+        roles_str = ", ".join(fi.roles) if fi.roles else "-"
         # Noise kennzeichnen, ohne das Schema zu ändern
         included_label = status
         if is_noise_file(fi):
@@ -1725,7 +1888,7 @@ def iter_report_blocks(
         # Link in Manifest
         path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
         manifest.append(
-            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | "
+            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
             f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
         )
     manifest.append("")
