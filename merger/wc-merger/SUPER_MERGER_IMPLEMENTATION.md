@@ -86,10 +86,12 @@ Alle Features sind über ein `ExtrasConfig`-Dataclass konfigurierbar:
 class ExtrasConfig:
     health: bool = False
     organism_index: bool = False
-    fleet_panorama: bool = False
+    fleet_panorama: bool = False  # Nur für Multi-Repo-Merges
     augment_sidecar: bool = False
     delta_reports: bool = False
 ```
+
+**Wichtig:** `fleet_panorama` wird nur bei Multi-Repo-Merges (2+ Repos) aktiviert, auch wenn das Flag in `ExtrasConfig` gesetzt ist. Bei Single-Repo-Merges erscheint weder das Flag im Meta noch der Fleet Panorama-Block im Report.
 
 ### Report-Struktur (Spec v2.3)
 
