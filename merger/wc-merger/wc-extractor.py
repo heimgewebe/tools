@@ -123,7 +123,6 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
                 try:
                     ts_part = line.split("`")[1]
                     # Parse it to a datetime and convert to ISO format
-                    import datetime
                     dt = datetime.datetime.strptime(ts_part, "%Y-%m-%d %H:%M:%S")
                     base_timestamp = dt.replace(tzinfo=datetime.timezone.utc).isoformat()
                 except (IndexError, ValueError):

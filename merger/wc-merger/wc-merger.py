@@ -1244,7 +1244,7 @@ def main_cli():
     
     # Try to extract delta_meta if delta_reports is enabled
     delta_meta = None
-    if extras_config.delta_reports and len(summaries) == 1:
+    if extras_config.delta_reports and summaries and len(summaries) == 1:
         # Only try to find delta for single-repo merges
         repo_name = summaries[0]["name"]
         try:
