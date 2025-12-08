@@ -342,14 +342,14 @@ class HealthCollector:
         return "\n".join(lines)
 
 
-def _build_extras_meta(extras: "ExtrasConfig", num_repos: int = 1) -> Dict[str, bool]:
+def _build_extras_meta(extras: "ExtrasConfig", num_repos: int) -> Dict[str, bool]:
     """
     Hilfsfunktion: baut den extras-Block für den @meta-Contract.
     Nur aktivierte Flags werden gesetzt, damit das Schema schlank bleibt.
     
     Args:
         extras: ExtrasConfig mit den gewünschten Extras
-        num_repos: Anzahl der Repos im Merge (für Fleet Panorama)
+        num_repos: Anzahl der Repos im Merge (für Fleet Panorama - muss explizit übergeben werden)
     """
     extras_meta: Dict[str, bool] = {}
     if extras.health:
@@ -1221,6 +1221,10 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
     lines.append(f"- **Current:** {current_ts}")
     lines.append("")
     
+    def _safe_list_len(val):
+        """Helper: safely get length of value if it's a list, else 0."""
+        return len(val) if isinstance(val, list) else 0
+    
     # Check for schema-compliant summary object
     summary = delta_meta.get("summary", {})
     if summary and isinstance(summary, dict):
@@ -1246,9 +1250,9 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
         changed = delta_meta.get("files_changed", [])
         
         lines.append("**Summary:**")
-        lines.append(f"- Files added: {len(added) if isinstance(added, list) else 0}")
-        lines.append(f"- Files removed: {len(removed) if isinstance(removed, list) else 0}")
-        lines.append(f"- Files changed: {len(changed) if isinstance(changed, list) else 0}")
+        lines.append(f"- Files added: {_safe_list_len(added)}")
+        lines.append(f"- Files removed: {_safe_list_len(removed)}")
+        lines.append(f"- Files changed: {_safe_list_len(changed)}")
         lines.append("")
     
     # Detail sections (only if we have lists)
