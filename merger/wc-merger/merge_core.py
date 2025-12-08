@@ -396,15 +396,25 @@ def _render_augment_block(sources: List[Path]) -> str:
     Render the Augment Intelligence block based on an augment sidecar, if present.
     The expected structure matches tools_augment.yml (augment.hotspots, suggestions, risks, dependencies, priorities, context).
     """
-    # yaml is optional; if not available, we cannot render the block
-    try:
-        yaml  # type: ignore[name-defined]
-    except NameError:
-        return ""
-
     augment_path = _find_augment_file_for_sources(sources)
     if not augment_path:
         return ""
+
+    # yaml is optional; if not available, render a basic block
+    try:
+        yaml  # type: ignore[name-defined]
+    except NameError:
+        lines = []
+        lines.append("<!-- @augment:start -->")
+        lines.append("## 🧩 Augment Intelligence")
+        lines.append("")
+        lines.append(f"**Sidecar:** `{augment_path.name}`")
+        lines.append("")
+        lines.append("_Hinweis: PyYAML nicht verfügbar – Details aus dem Sidecar können nicht automatisch geparst werden._")
+        lines.append("")
+        lines.append("<!-- @augment:end -->")
+        lines.append("")
+        return "\n".join(lines)
 
     try:
         raw = augment_path.read_text(encoding="utf-8")
@@ -1592,8 +1602,11 @@ def iter_report_blocks(
             }
 
         # Delta-Metadaten
-        if extras and extras.delta_reports and delta_meta:
-             meta_dict["merge"]["delta"] = delta_meta
+        if extras and extras.delta_reports:
+            if delta_meta:
+                meta_dict["merge"]["delta"] = delta_meta
+            else:
+                meta_dict["merge"]["delta"] = {"enabled": True}
 
         # Augment-Metadaten
         if extras and extras.augment_sidecar:
