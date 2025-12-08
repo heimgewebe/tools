@@ -122,7 +122,9 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
                 # Try to extract timestamp, but don't fail if it's malformed
                 try:
                     ts_part = line.split("`")[1]
-                    # Parse it to a datetime and convert to ISO format
+                    # Expected format: "YYYY-MM-DD HH:MM:SS"
+                    # Timestamp from diff_trees() is always in this format
+                    # We assume UTC timezone as diff_trees uses datetime.now() without timezone
                     dt = datetime.datetime.strptime(ts_part, "%Y-%m-%d %H:%M:%S")
                     base_timestamp = dt.replace(tzinfo=datetime.timezone.utc).isoformat()
                 except (IndexError, ValueError):
@@ -132,6 +134,8 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
         # Categorize rows
         only_old = [r["path"] for r in rows if r["status"] == "removed"]
         only_new = [r["path"] for r in rows if r["status"] == "added"]
+        # Format: (path, size_old, size_new, md5_old, md5_new, cat_old, cat_new)
+        # MD5 and category fields aren't used by build_delta_meta_from_diff, so we pass empty strings
         changed = [
             (r["path"], r["size_old"] or 0, r["size_new"] or 0, "", "", "", "")
             for r in rows if r["status"] == "changed"

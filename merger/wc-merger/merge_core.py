@@ -1578,7 +1578,7 @@ def iter_report_blocks(
     
     header.append("")
     
-    # Prepare filter descriptions for header (human-readable)
+    # Prepare human-readable filter descriptions for header display
     path_filter_desc = path_filter if path_filter else "none (full tree)"
     ext_filter_desc = ", ".join(sorted(ext_filter)) if ext_filter else "none (all text types)"
 
