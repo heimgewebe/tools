@@ -1055,10 +1055,110 @@ class MergerUI(object):
                 print(f"[wc-merger] {msg}")
             return
 
+        # Execute delta creation
+        # Note: In Spec 2.3 logic, wc-extractor creates delta.json alongside the report
         try:
-            delta_path = mod.create_delta_merge_from_diff(
+            # We assume create_delta_merge_from_diff does the diff calculation and side-effects (like delta.json)
+            # but we will perform report generation via write_reports_v2 to ensure consistency.
+            # However, create_delta_merge_from_diff in current wc-extractor MIGHT generate a report.
+            # We will ignore its return value if we are re-generating, OR rely on it if it's correct.
+            # The User Patch says "Parse delta.json from wc-extractor and build delta_meta"
+            # So we assume wc-extractor writes delta.json.
+
+            # Since we cannot modify wc-extractor, we call it.
+            # It returns the path to the report it generated.
+            # BUT we want to use write_reports_v2 to get all the bells and whistles (health, etc).
+
+            # Let's call it to ensure analysis is done.
+            _ = mod.create_delta_merge_from_diff(
                 diff_path, repo_root, merges_dir, profile="delta-full"
             )
+
+            # Now we look for delta.json in merges_dir (user patch assumption: out_dir == merges_dir)
+            delta_meta = None
+            try:
+                delta_json_path = merges_dir / "delta.json"
+                if delta_json_path.exists():
+                    import json
+                    raw = json.loads(delta_json_path.read_text(encoding="utf-8"))
+
+                    # Expected structure:
+                    # {
+                    #   "type": "wc-merge-delta",
+                    #   "base_import": "...",
+                    #   "current_timestamp": "...",
+                    #   "summary": { ... }
+                    # }
+
+                    # Validate minimal required keys
+                    if (
+                        isinstance(raw, dict)
+                        and raw.get("type") == "wc-merge-delta"
+                        and "summary" in raw
+                        and ("base_import" in raw or "base_timestamp" in raw)
+                        and "current_timestamp" in raw
+                    ):
+                        delta_meta = raw
+                    else:
+                        print("[WARN] delta.json gefunden, aber unvollständig – Delta deaktiviert.")
+                else:
+                    # Fallback: Try to extract from diff file if delta.json missing (like CLI does)
+                    if hasattr(mod, "extract_delta_meta_from_diff_file"):
+                        delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+
+                    if not delta_meta:
+                        print("[INFO] Keine delta.json gefunden – Delta deaktiviert.")
+
+            except Exception as e:
+                print(f"[ERROR] Delta-Parsing fehlgeschlagen: {e}")
+                delta_meta = None
+
+            # Determine extras config consistent with UI
+            # We use self.extras_config but enable delta_reports
+            extras = ExtrasConfig(
+                health=self.extras_config.health,
+                organism_index=self.extras_config.organism_index,
+                fleet_panorama=self.extras_config.fleet_panorama,
+                augment_sidecar=self.extras_config.augment_sidecar,
+                heatmap=self.extras_config.heatmap,
+                delta_reports=True # Force enable
+            )
+
+            # Need to scan repo for write_reports_v2
+            # delta-full implies max bytes? existing logic uses profile="delta-full".
+            # wc-merger.py presets for profiles:
+            # dev/max use max_bytes=0.
+            # Let's use max_bytes=0 (unlimited) as standard for full delta.
+            summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=0)
+
+            # Generate merge reports
+            out_paths = write_reports_v2(
+                merges_dir,
+                self.hub,
+                [summary],
+                "dev", # use 'dev' as base profile, but delta block will be added
+                "repo",
+                0,
+                plan_only=False,
+                debug=False,
+                path_filter=None,
+                ext_filter=None,
+                extras=extras,
+                delta_meta=delta_meta,    # << NEW: real delta injected
+            )
+
+            # Close files
+            force_close_files(out_paths)
+
+            msg = f"Delta report generated: {out_paths[0].name}"
+            if console:
+                try:
+                    console.hud_alert(msg)
+                except Exception:
+                    console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+            else:
+                print(f"[wc-merger] {msg}")
+
         except Exception as exc:
             msg = f"Delta merge failed: {exc}"
             if console:
@@ -1066,18 +1166,6 @@ class MergerUI(object):
             else:
                 print(f"[wc-merger] {msg}")
             return
-
-        # Eventuell im Editor automatisch geöffnete Dateien wieder schließen
-        force_close_files([delta_path])
-
-        msg = f"Delta report: {delta_path.name}"
-        if console:
-            try:
-                console.hud_alert(msg)
-            except Exception:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
-        else:
-            print(f"[wc-merger] {msg}")
 
     def run_merge(self, sender) -> None:
         try:

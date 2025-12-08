@@ -484,6 +484,44 @@ def _build_augment_meta(sources: List[Path]) -> Optional[Dict[str, Any]]:
     return {"sidecar": sidecar.name} if sidecar else None
 
 
+def _render_fleet_panorama(sources: List[Path], files: List["FileInfo"]) -> Optional[str]:
+    """
+    Render the Fleet Panorama block.
+    Only shown if:
+      - extras.fleet_panorama is true
+      - more than one repo is being merged
+    """
+    if len(sources) < 2:
+        return None
+
+    # Group files per repo
+    grouped: Dict[str, List["FileInfo"]] = {}
+    for fi in files:
+        grouped.setdefault(fi.root_label, []).append(fi)
+
+    lines: List[str] = []
+    lines.append("<!-- @fleet-panorama:start -->")
+    lines.append("## 🛰 Fleet Panorama")
+    lines.append("")
+
+    # Summary header
+    total_files = sum(len(v) for v in grouped.values())
+    total_bytes = sum(f.size for f in files)
+    lines.append(f"**Summary:** {len(grouped)} repos, {total_bytes} bytes, {total_files} files")
+    lines.append("")
+
+    # Per-repo details
+    for repo, repo_files in grouped.items():
+        repo_bytes = sum(f.size for f in repo_files)
+        lines.append(f"### `{repo}`")
+        lines.append(f"- Files: {len(repo_files)}")
+        lines.append(f"- Size: {repo_bytes} bytes")
+        lines.append("")
+
+    lines.append("<!-- @fleet-panorama:end -->")
+    return "\n".join(lines) + "\n"
+
+
 def _find_augment_file_for_sources(sources: List[Path]) -> Optional[Path]:
     """
     Locate an augment sidecar YAML file for the given sources.
@@ -1926,100 +1964,81 @@ def iter_report_blocks(
         except Exception as e:
             yield f"\n<!-- delta-error: {e} -->\n"
 
+    # --- Fleet Panorama (Stage 2 Multi-Repo) ---
+    if extras.fleet_panorama:
+        fleet_block = _render_fleet_panorama(sources, files)
+        if fleet_block:
+            yield fleet_block
+
     # --- Organism Index (Stage 2: Single Repo) ---
     if extras.organism_index and len(roots) == 1:
-        repo_role = infer_repo_role(list(roots)[0], files)
+        # Single-Repo-Organismus: Rolle + Organe explizit sichtbar machen
+        repo_name = list(roots)[0]
+        repo_role = infer_repo_role(repo_name, files)
 
-        organism_index = []
+        organism_index: List[str] = []
         organism_index.append("<!-- @organism-index:start -->")
         organism_index.append("## 🧬 Organism Index")
         organism_index.append("")
-        organism_index.append(f"**Rolle dieses Repos:** {repo_role}")
+        organism_index.append(f"**Repo:** `{repo_name}`")
+        organism_index.append(f"**Rolle:** {repo_role}")
         organism_index.append("")
-        
+        organism_index.append("**Organ-Status:**")
+        organism_index.append(f"- AI-Kontext: {len(organism_ai_ctx)} Datei(en)")
+        organism_index.append(f"- Verträge (Contracts): {len(organism_contracts)} Datei(en)")
+        organism_index.append(f"- Pipelines (CI/CD): {len(organism_pipelines)} Workflow(s)")
+        organism_index.append(f"- WGX / Fleet-Profile: {len(organism_wgx_profiles)} Profil(e)")
+        organism_index.append("")
+
+        # Detaillierte Abschnitte mit Fallbacks
+
+        # AI-Kontext
         if organism_ai_ctx:
             organism_index.append("### AI-Kontext")
             for fi in organism_ai_ctx:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
-        
+        else:
+            organism_index.append("### AI-Kontext")
+            organism_index.append("_Keine AI-Kontext-Dateien gefunden._")
+            organism_index.append("")
+
+        # Verträge / Contracts
         if organism_contracts:
             organism_index.append("### Verträge (Contracts)")
             for fi in organism_contracts:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
-        
+        else:
+            organism_index.append("### Verträge (Contracts)")
+            organism_index.append("_Keine Contract-Dateien gefunden._")
+            organism_index.append("")
+
+        # Pipelines / CI
         if organism_pipelines:
             organism_index.append("### Pipelines (CI/CD)")
             for fi in organism_pipelines:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
-        
+        else:
+            organism_index.append("### Pipelines (CI/CD)")
+            organism_index.append("_Keine CI/CD-Workflows gefunden._")
+            organism_index.append("")
+
+        # WGX / Fleet-Profile
         if organism_wgx_profiles:
             organism_index.append("### WGX / Fleet-Profile")
             for fi in organism_wgx_profiles:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
-        
+        else:
+            organism_index.append("### WGX / Fleet-Profile")
+            organism_index.append("_Kein WGX-/Fleet-Profil gefunden._")
+            organism_index.append("")
+
         organism_index.append("<!-- @organism-index:end -->")
         organism_index.append("")
         yield "\n".join(organism_index)
-
-    # --- Fleet Panorama (Stage 2: Multi-Repo) ---
-    if extras.fleet_panorama and len(roots) > 1:
-        fleet_panorama = []
-        fleet_panorama.append("<!-- @fleet-panorama:start -->")
-        fleet_panorama.append("## 🛰 Fleet Panorama")
-        fleet_panorama.append("")
-        fleet_panorama.append(f"**Summary:** {len(roots)} repos, {human_size(total_size)}, {len(files)} files")
-        fleet_panorama.append("")
-        
-        for root in sorted(files_by_root.keys()):
-            root_files = files_by_root[root]
-            root_total = len(root_files)
-            root_bytes = sum(f.size for f in root_files)
-            
-            # Count categories for this repo
-            root_cat_counts: Dict[str, int] = {}
-            for fi in root_files:
-                cat = fi.category or "other"
-                root_cat_counts[cat] = root_cat_counts.get(cat, 0) + 1
-            
-            cat_parts = [f"{cat}={count}" for cat, count in sorted(root_cat_counts.items())]
-            
-            # Check for key indicators
-            has_wgx = any(".wgx" in f.rel_path.parts for f in root_files)
-            has_ci = any("ci" in (f.tags or []) for f in root_files)
-            
-            fleet_panorama.append(f"**`{root}`:**")
-            fleet_panorama.append(f"- Files: {root_total}")
-            fleet_panorama.append(f"- Size: {human_size(root_bytes)}")
-            fleet_panorama.append(f"- Categories: {', '.join(cat_parts)}")
-            
-            # Role determination
-            role = "utility"
-            if "metarepo" in root.lower():
-                role = "governance"
-            elif "contract" in root.lower():
-                role = "schema authority"
-            elif "tool" in root.lower():
-                role = "tooling"
-            
-            fleet_panorama.append(f"- Role: {role}")
-            
-            indicators = []
-            if has_wgx:
-                indicators.append("WGX")
-            if has_ci:
-                indicators.append("CI")
-            if indicators:
-                fleet_panorama.append(f"- Indicators: {', '.join(indicators)}")
-            
-            fleet_panorama.append("")
-        
-        fleet_panorama.append("<!-- @fleet-panorama:end -->")
-        fleet_panorama.append("")
-        yield "\n".join(fleet_panorama)
 
     # --- AI Heatmap (Stage 3: Auto-Discovery) ---
     if extras.heatmap:
