@@ -19,3 +19,7 @@ build/
 *.swn
 .DS_Store
 metrics.json
+
+# Merger output files
+merges/
+*_merge.md
