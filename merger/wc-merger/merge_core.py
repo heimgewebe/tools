@@ -114,6 +114,7 @@ class ExtrasConfig:
     fleet_panorama: bool = False
     augment_sidecar: bool = False
     delta_reports: bool = False
+    heatmap: bool = False
 
     @classmethod
     def none(cls):
@@ -174,6 +175,7 @@ class RepoHealth:
     has_ci_workflows: bool
     has_contracts: bool
     has_ai_context: bool
+    unknown_category_ratio: float
     unknown_categories: List[str]
     unknown_tags: List[str]
     warnings: List[str]
@@ -216,15 +218,22 @@ class HealthCollector:
         # Check for unknown categories/tags
         unknown_categories = []
         unknown_tags = []
+        unknown_cat_count = 0
+
         for fi in files:
             cat = fi.category or "other"
             if cat not in ALLOWED_CATEGORIES:
                 if cat not in unknown_categories:
                     unknown_categories.append(cat)
+                unknown_cat_count += 1
             for tag in fi.tags or []:
                 if tag not in ALLOWED_TAGS:
                     if tag not in unknown_tags:
                         unknown_tags.append(tag)
+
+        unknown_category_ratio = 0.0
+        if len(files) > 0:
+            unknown_category_ratio = unknown_cat_count / len(files)
 
         # Generate warnings and recommendations
         warnings = []
@@ -274,6 +283,7 @@ class HealthCollector:
             has_ci_workflows=has_ci_workflows,
             has_contracts=has_contracts,
             has_ai_context=has_ai_context,
+            unknown_category_ratio=unknown_category_ratio,
             unknown_categories=unknown_categories,
             unknown_tags=unknown_tags,
             warnings=warnings,
@@ -297,6 +307,24 @@ class HealthCollector:
         lines.append("## 🩺 Repo Health")
         lines.append("")
 
+        # 1. Repo Feindynamiken (Global)
+        total_repos = len(self._repo_health)
+        no_ci = sum(1 for h in self._repo_health.values() if not h.has_ci_workflows)
+        no_contracts = sum(1 for h in self._repo_health.values() if not h.has_contracts)
+        no_wgx = sum(1 for h in self._repo_health.values() if not h.has_wgx_profile)
+
+        if no_ci > 0 or no_contracts > 0 or no_wgx > 0:
+            lines.append("### ⚔ Repo Feindynamiken (Global Risks)")
+            lines.append("")
+            if no_ci > 0:
+                lines.append(f"- {no_ci} Repos ohne CI-Workflows")
+            if no_contracts > 0:
+                lines.append(f"- {no_contracts} Repos ohne Contracts")
+            if no_wgx > 0:
+                lines.append(f"- {no_wgx} Repos ohne WGX-Profil")
+            lines.append("")
+
+        # 2. Per-Repo Report
         for health in sorted(self._repo_health.values(), key=lambda h: h.repo_name):
             # Status emoji
             status_emoji = {
@@ -323,21 +351,101 @@ class HealthCollector:
             indicators.append(f"AI Context: {'yes' if health.has_ai_context else 'no'}")
             lines.append(f"- **Indicators:** {', '.join(indicators)}")
 
-            # Warnings
+            # Feindynamik-Scanner (Risiken)
+            risks = []
+            if not health.has_contracts:
+                risks.append("❌ Keine Contracts gefunden → Änderungen nicht formal prüfbar.")
+            else:
+                risks.append("✅ Contracts vorhanden")
+
+            if not health.has_ci_workflows:
+                risks.append("❌ Keine CI-Workflows → Keine automatische Qualitätssicherung.")
+            else:
+                risks.append("✅ CI-Workflows vorhanden")
+
+            if not health.has_wgx_profile:
+                risks.append("❌ Kein WGX-Profil → Organismus kennt Standard-Jobs nicht.")
+            else:
+                risks.append("✅ WGX-Profil vorhanden")
+
+            lines.append("")
+            lines.append("**Risiko-Check (Feindynamik):**")
+            for r in risks:
+                lines.append(f"- {r}")
+
+            # Warnings (Standard)
             if health.warnings:
-                lines.append("- **Warnings:**")
+                lines.append("")
+                lines.append("**Detailed Warnings:**")
                 for warning in health.warnings:
                     lines.append(f"  - {warning}")
 
             # Recommendations
             if health.recommendations:
-                lines.append("- **Recommendations:**")
+                lines.append("")
+                lines.append("**Recommendations:**")
                 for rec in health.recommendations:
                     lines.append(f"  - {rec}")
 
             lines.append("")
 
         lines.append("<!-- @health:end -->")
+        lines.append("")
+        return "\n".join(lines)
+
+
+class HeatmapCollector:
+    """
+    Identifies code hotspots and complexity clusters.
+    """
+    def __init__(self, files: List["FileInfo"]):
+        self.files = files
+
+    def render_markdown(self) -> str:
+        if not self.files:
+            return ""
+
+        lines = []
+        lines.append("<!-- @heatmap:start -->")
+        lines.append("## 🔥 AI Heatmap – Code Hotspots")
+        lines.append("")
+
+        # 1. Top Files (Size & Complexity proxy)
+        # Filter for relevant categories
+        relevant = [f for f in self.files if f.category in ("source", "config", "contract", "test")]
+        # Sort by size desc
+        top_files = sorted(relevant, key=lambda f: f.size, reverse=True)[:5]
+
+        lines.append("### Top-Level Hotspots (Files by Size)")
+        for i, f in enumerate(top_files, 1):
+            lines.append(f"{i}. `{f.rel_path}`")
+            lines.append(f"   - Size: {human_size(f.size)}")
+            lines.append(f"   - Category: {f.category}")
+            if f.tags:
+                lines.append(f"   - Tags: {', '.join(f.tags)}")
+            lines.append("")
+
+        # 2. Top Folders
+        folder_stats = {}
+        for f in self.files:
+            parent = f.rel_path.parent
+            if parent == Path("."):
+                continue
+            path_str = str(parent)
+            if path_str not in folder_stats:
+                folder_stats[path_str] = {"count": 0, "size": 0}
+            folder_stats[path_str]["count"] += 1
+            folder_stats[path_str]["size"] += f.size
+
+        # Sort by size
+        sorted_folders = sorted(folder_stats.items(), key=lambda x: x[1]["size"], reverse=True)[:5]
+
+        lines.append("### Top Folder Hotspots")
+        for path, stats in sorted_folders:
+            lines.append(f"- `{path}/` → {stats['count']} Files, {human_size(stats['size'])}")
+
+        lines.append("")
+        lines.append("<!-- @heatmap:end -->")
         lines.append("")
         return "\n".join(lines)
 
@@ -363,6 +471,8 @@ def _build_extras_meta(extras: "ExtrasConfig", num_repos: int) -> Dict[str, bool
         extras_meta["augment_sidecar"] = True
     if extras.delta_reports:
         extras_meta["delta_reports"] = True
+    if extras.heatmap:
+        extras_meta["heatmap"] = True
     return extras_meta
 
 
@@ -679,6 +789,36 @@ class FileInfo(object):
 
 
 # --- Utilities ---
+
+def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
+    """
+    Infers the high-level semantic role of the repository within the organism.
+    """
+    roles = []
+    root = root_label.lower()
+
+    # Name-based heuristics
+    if "tool" in root or "merger" in root: roles.append("tooling")
+    if "contract" in root or "schema" in root: roles.append("contracts")
+    if "meta" in root: roles.append("governance")
+    if "lern" in root: roles.append("education")
+    if "geist" in root: roles.append("knowledge-base")
+    if "haus" in root: roles.append("logic-core")
+    if "sensor" in root: roles.append("ingestion")
+    if "ui" in root or "app" in root or "leitstand" in root: roles.append("ui")
+    if "wgx" in root: roles.append("fleet-management")
+
+    # Content-based heuristics
+    has_contracts = any(f.category == "contract" for f in files)
+
+    if has_contracts and "contracts" not in roles:
+        roles.append("contracts")
+
+    if not roles:
+        roles.append("service")
+
+    return " / ".join(roles)
+
 
 def compute_file_roles(fi: "FileInfo") -> List[str]:
     """
@@ -1788,31 +1928,35 @@ def iter_report_blocks(
 
     # --- Organism Index (Stage 2: Single Repo) ---
     if extras.organism_index and len(roots) == 1:
+        repo_role = infer_repo_role(list(roots)[0], files)
+
         organism_index = []
         organism_index.append("<!-- @organism-index:start -->")
         organism_index.append("## 🧬 Organism Index")
         organism_index.append("")
+        organism_index.append(f"**Rolle dieses Repos:** {repo_role}")
+        organism_index.append("")
         
         if organism_ai_ctx:
-            organism_index.append("**AI-Context:**")
+            organism_index.append("### AI-Kontext")
             for fi in organism_ai_ctx:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
         
         if organism_contracts:
-            organism_index.append("**Contracts:**")
+            organism_index.append("### Verträge (Contracts)")
             for fi in organism_contracts:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
         
         if organism_pipelines:
-            organism_index.append("**CI & Pipelines:**")
+            organism_index.append("### Pipelines (CI/CD)")
             for fi in organism_pipelines:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
         
         if organism_wgx_profiles:
-            organism_index.append("**WGX-Profile:**")
+            organism_index.append("### WGX / Fleet-Profile")
             for fi in organism_wgx_profiles:
                 organism_index.append(f"- `{fi.rel_path}`")
             organism_index.append("")
@@ -1876,6 +2020,13 @@ def iter_report_blocks(
         fleet_panorama.append("<!-- @fleet-panorama:end -->")
         fleet_panorama.append("")
         yield "\n".join(fleet_panorama)
+
+    # --- AI Heatmap (Stage 3: Auto-Discovery) ---
+    if extras.heatmap:
+        heatmap_collector = HeatmapCollector(files)
+        hm_report = heatmap_collector.render_markdown()
+        if hm_report:
+            yield hm_report
 
     # --- Augment Intelligence (Stage 4: Sidecar) ---
     if extras.augment_sidecar:

@@ -729,6 +729,7 @@ class MergerUI(object):
         add_switch("fleet_panorama", "Fleet Panorama (Multi-Repo)")
         add_switch("delta_reports", "Delta Reports (wenn Diff verfügbar)")
         add_switch("augment_sidecar", "Augment Sidecar (Playbooks)")
+        add_switch("heatmap", "AI Heatmap (Code Hotspots)")
 
         # Close button
         y += 20
@@ -866,6 +867,7 @@ class MergerUI(object):
                 "fleet_panorama": self.extras_config.fleet_panorama,
                 "delta_reports": self.extras_config.delta_reports,
                 "augment_sidecar": self.extras_config.augment_sidecar,
+                "heatmap": self.extras_config.heatmap,
             }
         }
         try:
@@ -914,6 +916,7 @@ class MergerUI(object):
             self.extras_config.fleet_panorama = extras_data.get("fleet_panorama", False)
             self.extras_config.delta_reports = extras_data.get("delta_reports", False)
             self.extras_config.augment_sidecar = extras_data.get("augment_sidecar", False)
+            self.extras_config.heatmap = extras_data.get("heatmap", False)
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
