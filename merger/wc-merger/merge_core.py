@@ -1633,12 +1633,16 @@ def iter_report_blocks(
                 "missing": sorted(list(missing_set)),
             }
 
-        # Delta-Metadaten
+        # --- Delta Meta (NEW fully correct block) ---
         if extras and extras.delta_reports:
             if delta_meta:
+                # Use the real delta metadata if provided
                 meta_dict["merge"]["delta"] = delta_meta
             else:
-                meta_dict["merge"]["delta"] = {"enabled": True}
+                # Minimal enabling marker
+                meta_dict["merge"]["delta"] = {
+                    "enabled": True
+                }
 
         # Augment-Metadaten
         if extras and extras.augment_sidecar:
@@ -1773,6 +1777,15 @@ def iter_report_blocks(
         if health_report:
             yield health_report
 
+    # --- Delta Report Block (NEW) ---
+    if extras.delta_reports and delta_meta:
+        try:
+            delta_block = _render_delta_block(delta_meta)
+            if delta_block:
+                yield delta_block
+        except Exception as e:
+            yield f"\n<!-- delta-error: {e} -->\n"
+
     # --- Organism Index (Stage 2: Single Repo) ---
     if extras.organism_index and len(roots) == 1:
         organism_index = []
@@ -1869,12 +1882,6 @@ def iter_report_blocks(
         augment_block = _render_augment_block(sources)
         if augment_block:
             yield augment_block
-    
-    # --- Delta Report (Stage 3: Content) ---
-    if extras.delta_reports and delta_meta:
-        delta_block = _render_delta_block(delta_meta)
-        if delta_block:
-            yield delta_block
 
     if plan_only:
         return
