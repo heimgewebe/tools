@@ -1241,6 +1241,24 @@ def main_cli():
                 print(f"Warning: Unknown extra '{part}' ignored.")
 
     merges_dir = get_merges_dir(hub)
+    
+    # Try to extract delta_meta if delta_reports is enabled
+    delta_meta = None
+    if extras_config.delta_reports and len(summaries) == 1:
+        # Only try to find delta for single-repo merges
+        repo_name = summaries[0]["name"]
+        try:
+            mod = _load_wc_extractor_module()
+            if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
+                diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
+                if diff_path:
+                    delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+                    if delta_meta and args.debug:
+                        print(f"Delta metadata extracted from {diff_path.name}")
+        except Exception as e:
+            if args.debug:
+                print(f"Warning: Could not extract delta metadata: {e}")
+    
     out_paths = write_reports_v2(
         merges_dir,
         hub,
@@ -1254,6 +1272,7 @@ def main_cli():
         path_filter=None,
         ext_filter=None,
         extras=extras_config,
+        delta_meta=delta_meta,
     )
 
     print(f"Generated {len(out_paths)} report(s):")

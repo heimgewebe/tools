@@ -96,6 +96,55 @@ def build_delta_meta_from_diff(
     return delta_meta
 
 
+def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Extract delta metadata from an import-diff file.
+    
+    Args:
+        diff_path: Path to the import-diff markdown file
+    
+    Returns:
+        Delta metadata dict conforming to wc-merge-delta.schema.json,
+        or None if extraction fails
+    """
+    try:
+        text = diff_path.read_text(encoding="utf-8")
+        rows = parse_import_diff_table(text)
+        
+        if not rows:
+            return None
+        
+        # Extract base timestamp from diff file if available
+        base_timestamp = None
+        lines = text.splitlines()
+        for line in lines:
+            if line.strip().startswith("- Zeitpunkt:"):
+                # Try to extract timestamp, but don't fail if it's malformed
+                try:
+                    ts_part = line.split("`")[1]
+                    # Parse it to a datetime and convert to ISO format
+                    import datetime
+                    dt = datetime.datetime.strptime(ts_part, "%Y-%m-%d %H:%M:%S")
+                    base_timestamp = dt.replace(tzinfo=datetime.timezone.utc).isoformat()
+                except (IndexError, ValueError):
+                    pass
+                break
+        
+        # Categorize rows
+        only_old = [r["path"] for r in rows if r["status"] == "removed"]
+        only_new = [r["path"] for r in rows if r["status"] == "added"]
+        changed = [
+            (r["path"], r["size_old"] or 0, r["size_new"] or 0, "", "", "", "")
+            for r in rows if r["status"] == "changed"
+        ]
+        
+        return build_delta_meta_from_diff(only_old, only_new, changed, base_timestamp)
+    
+    except Exception:
+        # Silently fail - don't break the merge if delta extraction fails
+        return None
+
+
 def diff_trees(
     old: Path,
     new: Path,
@@ -609,6 +658,27 @@ def build_delta_merge_report(
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
     return out_path
+
+
+def find_latest_diff_for_repo(merges_dir: Path, repo_name: str) -> Optional[Path]:
+    """
+    Find the most recent import-diff file for a given repo.
+    
+    Args:
+        merges_dir: Directory containing merge files
+        repo_name: Name of the repository
+    
+    Returns:
+        Path to the most recent diff file, or None if not found
+    """
+    try:
+        pattern = f"{repo_name}-import-diff-*.md"
+        candidates = list(merges_dir.glob(pattern))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    except Exception:
+        return None
 
 
 def create_delta_merge_from_diff(
