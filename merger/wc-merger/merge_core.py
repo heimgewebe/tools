@@ -1578,7 +1578,7 @@ def iter_report_blocks(
     
     header.append("")
     
-    # Prepare filter descriptions for meta block
+    # Prepare human-readable filter descriptions for header display
     path_filter_desc = path_filter if path_filter else "none (full tree)"
     ext_filter_desc = ", ".join(sorted(ext_filter)) if ext_filter else "none (all text types)"
 
@@ -1599,8 +1599,8 @@ def iter_report_blocks(
                 "max_file_bytes": max_file_bytes,
                 "scope": scope_desc,
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
-                "path_filter": path_filter_desc,
-                "ext_filter": ext_filter_desc,
+                "path_filter": path_filter,  # Use actual value, not description
+                "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
             }
         }
 
@@ -1703,6 +1703,20 @@ def iter_report_blocks(
             f"- **Coverage:** {included_count}/{len(text_files)} Textdateien mit Inhalt (`full`/`truncated`)"
         )
     plan.append("")
+    
+    # Optional Delta Summary (if delta_meta is provided with summary)
+    if extras.delta_reports and delta_meta and isinstance(delta_meta, dict):
+        summary = delta_meta.get("summary", {})
+        if isinstance(summary, dict):
+            plan.append("### Delta Summary")
+            plan.append("")
+            files_added = summary.get("files_added", 0)
+            files_removed = summary.get("files_removed", 0)
+            files_changed = summary.get("files_changed", 0)
+            plan.append(f"- Files added: {files_added}")
+            plan.append(f"- Files removed: {files_removed}")
+            plan.append(f"- Files changed: {files_changed}")
+            plan.append("")
 
     # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
     # files_by_root was calculated earlier for Health Check
