@@ -52,6 +52,50 @@ def detect_hub() -> Path:
     return detect_hub_dir(script_path)
 
 
+def build_delta_meta_from_diff(
+    only_old: List[str],
+    only_new: List[str],
+    changed: List[Tuple[str, int, int, str, str, str, str]],
+    base_timestamp: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Builds a delta metadata dict conforming to wc-merge-delta.schema.json.
+    
+    Args:
+        only_old: List of files removed
+        only_new: List of files added
+        changed: List of changed file tuples (path, size_old, size_new, ...)
+        base_timestamp: Optional timestamp of base import
+    
+    Returns:
+        Delta metadata dict conforming to schema
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    
+    delta_meta = {
+        "type": "wc-merge-delta",
+        "base_import": base_timestamp or now.isoformat(),
+        "current_timestamp": now.isoformat(),
+        "summary": {
+            "files_added": len(only_new),
+            "files_removed": len(only_old),
+            "files_changed": len(changed),
+        },
+        # Optional: detailed lists (extension to schema)
+        "files_added": list(only_new),
+        "files_removed": list(only_old),
+        "files_changed": [
+            {
+                "path": item[0],
+                "size_delta": item[2] - item[1],  # size_new - size_old
+            }
+            for item in changed
+        ],
+    }
+    
+    return delta_meta
+
+
 def diff_trees(
     old: Path,
     new: Path,

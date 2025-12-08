@@ -342,17 +342,22 @@ class HealthCollector:
         return "\n".join(lines)
 
 
-def _build_extras_meta(extras: "ExtrasConfig") -> Dict[str, bool]:
+def _build_extras_meta(extras: "ExtrasConfig", num_repos: int = 1) -> Dict[str, bool]:
     """
     Hilfsfunktion: baut den extras-Block für den @meta-Contract.
     Nur aktivierte Flags werden gesetzt, damit das Schema schlank bleibt.
+    
+    Args:
+        extras: ExtrasConfig mit den gewünschten Extras
+        num_repos: Anzahl der Repos im Merge (für Fleet Panorama)
     """
     extras_meta: Dict[str, bool] = {}
     if extras.health:
         extras_meta["health"] = True
     if extras.organism_index:
         extras_meta["organism_index"] = True
-    if extras.fleet_panorama:
+    # Fleet Panorama nur bei Multi-Repo-Merges
+    if extras.fleet_panorama and num_repos > 1:
         extras_meta["fleet_panorama"] = True
     if extras.augment_sidecar:
         extras_meta["augment_sidecar"] = True
@@ -1198,33 +1203,56 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
     """
     Render Delta Report block from delta metadata.
     Shows what changed between base and current import.
+    
+    Supports both formats:
+    1. Schema-compliant (base_import, current_timestamp, summary.files_*)
+    2. Detailed format (base_timestamp, files_added/removed/changed as arrays)
     """
     lines = []
     lines.append("<!-- @delta:start -->")
     lines.append("## ♻ Delta Report")
     lines.append("")
     
-    # Extract info from delta_meta
-    base_ts = delta_meta.get("base_timestamp", "unknown")
+    # Extract timestamps - support both schema (base_import) and legacy (base_timestamp)
+    base_ts = delta_meta.get("base_import") or delta_meta.get("base_timestamp", "unknown")
     current_ts = delta_meta.get("current_timestamp", "unknown")
     
     lines.append(f"- **Base Import:** {base_ts}")
     lines.append(f"- **Current:** {current_ts}")
     lines.append("")
     
-    # Summary
-    added = delta_meta.get("files_added", [])
-    removed = delta_meta.get("files_removed", [])
-    changed = delta_meta.get("files_changed", [])
+    # Check for schema-compliant summary object
+    summary = delta_meta.get("summary", {})
+    if summary and isinstance(summary, dict):
+        # Schema-compliant format with counts
+        added_count = summary.get("files_added", 0)
+        removed_count = summary.get("files_removed", 0)
+        changed_count = summary.get("files_changed", 0)
+        
+        lines.append("**Summary:**")
+        lines.append(f"- Files added: {added_count}")
+        lines.append(f"- Files removed: {removed_count}")
+        lines.append(f"- Files changed: {changed_count}")
+        lines.append("")
+        
+        # Check for detailed lists (optional extension to schema)
+        added = delta_meta.get("files_added", [])
+        removed = delta_meta.get("files_removed", [])
+        changed = delta_meta.get("files_changed", [])
+    else:
+        # Legacy detailed format with arrays
+        added = delta_meta.get("files_added", [])
+        removed = delta_meta.get("files_removed", [])
+        changed = delta_meta.get("files_changed", [])
+        
+        lines.append("**Summary:**")
+        lines.append(f"- Files added: {len(added) if isinstance(added, list) else 0}")
+        lines.append(f"- Files removed: {len(removed) if isinstance(removed, list) else 0}")
+        lines.append(f"- Files changed: {len(changed) if isinstance(changed, list) else 0}")
+        lines.append("")
     
-    lines.append("**Summary:**")
-    lines.append(f"- Files added: {len(added)}")
-    lines.append(f"- Files removed: {len(removed)}")
-    lines.append(f"- Files changed: {len(changed)}")
-    lines.append("")
-    
-    # Detail sections
-    if added:
+    # Detail sections (only if we have lists)
+    if isinstance(added, list) and added:
         lines.append("### Added Files")
         for f in added[:MAX_DELTA_FILES]:
             lines.append(f"- `{f}`")
@@ -1232,7 +1260,7 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
             lines.append(f"- _(and {len(added) - MAX_DELTA_FILES} more)_")
         lines.append("")
     
-    if removed:
+    if isinstance(removed, list) and removed:
         lines.append("### Removed Files")
         for f in removed[:MAX_DELTA_FILES]:
             lines.append(f"- `{f}`")
@@ -1240,7 +1268,7 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
             lines.append(f"- _(and {len(removed) - MAX_DELTA_FILES} more)_")
         lines.append("")
     
-    if changed:
+    if isinstance(changed, list) and changed:
         lines.append("### Changed Files")
         for f in changed[:MAX_DELTA_FILES]:
             if isinstance(f, dict):
@@ -1574,7 +1602,7 @@ def iter_report_blocks(
 
         # Extras-Flags
         if extras:
-            extras_meta = _build_extras_meta(extras)
+            extras_meta = _build_extras_meta(extras, len(roots))
             if extras_meta:
                 meta_dict["merge"]["extras"] = extras_meta
 
