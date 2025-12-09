@@ -43,6 +43,36 @@ except Exception:
     editor = None    # type: ignore
 
 
+def safe_script_path() -> Path:
+    """
+    Versucht, den Pfad dieses Skripts robust zu bestimmen.
+
+    Reihenfolge:
+    1. __file__ (Standard-Python)
+    2. sys.argv[0] (z. B. in Shortcuts / eingebetteten Umgebungen)
+    3. aktuelle Arbeitsdirectory (Last Resort)
+    """
+    try:
+        return Path(__file__).resolve()
+    except NameError:
+        # Pythonista / Shortcuts oder exotischer Kontext
+        argv0 = None
+        try:
+            if getattr(sys, "argv", None):
+                argv0 = sys.argv[0] or None
+        except Exception:
+            argv0 = None
+
+        if argv0:
+            try:
+                return Path(argv0).resolve()
+            except Exception:
+                pass
+
+        # Fallback: aktuelle Arbeitsdirectory
+        return Path.cwd().resolve()
+
+
 def force_close_files(paths: List[Path]) -> None:
     """
     Ensures generated files are not left open in the editor.
@@ -82,7 +112,7 @@ try:
         ExtrasConfig,
     )
 except ImportError:
-    sys.path.append(str(Path(__file__).parent))
+    sys.path.append(str(safe_script_path().parent))
     from merge_core import (
         MERGES_DIR_NAME,
         DEFAULT_MAX_BYTES,
@@ -186,20 +216,7 @@ def _load_wc_extractor_module():
     import types
     import sys
 
-    try:
-        # Normalfall: __file__ ist definiert.
-        script_path = Path(__file__).resolve()
-    except NameError:
-        # Eingebetteter / Pythonista-Sonderfall.
-        candidate = None
-        if getattr(sys, "argv", None):
-            candidate = sys.argv[0] or None
-        if candidate:
-            script_path = Path(candidate).resolve()
-        else:
-            # Fallback – besser ein „best guess“ als ein Crash.
-            script_path = Path.cwd() / "wc-merger.py"
-
+    script_path = safe_script_path()
     extractor_path = script_path.with_name("wc-extractor.py")
     if not extractor_path.exists():
         return None
@@ -1307,7 +1324,7 @@ def main_cli():
 
     args = parser.parse_args()
 
-    script_path = Path(__file__).resolve()
+    script_path = safe_script_path()
     hub = detect_hub_dir(script_path, args.hub)
 
     sources = []
@@ -1412,7 +1429,7 @@ def main():
 
     if use_ui:
         try:
-            script_path = Path(__file__).resolve()
+            script_path = safe_script_path()
             hub = detect_hub_dir(script_path)
             return run_ui(hub)
         except Exception as e:

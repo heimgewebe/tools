@@ -13,10 +13,41 @@ Voraussetzungen:
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator
+
+
+def safe_script_path() -> Path:
+    """
+    Versucht, den Pfad dieses Skripts robust zu bestimmen.
+
+    Reihenfolge:
+    1. __file__ (Standard-Python)
+    2. sys.argv[0] (z. B. in Shortcuts / eingebetteten Umgebungen)
+    3. aktuelle Arbeitsdirectory (Last Resort)
+    """
+    try:
+        return Path(__file__).resolve()
+    except NameError:
+        # Pythonista / Shortcuts oder exotischer Kontext
+        argv0 = None
+        try:
+            if getattr(sys, "argv", None):
+                argv0 = sys.argv[0] or None
+        except Exception:
+            argv0 = None
+
+        if argv0:
+            try:
+                return Path(argv0).resolve()
+            except Exception:
+                pass
+
+        # Fallback: aktuelle Arbeitsdirectory
+        return Path.cwd().resolve()
 
 
 def extract_meta_block(markdown: str) -> dict:
@@ -40,7 +71,7 @@ def load_schema(path: Path) -> dict:
 
 def validate_report_meta(report_path: Path) -> None:
     # Schemas liegen neben dem Skript, nicht zwingend neben dem Report
-    script_dir = Path(__file__).resolve().parent
+    script_dir = safe_script_path().parent
 
     text = report_path.read_text(encoding="utf-8")
     meta = extract_meta_block(text)
