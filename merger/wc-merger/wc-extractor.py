@@ -31,6 +31,41 @@ try:
 except ImportError:
     console = None  # type: ignore
 
+
+def safe_script_path() -> Path:
+    """
+    Versucht, den Pfad dieses Skripts robust zu bestimmen.
+
+    Reihenfolge:
+    1. __file__ (Standard-Python)
+    2. sys.argv[0] (z. B. in Shortcuts / eingebetteten Umgebungen)
+    3. aktuelle Arbeitsdirectory (Last Resort)
+    """
+    try:
+        return Path(__file__).resolve()
+    except NameError:
+        # Pythonista / Shortcuts oder exotischer Kontext
+        argv0 = None
+        try:
+            if getattr(sys, "argv", None):
+                argv0 = sys.argv[0] or None
+        except Exception:
+            argv0 = None
+
+        if argv0:
+            try:
+                return Path(argv0).resolve()
+            except Exception:
+                pass
+
+        # Fallback: aktuelle Arbeitsdirectory
+        return Path.cwd().resolve()
+
+
+# Cache script path at module level for consistent behavior
+SCRIPT_PATH = safe_script_path()
+SCRIPT_DIR = SCRIPT_PATH.parent
+
 # Import from core
 try:
     from merge_core import (
@@ -39,7 +74,7 @@ try:
         get_repo_snapshot,
     )
 except ImportError:
-    sys.path.append(str(Path(__file__).parent))
+    sys.path.append(str(SCRIPT_DIR))
     from merge_core import (
         detect_hub_dir,
         get_merges_dir,
@@ -48,8 +83,7 @@ except ImportError:
 
 
 def detect_hub() -> Path:
-    script_path = Path(__file__).resolve()
-    return detect_hub_dir(script_path)
+    return detect_hub_dir(SCRIPT_PATH)
 
 
 def build_delta_meta_from_diff(
@@ -358,8 +392,7 @@ def main() -> int:
     parser.add_argument("--hub", help="Hub directory override.")
     args = parser.parse_args()
 
-    script_path = Path(__file__).resolve()
-    hub = detect_hub_dir(script_path, args.hub)
+    hub = detect_hub_dir(SCRIPT_PATH, args.hub)
 
     if not hub.exists():
          print(f"Hub directory not found: {hub}")
