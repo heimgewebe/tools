@@ -235,7 +235,7 @@ class MergerUI(object):
         # Expected format: wc-merger.py --level max --mode gesamt ...
         import argparse
         parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument("--level", default="dev")
+        parser.add_argument("--level", default="max")
         parser.add_argument("--mode", default="gesamt")
         # 0 = unbegrenzt
         parser.add_argument("--max-bytes", type=int, default=0)
@@ -407,7 +407,7 @@ class MergerUI(object):
         try:
             seg_detail.selected_index = seg_detail.segments.index(args.level)
         except ValueError:
-            seg_detail.selected_index = 2  # Default dev
+            seg_detail.selected_index = 3  # Default max
         seg_detail.frame = (70, cy - 2, cw - 80, 28)
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
@@ -690,11 +690,32 @@ class MergerUI(object):
         s = ui.View()
         s.name = "Extras"
         s.background_color = "#222222"
-        s.frame = (0, 0, 300, 340)
+
+        # Items definieren, um Höhe zu berechnen
+        items = [
+            ("Repo Health Checks", "health"),
+            ("Organism Index", "organism_index"),
+            ("Fleet Panorama", "fleet_panorama"),
+            ("Delta Reports", "delta_reports"),
+            ("Augment Sidecar", "augment_sidecar"),
+            ("AI Heatmap", "heatmap")
+        ]
+
+        row_h = 44
+        padding_top = 20
+        padding_bottom = 20
+        title_height = 50 # War 40 + gap, wir nehmen etwas mehr für 2 Zeilen
+
+        dynamic_h = padding_top + title_height + len(items) * row_h + padding_bottom + 60 # +60 für Done-Button + Gap
+
+        # Mindest- und Maximalhöhe setzen (Pythonista Sheet Constraints)
+        dynamic_h = max(260, min(dynamic_h, 540))
+
+        s.frame = (0, 0, 420, dynamic_h)
 
         y = 20
         margin = 20
-        w = 300 - 2 * margin
+        w = s.width - 2 * margin
 
         lbl = ui.Label(frame=(margin, y, w, 40))
         lbl.text = "Optionale Zusatzanalysen\n(Health, Organism, etc.)"
@@ -722,17 +743,13 @@ class MergerUI(object):
 
             s.add_subview(l)
             s.add_subview(sw)
-            y += 40
+            y += row_h
 
-        add_switch("health", "Repo Health Checks")
-        add_switch("organism_index", "Organism Index")
-        add_switch("fleet_panorama", "Fleet Panorama (Multi-Repo)")
-        add_switch("delta_reports", "Delta Reports (wenn Diff verfügbar)")
-        add_switch("augment_sidecar", "Augment Sidecar (Playbooks)")
-        add_switch("heatmap", "AI Heatmap (Code Hotspots)")
+        for title, key in items:
+            add_switch(key, title)
 
         # Close button
-        y += 20
+        y += 10
         btn = ui.Button(frame=(margin, y, w, 40))
         btn.title = "Done"
         btn.background_color = "#007aff"
@@ -1280,6 +1297,8 @@ def main_cli():
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
     parser.add_argument("--extras", help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar) or 'none'", default="none")
+    parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
+    parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
 
     args = parser.parse_args()
 
@@ -1309,10 +1328,13 @@ def main_cli():
     print(f"Hub: {hub}")
     print(f"Sources: {[s.name for s in sources]}")
 
+    ext_list = _normalize_ext_list(args.extensions) if args.extensions else None
+    path_filter = args.path_filter
+
     summaries = []
     for src in sources:
         print(f"Scanning {src.name}...")
-        summary = scan_repo(src, None, None, args.max_bytes)
+        summary = scan_repo(src, ext_list, path_filter, args.max_bytes)
         summaries.append(summary)
 
     # Default: ab 10 MB wird gesplittet, aber kein Gesamtlimit – es werden
@@ -1360,8 +1382,8 @@ def main_cli():
         args.plan_only,
         split_size,
         debug=args.debug,
-        path_filter=None,
-        ext_filter=None,
+        path_filter=path_filter,
+        ext_filter=ext_list,
         extras=extras_config,
         delta_meta=delta_meta,
     )

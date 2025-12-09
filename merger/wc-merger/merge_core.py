@@ -1343,7 +1343,14 @@ def build_tree(file_infos: List[FileInfo]) -> str:
     lines.append("```")
     return "\n".join(lines)
 
-def make_output_filename(merges_dir: Path, repo_names: List[str], mode: str, detail: str, part: Optional[int] = None) -> Path:
+def make_output_filename(
+    merges_dir: Path,
+    repo_names: List[str],
+    detail: str,
+    part_suffix: str = "",
+    path_filter: Optional[str] = None,
+    ext_filter: Optional[List[str]] = None
+) -> Path:
     # Zeitstempel ohne Sekunden, damit die Namen ruhiger werden
     ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
     base = "+".join(repo_names) if repo_names else "no-repos"
@@ -1351,12 +1358,26 @@ def make_output_filename(merges_dir: Path, repo_names: List[str], mode: str, det
         base = base[:37] + "..."
     base = base.replace(" ", "-").replace("/", "_")
 
-    part_suffix = f"_part{part}" if part else ""
+    # Filter im Dateinamen (2.3 Spec Update)
+    filter_parts = []
+    if ext_filter:
+        # e.g. .md,.yml -> md-yml
+        ext_str = "-".join(sorted(ext_filter)).replace(".", "").replace(",", "-")
+        if len(ext_str) > 20: ext_str = ext_str[:17] + "..."
+        filter_parts.append(f"ext-{ext_str}")
+
+    if path_filter:
+        # e.g. docs/ -> docs
+        path_str = path_filter.replace("/", "").replace(",", "-")
+        if len(path_str) > 20: path_str = path_str[:17] + "..."
+        filter_parts.append(f"path-{path_str}")
+
+    filter_suffix = ("_" + "_".join(filter_parts)) if filter_parts else ""
+
     # Neues Schema:
-    #   <repos>_<detail>_<mode>_<YYMMDD-HHMM>[_partX]_merge.md
-    # Beispiel:
-    #   hausKI+wgx_dev_multi_251205-1457_merge.md
-    return merges_dir / f"{base}_{detail}_{mode}_{ts}{part_suffix}_merge.md"
+    #   <repos>_<detail>_<YYMMDD-HHMM>[_filters][_partXofY]_merge.md
+    # Removed: 'mode' (single/multi) as it is redundant
+    return merges_dir / f"{base}_{detail}_{ts}{filter_suffix}{part_suffix}_merge.md"
 
 def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[str, bool, str]:
     """
@@ -2235,7 +2256,9 @@ def write_reports_v2(
                 if not current_lines:
                     return
 
-                out_path = output_filename_base_func(part=part_num)
+                # Temporärer Name während der Generierung
+                # Wir nutzen _tmp_partX, um es später sauber umzubenennen
+                out_path = output_filename_base_func(part_suffix=f"_tmp_part{part_num}")
                 out_path.write_text("".join(current_lines), encoding="utf-8")
                 local_out_paths.append(out_path)
 
@@ -2262,51 +2285,59 @@ def write_reports_v2(
 
             flush_part(is_last=True)
 
-            # Nachlauf: Header aller Teile auf "Part N/M" normalisieren.
-            # Hintergrund:
-            # - Während des Schreibens kennen wir die Gesamtzahl der Teile noch nicht.
-            # - Jetzt (nach allen flushes) können wir die Header 1/1, 1/3, 2/3, … sauber setzen.
+            # Nachlauf: Header normalisieren UND Dateien umbenennen (Part X of Y)
             total_parts = len(local_out_paths)
-            if total_parts >= 1:
-                prefix_part = "# WC-Merge Report (Part "
-                prefix_main = "# WC-Merge Report"
+            final_paths = []
 
-                for idx, path in enumerate(local_out_paths, start=1):
-                    try:
-                        text = path.read_text(encoding="utf-8")
-                    except Exception:
-                        # Wenn das Lesen fehlschlägt, diesen Part überspringen.
-                        continue
-
+            for idx, path in enumerate(local_out_paths, start=1):
+                # 1. Header Rewrite
+                try:
+                    text = path.read_text(encoding="utf-8")
                     lines = text.splitlines(True)
-                    if not lines:
-                        continue
+                    if lines:
+                        prefix_part = "# WC-Merge Report (Part "
+                        prefix_main = "# WC-Merge Report"
+                        for i, line in enumerate(lines):
+                            stripped = line.lstrip("\ufeff")
+                            if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
+                                lines[i] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
+                                break
+                    text = "".join(lines)
+                except Exception:
+                    text = None # Skip rewrite if read fails, but still rename
 
-                    # Robuste Header-Erkennung: BOM und Whitespace tolerieren
-                    header_idx = None
-                    for i, line in enumerate(lines):
-                        stripped = line.lstrip("\ufeff")  # Remove BOM if present
-                        if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
-                            header_idx = i
-                            break
+                # 2. Rename File
+                # If total_parts == 1, no part suffix.
+                # If total_parts > 1, _partXofY.
+                if total_parts == 1:
+                    new_suffix = ""
+                else:
+                    new_suffix = f"_part{idx}of{total_parts}"
 
-                    if header_idx is None:
-                        continue
+                new_path = output_filename_base_func(part_suffix=new_suffix)
 
-                    # Nur die Header-Zeile ersetzen, Rest unverändert lassen.
-                    lines[header_idx] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
-                    try:
-                        path.write_text("".join(lines), encoding="utf-8")
-                    except Exception:
-                        # Schreibfehler nicht fatal machen.
-                        pass
+                if text is not None:
+                     new_path.write_text(text, encoding="utf-8")
+                     # Delete old tmp file
+                     try:
+                         path.unlink()
+                     except OSError:
+                         pass
+                else:
+                     # Just rename if we couldn't read/edit content
+                     try:
+                         path.rename(new_path)
+                     except OSError:
+                         pass
 
-            out_paths.extend(local_out_paths)
+                final_paths.append(new_path)
+
+            out_paths.extend(final_paths)
 
         else:
-            # Standard single file
+            # Standard single file (no split logic active, e.g. split_size=0)
             content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta)
-            out_path = output_filename_base_func(part=None)
+            out_path = output_filename_base_func(part_suffix="")
             out_path.write_text(content, encoding="utf-8")
             out_paths.append(out_path)
 
@@ -2319,13 +2350,10 @@ def write_reports_v2(
             repo_names.append(s["name"])
             sources.append(s["root"])
 
-        # kosmetisches Label im Dateinamen:
-        # nur ein Repo → "single", mehrere → "multi"
-        mode_label = "single" if len(repo_names) == 1 else "multi"
         process_and_write(
             all_files,
             sources,
-            lambda part=None: make_output_filename(merges_dir, repo_names, mode_label, detail, part),
+            lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter),
         )
 
     else:
@@ -2334,6 +2362,6 @@ def write_reports_v2(
             s_files = s["files"]
             s_root = s["root"]
 
-            process_and_write(s_files, [s_root], lambda part=None: make_output_filename(merges_dir, [s_name], "repo", detail, part))
+            process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter))
 
     return out_paths
