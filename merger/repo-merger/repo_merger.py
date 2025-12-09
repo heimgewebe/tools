@@ -124,14 +124,14 @@ def file_md5(path: Path) -> str:
 def is_text_file(path: Path) -> bool:
     """Check if file is a text file based on extension."""
     ext = path.suffix.lower()
-    name = path.name.lower()
+    name_lower = path.name.lower()
     
     # Check extension
     if ext in TEXT_EXTENSIONS:
         return True
     
-    # Check special files without extension
-    if name in {"dockerfile", "makefile", "justfile"}:
+    # Check special files without extension (case-insensitive)
+    if name_lower in {"dockerfile", "makefile", "justfile"}:
         return True
     
     # Sniff for text content
@@ -204,10 +204,10 @@ def gather_files(root: Path, level: str) -> List[Tuple[Path, Path]]:
     for dirpath, dirnames, filenames in os.walk(root):
         d = Path(dirpath)
         
-        # Filter directories
+        # Filter directories (keep .github as it's often important)
         dirnames[:] = [
             dn for dn in dirnames
-            if dn not in SKIP_DIRS and not dn.startswith(".")
+            if dn not in SKIP_DIRS and (not dn.startswith(".") or dn == ".github")
         ]
         
         for fn in filenames:
@@ -225,8 +225,8 @@ def gather_files(root: Path, level: str) -> List[Tuple[Path, Path]]:
             
             # Level-specific filtering
             if level == "overview":
-                # Only specific important files
-                if fn.lower() not in config["include_patterns"]:
+                # Only specific important files (case-insensitive match)
+                if fn.lower() not in {p.lower() for p in config["include_patterns"]}:
                     continue
             else:
                 # Category-based filtering

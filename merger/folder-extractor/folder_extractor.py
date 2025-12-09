@@ -368,10 +368,10 @@ def gather_files(root: Path) -> List[Tuple[Path, Path]]:
     for dirpath, dirnames, filenames in os.walk(root):
         d = Path(dirpath)
         
-        # Filter directories
+        # Filter directories (keep .github as it's often important)
         dirnames[:] = [
             dn for dn in dirnames
-            if dn not in IGNORE_DIR_NAMES and not dn.startswith(".")
+            if dn not in IGNORE_DIR_NAMES and (not dn.startswith(".") or dn == ".github")
         ]
         
         for fn in filenames:
@@ -617,9 +617,11 @@ Supported File Types:
 Configuration:
   Create ~/.config/folder-extractor/config.toml for OCR settings:
   
+  # For Tesseract OCR:
   [ocr]
-  backend = "tesseract"  # or "shortcut" or "none"
+  backend = "tesseract"
   
+  # For iOS Shortcuts OCR:
   [ocr]
   backend = "shortcut"
   shortcut_name = "FolderExtractor OCR"
