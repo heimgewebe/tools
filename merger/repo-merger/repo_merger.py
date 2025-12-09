@@ -201,6 +201,11 @@ def gather_files(root: Path, level: str) -> List[Tuple[Path, Path]]:
     config = LEVEL_CONFIG.get(level, LEVEL_CONFIG["max"])
     files: List[Tuple[Path, Path]] = []
     
+    # Prepare include patterns for overview level (case-insensitive)
+    include_patterns_lower = None
+    if level == "overview" and "include_patterns" in config:
+        include_patterns_lower = {p.lower() for p in config["include_patterns"]}
+    
     for dirpath, dirnames, filenames in os.walk(root):
         d = Path(dirpath)
         
@@ -226,7 +231,7 @@ def gather_files(root: Path, level: str) -> List[Tuple[Path, Path]]:
             # Level-specific filtering
             if level == "overview":
                 # Only specific important files (case-insensitive match)
-                if fn.lower() not in {p.lower() for p in config["include_patterns"]}:
+                if include_patterns_lower and fn.lower() not in include_patterns_lower:
                     continue
             else:
                 # Category-based filtering
