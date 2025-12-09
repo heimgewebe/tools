@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-all-ein-wandler – Ordner → eine Markdown-Datei + JSON-Manifest
+omniwandler – Ordner → eine Markdown-Datei + JSON-Manifest
 
 Optimiert für iOS (Pythonista) & Desktop.
 Zweck: Konvertierung von generischen Ordnern (PDFs, Bilder, Docs) in KI-lesbares Markdown.
@@ -166,11 +166,11 @@ def is_probably_text(path: Path, sniff_bytes: int = 4096) -> bool:
 
 # --- Config Class ---
 
-class WandlerConfig:
+class OmniWandlerConfig:
     def __init__(self):
         self.max_file_bytes = DEFAULT_MAX_FILE_BYTES
         self.ocr_backend = "none"
-        self.ocr_shortcut = "AllEin OCR"
+        self.ocr_shortcut = "OmniWandler OCR"
         self.keep_last_n = 5
         self.auto_delete_source = True # Im Hub-Modus Standard
 
@@ -178,7 +178,7 @@ class WandlerConfig:
 
     def load(self):
         # 1. ~/.config
-        cfg_path = Path.home() / ".config" / "all-ein-wandler" / "config.toml"
+        cfg_path = Path.home() / ".config" / "omniwandler" / "config.toml"
         if cfg_path.exists():
             try:
                 # Basic parsing without toml lib dependency to avoid crashes
@@ -198,8 +198,8 @@ class WandlerConfig:
 
 # --- Core Logic ---
 
-class WandlerCore:
-    def __init__(self, config: WandlerConfig):
+class OmniWandlerCore:
+    def __init__(self, config: OmniWandlerConfig):
         self.config = config
 
     def ocr_via_shortcut(self, image_path: Path) -> Optional[str]:
@@ -238,7 +238,7 @@ class WandlerCore:
         files = self.gather_files(source)
 
         ts = datetime.now().strftime("%Y%m%d-%H%M")
-        stem = f"{source.name}_all-ein_{ts}"
+        stem = f"{source.name}_omniwandler_{ts}"
         md_path = dest_dir / f"{stem}.md"
         json_path = dest_dir / f"{stem}.manifest.json"
 
@@ -247,10 +247,10 @@ class WandlerCore:
 
         with md_path.open("w", encoding=ENCODING, errors="replace") as out:
             # Header matching wc-merger style roughly
-            out.write(f"# All-Ein-Wandler Report: {source.name}\n\n")
+            out.write(f"# OmniWandler Report: {source.name}\n\n")
             out.write(f"<!-- @meta:start -->\n")
-            out.write(f"tool: all-ein-wandler\n")
-            out.write(f"version: 2.1\n")
+            out.write(f"tool: omniwandler\n")
+            out.write(f"version: 2.2\n")
             out.write(f"source: {source.name}\n")
             out.write(f"timestamp: {datetime.now().isoformat()}\n")
             out.write(f"files: {len(files)}\n")
@@ -315,7 +315,7 @@ class WandlerCore:
 
         # Write Manifest
         manifest = {
-            "tool": "all-ein-wandler",
+            "tool": "omniwandler",
             "version": 2,
             "source": str(source),
             "created": datetime.now().isoformat(),
@@ -353,7 +353,7 @@ class WandlerCore:
 
     def enforce_retention(self, dest_dir: Path, keep: int = 5):
         try:
-            files = list(dest_dir.glob("*_all-ein_*.md"))
+            files = list(dest_dir.glob("*_omniwandler_*.md"))
             files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
             for f in files[keep:]:
                 f.unlink(missing_ok=True)
@@ -363,8 +363,8 @@ class WandlerCore:
 
 # --- UI Class ---
 
-class WandlerUI:
-    def __init__(self, core: WandlerCore, hub_dir: Path):
+class OmniWandlerUI:
+    def __init__(self, core: OmniWandlerCore, hub_dir: Path):
         self.core = core
         self.hub_dir = hub_dir
         self.files = self._scan_hub()
@@ -372,18 +372,27 @@ class WandlerUI:
 
     def _scan_hub(self) -> List[Path]:
         if not self.hub_dir.exists():
-            self.hub_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                self.hub_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                # Silently ignore creation errors if hub detection is fuzzy
+                pass
+
+        if not self.hub_dir.exists():
+            print(f"Hub not found at: {self.hub_dir}")
+            return []
 
         print(f"Scanning Hub: {self.hub_dir}")
         cands = []
-        for p in self.hub_dir.iterdir():
-            if p.name == "wandlungen" or p.name.startswith("."):
-                continue
-            if p.is_dir():
-                cands.append(p)
-            else:
-                # Debugging info
-                print(f"Skipping non-dir: {p.name}")
+        try:
+            for p in self.hub_dir.iterdir():
+                if p.name == "wandlungen" or p.name.startswith("."):
+                    continue
+                if p.is_dir():
+                    cands.append(p)
+        except Exception as e:
+            print(f"Error scanning hub: {e}")
+            return []
 
         # Sort new to old
         cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -392,7 +401,7 @@ class WandlerUI:
 
     def _build_view(self) -> ui.View:
         v = ui.View()
-        v.name = "All-Ein-Wandler"
+        v.name = "OmniWandler"
         v.background_color = "#111111"
         v.flex = "WH"
 
@@ -404,24 +413,27 @@ class WandlerUI:
         v.add_subview(hdr)
 
         title = ui.Label(frame=(10, 5, v.width - 60, 24))
-        title.text = "All-Ein-Wandler"
+        title.text = "OmniWandler"
         title.font = ("<system-bold>", 18)
         title.text_color = "white"
         title.flex = "W"
         hdr.add_subview(title)
 
-        # Show path for debug/confirmation
+        # Show path for debug/confirmation + Select Action
         path_str = str(self.hub_dir)
         home = str(Path.home())
         if path_str.startswith(home):
             path_str = "~" + path_str[len(home):]
 
-        path_lbl = ui.Label(frame=(10, 30, v.width - 60, 20))
-        path_lbl.text = f"Hub: {path_str}"
+        path_lbl = ui.Button(frame=(10, 30, v.width - 60, 20))
+        path_lbl.title = f"Hub: {path_str}"
         path_lbl.font = ("<system>", 12)
-        path_lbl.text_color = "#888888"
+        path_lbl.tint_color = "#888888"
+        path_lbl.alignment = ui.ALIGN_LEFT
         path_lbl.flex = "W"
+        path_lbl.action = self._pick_hub_location
         hdr.add_subview(path_lbl)
+        self.path_lbl = path_lbl
 
         # Add Source Button (Manual Pick)
         add_btn = ui.Button(frame=(v.width - 50, 10, 40, 40))
@@ -496,6 +508,25 @@ class WandlerUI:
         else:
             self.status_lbl.text = "No folders found in Hub."
 
+        # Update Hub Label text in case it changed
+        path_str = str(self.hub_dir)
+        home = str(Path.home())
+        if path_str.startswith(home):
+            path_str = "~" + path_str[len(home):]
+        self.path_lbl.title = f"Hub: {path_str}"
+
+    def _pick_hub_location(self, sender):
+        """Allows re-selecting the Hub directory if detection failed."""
+        if not dialogs: return
+
+        # We need a folder picker for the Hub root
+        folder = dialogs.pick_document(types=['public.folder'])
+        if folder:
+            self.hub_dir = Path(folder)
+            self._refresh(None)
+            if console:
+                console.hud_alert("Hub updated")
+
     def _pick_folder(self, sender):
         if not dialogs:
             if console: console.alert("Dialogs module not available.")
@@ -506,11 +537,9 @@ class WandlerUI:
         if folder:
             src = Path(folder)
             self.status_lbl.text = f"Manual pick: {src.name}"
-            # Confirm
-            if console:
-                idx = console.alert(f"Process {src.name}?", str(src), "Convert", "Cancel")
-                if idx == 0:
-                    self._run_conversion(src, manual_mode=True)
+            # Direct processing without blocking console.alert
+            # to avoid UI thread issues
+            self._run_conversion(src, manual_mode=True)
 
     def _on_select(self, sender):
         idx = self.tv.selected_row
@@ -524,14 +553,18 @@ class WandlerUI:
 
         def worker():
             try:
+                # Output dir: wandlungen subdir in Hub
+                # If hub_dir is not writable/valid, maybe use src parent?
+                # But let's try Hub first.
                 dest = self.hub_dir / "wandlungen"
-                dest.mkdir(exist_ok=True)
-                should_del = self.del_switch.value
+                if not dest.exists():
+                    try:
+                        dest.mkdir(parents=True, exist_ok=True)
+                    except Exception:
+                        # Fallback to source parent if hub is readonly/invalid
+                        dest = src.parent
 
-                # In manual mode, maybe output to parent of source?
-                # Or always to wandlungen?
-                # Let's keep it to wandlungen to be safe.
-                # User can delete source if switch is on.
+                should_del = self.del_switch.value
 
                 md, _ = self.core.run(src, dest, delete_source=should_del)
                 self.core.enforce_retention(dest)
@@ -544,7 +577,8 @@ class WandlerUI:
             except Exception as e:
                 traceback.print_exc()
                 if console:
-                    console.alert("Error", str(e))
+                    # Non-blocking error if possible, or just log
+                    console.hud_alert(f"Error: {e}", "error", 2.0)
                 self.status_lbl.text = "Error occurred."
 
         ui.delay(worker, 0.1)
@@ -553,11 +587,50 @@ class WandlerUI:
         self.view.present("fullscreen", hide_title_bar=True)
 
 
+# --- Hub Detection ---
+
+def detect_wandler_hub(script_path: Path) -> Path:
+    """
+    Smarter Hub detection logic.
+    1. Env var: OMNIWANDLER_HUB
+    2. Check relative paths (../../wandler-hub, etc.)
+    3. Check standard iOS Documents path (~/Documents/wandler-hub)
+    4. Fallback to script parent
+    """
+    env_hub = os.environ.get("OMNIWANDLER_HUB")
+    if env_hub:
+        p = Path(env_hub).expanduser()
+        if p.is_dir(): return p
+
+    # Standard iOS Pythonista location
+    ios_docs = Path.home() / "Documents" / "wandler-hub"
+    if ios_docs.is_dir(): return ios_docs
+
+    # Relative to script (up to 3 levels)
+    # script/../../wandler-hub
+    current = script_path.parent
+    for _ in range(3):
+        candidate = current / "wandler-hub"
+        if candidate.is_dir(): return candidate
+        if current.parent == current: break
+        current = current.parent
+
+    # Check if we are INSIDE the hub (e.g. script is in wandler-hub/tools/omniwandler.py)
+    # Not common but possible.
+
+    # If standard path doesn't exist but we are in standard environment (iOS),
+    # we might want to CREATE it there.
+    # So returning ios_docs is a good default even if it doesn't exist yet,
+    # as main() will try to create it.
+
+    return ios_docs
+
+
 # --- Main ---
 
 def main():
-    config = WandlerConfig()
-    core = WandlerCore(config)
+    config = OmniWandlerConfig()
+    core = OmniWandlerCore(config)
 
     # Args
     source_arg = None
@@ -566,7 +639,7 @@ def main():
 
     # Env var
     if not source_arg:
-        source_arg = os.environ.get("AEW_SOURCE")
+        source_arg = os.environ.get("OMNIWANDLER_SOURCE") or os.environ.get("AEW_SOURCE")
 
     # Mode selection
     if source_arg:
@@ -582,7 +655,8 @@ def main():
 
     else:
         # Hub Mode
-        hub_dir = Path.home() / "Documents" / "wandler-hub"
+        script_path = safe_script_path()
+        hub_dir = detect_wandler_hub(script_path)
 
         # Fix for crash: Auto-create if missing
         if not hub_dir.exists():
@@ -595,7 +669,7 @@ def main():
 
         # Check for UI availability
         if ui:
-            app = WandlerUI(core, hub_dir)
+            app = OmniWandlerUI(core, hub_dir)
             app.present()
         else:
             # Fallback for headless hub mode
