@@ -62,6 +62,10 @@ def safe_script_path() -> Path:
         return Path.cwd().resolve()
 
 
+# Cache script path at module level for consistent behavior
+SCRIPT_PATH = safe_script_path()
+SCRIPT_DIR = SCRIPT_PATH.parent
+
 # Import from core
 try:
     from merge_core import (
@@ -70,7 +74,7 @@ try:
         get_repo_snapshot,
     )
 except ImportError:
-    sys.path.append(str(safe_script_path().parent))
+    sys.path.append(str(SCRIPT_DIR))
     from merge_core import (
         detect_hub_dir,
         get_merges_dir,
@@ -79,8 +83,7 @@ except ImportError:
 
 
 def detect_hub() -> Path:
-    script_path = safe_script_path()
-    return detect_hub_dir(script_path)
+    return detect_hub_dir(SCRIPT_PATH)
 
 
 def build_delta_meta_from_diff(
@@ -389,8 +392,7 @@ def main() -> int:
     parser.add_argument("--hub", help="Hub directory override.")
     args = parser.parse_args()
 
-    script_path = safe_script_path()
-    hub = detect_hub_dir(script_path, args.hub)
+    hub = detect_hub_dir(SCRIPT_PATH, args.hub)
 
     if not hub.exists():
          print(f"Hub directory not found: {hub}")
