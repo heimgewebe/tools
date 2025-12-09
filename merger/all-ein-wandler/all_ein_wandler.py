@@ -39,6 +39,7 @@ import os
 import io
 import json
 import hashlib
+import shutil
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -324,9 +325,10 @@ def gather_files(source: Path) -> List[Tuple[Path, Path]]:
     for dirpath, dirnames, filenames in os.walk(source):
         d = Path(dirpath)
         # Ordner filtern
+        # .github erlauben, andere hidden ordner ausschließen
         dirnames[:] = [
             dn for dn in dirnames
-            if dn not in IGNORE_DIR_NAMES and not dn.startswith(".")
+            if dn not in IGNORE_DIR_NAMES and (not dn.startswith(".") or dn == ".github")
         ]
         for fn in filenames:
             p = d / fn
@@ -377,7 +379,7 @@ def write_text_file_content(
                     break
                 chunk_index += 1
                 text = raw.decode(ENCODING, errors="replace")
-                suffix = f" (Teil {chunk_index})"
+                # suffix nicht verwendet
                 out.write(f"```{lang}\n")
                 out.write(text)
                 if not text.endswith("\n"):
@@ -392,14 +394,14 @@ def write_text_file_content(
     return chunk_index
 
 
-def build_output_paths(source: Path) -> Tuple[Path, Path]:
+def build_output_paths(source: Path, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
     """
     Erzeugt Pfade für:
       - Markdown
       - JSON-Manifest
-    im selben Verzeichnis wie die Quelle.
+    im Zielordner (dest_dir) oder, falls nicht gesetzt, im Elternordner der Quelle.
     """
-    base_dir = source.parent
+    base_dir = dest_dir or source.parent
     base_name = source.name
     ts = datetime.now().strftime("%Y%m%d-%H%M")
     stem = f"{base_name}_all-ein_{ts}"
@@ -408,13 +410,14 @@ def build_output_paths(source: Path) -> Tuple[Path, Path]:
     return md_path, json_path
 
 
-def run_all_ein_wandler(source: Path, max_file_bytes: int) -> None:
+def run_all_ein_wandler(source: Path, max_file_bytes: int, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
     cfg = load_config()
     ocr_backend, ocr_cfg = get_ocr_backend(cfg)
 
     files = gather_files(source)
 
-    md_path, json_path = build_output_paths(source)
+    # Zielordner bestimmen (explizit oder Standard = Elternordner der Quelle)
+    md_path, json_path = build_output_paths(source, dest_dir=dest_dir)
     md_path.parent.mkdir(parents=True, exist_ok=True)
 
     stats_total_bytes = 0
@@ -572,6 +575,8 @@ def run_all_ein_wandler(source: Path, max_file_bytes: int) -> None:
     print(f"   Markdown : {md_path}")
     print(f"   Manifest : {json_path}")
 
+    return md_path, json_path
+
 
 # ========= CLI / Source-Ermittlung =========
 
@@ -614,44 +619,150 @@ def parse_args(argv: List[str]) -> Tuple[Optional[str], int]:
     return src, max_bytes
 
 
-def resolve_source_dir(argv: List[str]) -> Tuple[Path, int]:
-    # 1) Env Override
+def _resolve_paths(argv: List[str]) -> Tuple[Path, Path, int, bool]:
+    """
+    Ermittelt Quelle, Ziel, max_file_bytes und ob wir im wandler-hub-Modus laufen.
+
+    - Wenn AEW_SOURCE oder CLI-Args gesetzt sind:
+      → Quelle wie bisher, Ziel = source.parent, kein Auto-Löschen.
+    - Wenn nichts gesetzt:
+      → wandler-hub-Modus:
+         Quelle = zuletzt geänderter Unterordner von ~/Documents/wandler-hub
+                   (ohne 'wandlungen' und ohne versteckte Ordner)
+         Ziel   = ~/Documents/wandler-hub/wandlungen
+    """
+    # 1) Env/CLI prüfen
     env_src = os.environ.get("AEW_SOURCE", "").strip()
     cli_src, cli_max_bytes = parse_args(argv)
 
+    has_explicit_source = bool(env_src or cli_src)
     max_bytes = cli_max_bytes
 
-    cand = env_src or cli_src or ""
-    if not cand:
-        # Fallback: aktuelles Verzeichnis
-        source = Path.cwd()
-    else:
-        cand = deurl_path(cand)
-        p = Path(cand).expanduser()
-        if p.is_file():
-            source = p.parent
+    if has_explicit_source:
+        cand = env_src or cli_src or ""
+        cand = deurl_path(cand) if cand else ""
+        if not cand:
+            source = Path.cwd()
         else:
-            source = p
+            p = Path(cand).expanduser()
+            if p.is_file():
+                source = p.parent
+            else:
+                source = p
 
-    if not source.is_dir():
-        raise SystemExit(f"❌ Quelle ist kein Ordner: {source}")
+        if not source.is_dir():
+            raise SystemExit(f"❌ Quelle ist kein Ordner: {source}")
 
-    # Config kann max_file_bytes noch überschreiben (wenn CLI nichts gesetzt hat)
+        # Config kann max_file_bytes noch überschreiben (wenn CLI nichts gesetzt hat)
+        cfg = load_config()
+        gen_cfg = cfg.get("general") or {}
+        if cli_max_bytes == DEFAULT_MAX_FILE_BYTES:
+            try:
+                cfg_val = int(gen_cfg.get("max_file_bytes", DEFAULT_MAX_FILE_BYTES))
+                max_bytes = cfg_val
+            except Exception:
+                max_bytes = DEFAULT_MAX_FILE_BYTES
+
+        dest_dir = source.parent
+        return source, dest_dir, max_bytes, False  # Kein Hub-Modus
+
+    # 2) wandler-hub-Modus (Standard auf iPad ohne Args)
+    docs_root = Path.home() / "Documents"
+    hub_dir = docs_root / "wandler-hub"
+    if not hub_dir.is_dir():
+        raise SystemExit(f"❌ wandler-hub nicht gefunden: {hub_dir}")
+
+    dest_dir = hub_dir / "wandlungen"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Alle Kandidatenordner (Unterordner außer 'wandlungen' und versteckte)
+    candidates: List[Path] = []
+    for entry in hub_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        if entry.name == "wandlungen":
+            continue
+        if entry.name.startswith("."):
+            continue
+        candidates.append(entry)
+
+    if not candidates:
+        raise SystemExit("❌ Kein Quellordner in wandler-hub gefunden (außer 'wandlungen').")
+
+    # Zuletzt geänderten Ordner nehmen (vermutlich der gerade abgelegte)
+    try:
+        source = max(candidates, key=lambda p: p.stat().st_mtime)
+    except Exception:
+        source = candidates[0]
+
+    # max_file_bytes ggf. aus Config holen
     cfg = load_config()
     gen_cfg = cfg.get("general") or {}
-    if cli_max_bytes == DEFAULT_MAX_FILE_BYTES:
-        try:
-            cfg_val = int(gen_cfg.get("max_file_bytes", DEFAULT_MAX_FILE_BYTES))
-            max_bytes = cfg_val
-        except Exception:
-            max_bytes = DEFAULT_MAX_FILE_BYTES
+    try:
+        cfg_val = int(gen_cfg.get("max_file_bytes", DEFAULT_MAX_FILE_BYTES))
+        max_bytes = cfg_val
+    except Exception:
+        max_bytes = DEFAULT_MAX_FILE_BYTES
 
-    return source, max_bytes
+    return source, dest_dir, max_bytes, True  # Hub-Modus aktiv
+
+
+def _cleanup_source_dir(source: Path, dest_dir: Path) -> None:
+    """
+    Löscht den Quellordner nach erfolgreicher Wandlung.
+    Sicherheitsleine: löscht niemals den Zielordner selbst.
+    """
+    try:
+        if source.resolve() == dest_dir.resolve():
+            print("⚠️ Quelle und Ziel sind identisch – nichts gelöscht.", file=sys.stderr)
+            return
+        shutil.rmtree(source)
+        print(f"🗑️ Quellordner gelöscht: {source}")
+    except Exception as e:
+        print(f"⚠️ Konnte Quellordner nicht löschen: {e}", file=sys.stderr)
+
+
+def _enforce_retention(dest_dir: Path, keep: int = 5) -> None:
+    """
+    Hält nur die letzten `keep` Wandlungen im Zielordner.
+    Ältere Paare (<stem>.md + <stem>.manifest.json) werden entfernt.
+    """
+    try:
+        runs: List[Tuple[str, float]] = []
+        for md_file in dest_dir.glob("*_all-ein_*.md"):
+            stem = md_file.stem
+            try:
+                mtime = md_file.stat().st_mtime
+            except Exception:
+                mtime = 0.0
+            runs.append((stem, mtime))
+
+        if len(runs) <= keep:
+            return
+
+        runs.sort(key=lambda x: x[1], reverse=True)  # Neueste zuerst
+        to_delete = [stem for stem, _ in runs[keep:]]
+
+        for stem in to_delete:
+            for suffix in (".md", ".manifest.json"):
+                path = dest_dir / f"{stem}{suffix}"
+                if path.exists():
+                    try:
+                        path.unlink()
+                    except Exception as e:
+                        print(f"⚠️ Konnte alte Wandlung nicht löschen: {path} ({e})", file=sys.stderr)
+    except Exception as e:
+        print(f"⚠️ Fehler bei Aufräumlogik im Zielordner: {e}", file=sys.stderr)
 
 
 def main() -> None:
-    source, max_bytes = resolve_source_dir(sys.argv[1:])
-    run_all_ein_wandler(source, max_file_bytes=max_bytes)
+    source, dest_dir, max_bytes, is_hub_mode = _resolve_paths(sys.argv[1:])
+    md_path, json_path = run_all_ein_wandler(source, max_file_bytes=max_bytes, dest_dir=dest_dir)
+
+    # Nur im wandler-hub-Modus aggressiv aufräumen
+    if is_hub_mode:
+        _cleanup_source_dir(source, dest_dir)
+        _enforce_retention(dest_dir, keep=5)
 
 
 if __name__ == "__main__":
