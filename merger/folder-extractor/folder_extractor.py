@@ -197,18 +197,27 @@ def load_config() -> Dict[str, Any]:
 
 def extract_text(path: Path, max_bytes: int) -> Tuple[Optional[str], str]:
     """
-    Extract text from text file.
+    Extract text from text file with chunking for large files.
     Returns (text, method)
     """
     try:
         size = path.stat().st_size
         if max_bytes > 0 and size > max_bytes:
-            # Read only up to max_bytes
+            # Chunk large files instead of truncating
+            chunks = []
+            chunk_num = 0
             with path.open("rb") as f:
-                content = f.read(max_bytes)
-            text = content.decode(ENCODING, errors="replace")
-            text += f"\n\n... (truncated, file is {human_size(size)})"
-            return text, "text_truncated"
+                while True:
+                    content = f.read(max_bytes)
+                    if not content:
+                        break
+                    chunk_num += 1
+                    text = content.decode(ENCODING, errors="replace")
+                    chunks.append(f"--- Chunk {chunk_num} ---\n{text}")
+            
+            full_text = "\n\n".join(chunks)
+            full_text += f"\n\n(File chunked into {chunk_num} parts, total size: {human_size(size)})"
+            return full_text, "text_chunked"
         else:
             text = path.read_text(encoding=ENCODING, errors="replace")
             return text, "text"
@@ -229,7 +238,9 @@ def extract_pdf(path: Path) -> Tuple[Optional[str], str]:
             reader = PyPDF2.PdfReader(f)
             for page in reader.pages:
                 try:
-                    text_parts.append(page.extract_text())
+                    text = page.extract_text()
+                    if text:  # Filter out None values
+                        text_parts.append(text)
                 except Exception:
                     continue
         if text_parts:
@@ -542,14 +553,19 @@ def generate_extraction(
         if current_part:
             parts.append("\n".join(current_part))
         
-        # Write parts
+        # Write parts with proper headers
         stem = output_path.stem
         parent = output_path.parent
         suffix = output_path.suffix
         
         for i, part in enumerate(parts, 1):
             part_path = parent / f"{stem}_part{i}{suffix}"
-            part_path.write_text(part, encoding=ENCODING)
+            
+            # Add part header
+            part_content = f"# Folder Extractor Report: {root.name} (Part {i}/{len(parts)})\n\n"
+            part_content += part
+            
+            part_path.write_text(part_content, encoding=ENCODING)
             print(f"✅ Part {i}/{len(parts)} created: {part_path}")
     else:
         # Single file
