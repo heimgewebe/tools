@@ -50,6 +50,11 @@ def safe_script_path() -> Path:
         return Path.cwd().resolve()
 
 
+# Cache script path at module level for consistent behavior
+SCRIPT_PATH = safe_script_path()
+SCRIPT_DIR = SCRIPT_PATH.parent
+
+
 def extract_meta_block(markdown: str) -> dict:
     """
     Sucht den ersten @meta-Block im Markdown und parst den YAML-Inhalt.
@@ -71,8 +76,6 @@ def load_schema(path: Path) -> dict:
 
 def validate_report_meta(report_path: Path) -> None:
     # Schemas liegen neben dem Skript, nicht zwingend neben dem Report
-    script_dir = safe_script_path().parent
-
     text = report_path.read_text(encoding="utf-8")
     meta = extract_meta_block(text)
 
@@ -81,7 +84,7 @@ def validate_report_meta(report_path: Path) -> None:
         raise ValueError("Im @meta-Block fehlt der Schlüssel 'merge' oder er ist kein Objekt.")
 
     # Hauptschema laden
-    report_schema_path = (script_dir / "wc-merge-report.schema.json").resolve()
+    report_schema_path = (SCRIPT_DIR / "wc-merge-report.schema.json").resolve()
     if not report_schema_path.exists():
         raise FileNotFoundError(f"Schema nicht gefunden: {report_schema_path}")
 
@@ -102,7 +105,7 @@ def validate_report_meta(report_path: Path) -> None:
     # Optional: Delta-Contract validieren, falls vorhanden
     delta = merge_meta.get("delta")
     if isinstance(delta, dict) and delta.get("type") == "wc-merge-delta":
-        delta_schema_path = (script_dir / "wc-merge-delta.schema.json").resolve()
+        delta_schema_path = (SCRIPT_DIR / "wc-merge-delta.schema.json").resolve()
         if not delta_schema_path.exists():
             print("⚠️  Delta-Schema nicht gefunden, überspringe Delta-Validierung.")
             return

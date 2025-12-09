@@ -73,6 +73,11 @@ def safe_script_path() -> Path:
         return Path.cwd().resolve()
 
 
+# Cache script path at module level for consistent behavior
+SCRIPT_PATH = safe_script_path()
+SCRIPT_DIR = SCRIPT_PATH.parent
+
+
 def force_close_files(paths: List[Path]) -> None:
     """
     Ensures generated files are not left open in the editor.
@@ -112,7 +117,7 @@ try:
         ExtrasConfig,
     )
 except ImportError:
-    sys.path.append(str(safe_script_path().parent))
+    sys.path.append(str(SCRIPT_DIR))
     from merge_core import (
         MERGES_DIR_NAME,
         DEFAULT_MAX_BYTES,
@@ -216,8 +221,7 @@ def _load_wc_extractor_module():
     import types
     import sys
 
-    script_path = safe_script_path()
-    extractor_path = script_path.with_name("wc-extractor.py")
+    extractor_path = SCRIPT_PATH.with_name("wc-extractor.py")
     if not extractor_path.exists():
         return None
     try:
@@ -1324,8 +1328,7 @@ def main_cli():
 
     args = parser.parse_args()
 
-    script_path = safe_script_path()
-    hub = detect_hub_dir(script_path, args.hub)
+    hub = detect_hub_dir(SCRIPT_PATH, args.hub)
 
     sources = []
     if args.paths:
@@ -1429,8 +1432,7 @@ def main():
 
     if use_ui:
         try:
-            script_path = safe_script_path()
-            hub = detect_hub_dir(script_path)
+            hub = detect_hub_dir(SCRIPT_PATH)
             return run_ui(hub)
         except Exception as e:
             # Fallback auf CLI (headless), falls UI trotz ui-Import nicht verfügbar ist
