@@ -1291,7 +1291,12 @@ def main_cli():
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default="dev")
     parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default="gesamt")
     # 0 = unbegrenzt pro Datei
-    parser.add_argument("--max-bytes", type=int, default=0)
+    parser.add_argument(
+        "--max-bytes",
+        type=str,
+        default="0",
+        help="Max bytes per file (e.g. 5MB, 500K, or 0 for unlimited)",
+    )
     parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="10MB")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
@@ -1328,13 +1333,17 @@ def main_cli():
     print(f"Hub: {hub}")
     print(f"Sources: {[s.name for s in sources]}")
 
+    max_bytes = parse_human_size(str(args.max_bytes))
+    if max_bytes < 0:
+        max_bytes = 0
+
     ext_list = _normalize_ext_list(args.extensions) if args.extensions else None
     path_filter = args.path_filter
 
     summaries = []
     for src in sources:
         print(f"Scanning {src.name}...")
-        summary = scan_repo(src, ext_list, path_filter, args.max_bytes)
+        summary = scan_repo(src, ext_list, path_filter, max_bytes)
         summaries.append(summary)
 
     # Default: ab 10 MB wird gesplittet, aber kein Gesamtlimit – es werden
@@ -1378,7 +1387,7 @@ def main_cli():
         summaries,
         args.level,
         args.mode,
-        args.max_bytes,
+        max_bytes,
         args.plan_only,
         split_size,
         debug=args.debug,
