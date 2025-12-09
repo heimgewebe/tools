@@ -53,6 +53,11 @@ try:
 except ImportError:
     shortcuts = None
 
+try:
+    import dialogs
+except ImportError:
+    dialogs = None
+
 # --- Constants ---
 
 ENCODING = "utf-8"
@@ -245,7 +250,7 @@ class WandlerCore:
             out.write(f"# All-Ein-Wandler Report: {source.name}\n\n")
             out.write(f"<!-- @meta:start -->\n")
             out.write(f"tool: all-ein-wandler\n")
-            out.write(f"version: 2.0\n")
+            out.write(f"version: 2.1\n")
             out.write(f"source: {source.name}\n")
             out.write(f"timestamp: {datetime.now().isoformat()}\n")
             out.write(f"files: {len(files)}\n")
@@ -369,12 +374,20 @@ class WandlerUI:
         if not self.hub_dir.exists():
             self.hub_dir.mkdir(parents=True, exist_ok=True)
 
+        print(f"Scanning Hub: {self.hub_dir}")
         cands = []
         for p in self.hub_dir.iterdir():
-            if p.is_dir() and p.name != "wandlungen" and not p.name.startswith("."):
+            if p.name == "wandlungen" or p.name.startswith("."):
+                continue
+            if p.is_dir():
                 cands.append(p)
+            else:
+                # Debugging info
+                print(f"Skipping non-dir: {p.name}")
+
         # Sort new to old
         cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        print(f"Found {len(cands)} candidates.")
         return cands
 
     def _build_view(self) -> ui.View:
@@ -383,9 +396,44 @@ class WandlerUI:
         v.background_color = "#111111"
         v.flex = "WH"
 
+        # Header Area
+        hdr_h = 60
+        hdr = ui.View(frame=(0, 0, v.width, hdr_h))
+        hdr.flex = "W"
+        hdr.background_color = "#222222"
+        v.add_subview(hdr)
+
+        title = ui.Label(frame=(10, 5, v.width - 60, 24))
+        title.text = "All-Ein-Wandler"
+        title.font = ("<system-bold>", 18)
+        title.text_color = "white"
+        title.flex = "W"
+        hdr.add_subview(title)
+
+        # Show path for debug/confirmation
+        path_str = str(self.hub_dir)
+        home = str(Path.home())
+        if path_str.startswith(home):
+            path_str = "~" + path_str[len(home):]
+
+        path_lbl = ui.Label(frame=(10, 30, v.width - 60, 20))
+        path_lbl.text = f"Hub: {path_str}"
+        path_lbl.font = ("<system>", 12)
+        path_lbl.text_color = "#888888"
+        path_lbl.flex = "W"
+        hdr.add_subview(path_lbl)
+
+        # Add Source Button (Manual Pick)
+        add_btn = ui.Button(frame=(v.width - 50, 10, 40, 40))
+        add_btn.image = ui.Image.named('iob:plus_round_24')
+        add_btn.tint_color = "white"
+        add_btn.action = self._pick_folder
+        add_btn.flex = "L"
+        hdr.add_subview(add_btn)
+
         # List
         tv = ui.TableView()
-        tv.frame = (0, 0, v.width, v.height - 120)
+        tv.frame = (0, hdr_h, v.width, v.height - (hdr_h + 120))
         tv.flex = "WH"
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
@@ -443,20 +491,47 @@ class WandlerUI:
         self.files = self._scan_hub()
         self.tv.data_source.items = [p.name for p in self.files]
         self.tv.reload_data()
+        if self.files:
+            self.status_lbl.text = f"{len(self.files)} folders found."
+        else:
+            self.status_lbl.text = "No folders found in Hub."
+
+    def _pick_folder(self, sender):
+        if not dialogs:
+            if console: console.alert("Dialogs module not available.")
+            return
+
+        # Pick a folder manually
+        folder = dialogs.pick_document(types=['public.folder'])
+        if folder:
+            src = Path(folder)
+            self.status_lbl.text = f"Manual pick: {src.name}"
+            # Confirm
+            if console:
+                idx = console.alert(f"Process {src.name}?", str(src), "Convert", "Cancel")
+                if idx == 0:
+                    self._run_conversion(src, manual_mode=True)
 
     def _on_select(self, sender):
         idx = self.tv.selected_row
         if idx < 0 or idx >= len(self.files): return
 
         src = self.files[idx]
+        self._run_conversion(src)
+
+    def _run_conversion(self, src: Path, manual_mode: bool = False):
         self.status_lbl.text = f"Processing {src.name}..."
 
-        # Async run to not block UI completely (though in Pythonista main thread is shared)
         def worker():
             try:
                 dest = self.hub_dir / "wandlungen"
                 dest.mkdir(exist_ok=True)
                 should_del = self.del_switch.value
+
+                # In manual mode, maybe output to parent of source?
+                # Or always to wandlungen?
+                # Let's keep it to wandlungen to be safe.
+                # User can delete source if switch is on.
 
                 md, _ = self.core.run(src, dest, delete_source=should_del)
                 self.core.enforce_retention(dest)
@@ -467,6 +542,7 @@ class WandlerUI:
                 self._refresh(None)
                 self.status_lbl.text = f"Done: {md.name}"
             except Exception as e:
+                traceback.print_exc()
                 if console:
                     console.alert("Error", str(e))
                 self.status_lbl.text = "Error occurred."
@@ -515,7 +591,7 @@ def main():
                 (hub_dir / "wandlungen").mkdir(exist_ok=True)
             except Exception as e:
                 print(f"Error creating hub: {e}")
-                sys.exit(1)
+                # Don't exit, just continue, maybe permissions denied but UI might work with manual pick
 
         # Check for UI availability
         if ui:
@@ -525,9 +601,10 @@ def main():
             # Fallback for headless hub mode
             print("Running Headless Hub Mode...")
             cands = []
-            for p in hub_dir.iterdir():
-                if p.is_dir() and p.name != "wandlungen" and not p.name.startswith("."):
-                    cands.append(p)
+            if hub_dir.exists():
+                for p in hub_dir.iterdir():
+                    if p.is_dir() and p.name != "wandlungen" and not p.name.startswith("."):
+                        cands.append(p)
 
             if not cands:
                 print("No folders found in wandler-hub.")
