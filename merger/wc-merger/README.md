@@ -169,6 +169,9 @@ python3 wc-merger.py myrepo --level dev --mode pro-repo
 python3 wc-merger.py myrepo --level max --split-size 20MB
 ```
 
+Hinweis: `--split-size` **und** `--max-bytes` akzeptieren menschenlesbare Werte
+wie `5MB`, `500K` oder `1GB`. `0` bedeutet „kein Limit pro Datei“.
+
 ### Nutzung in iOS Shortcuts (Headless)
 
 Shortcuts startet Pythonista oft als **App-Extension** mit stark eingeschränkten Rechten.
