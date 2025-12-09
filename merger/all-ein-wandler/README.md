@@ -1,80 +1,66 @@
-# all-ein-wandler – Zweck & Funktion
+# all-ein-wandler
 
-## Zweck
+**Der "Alles-in-einen-Topf" Wandler für generische Ordner.**
 
-Der all-ein-wandler dient als universelles Werkzeug, um Ordner mit beliebigen Dateien (Text, PDFs, Bilder, Office-Dateien usw.) in eine einheitliche, KI-freundliche Textform zu überführen.
-Der Fokus: schnelle, kompakte, maschinenlesbare Zusammenfassungen, die auf iPad und Pythonista problemlos funktionieren.
+## 🎯 Zweck
 
-Das Tool ist speziell darauf ausgelegt, Inhalte aus Unterricht, Projekten, Recherche oder Dokumenten aller Art so aufzubereiten, dass sie unmittelbar von KI-Systemen verarbeitet, durchsucht oder analysiert werden können.
+Der **all-ein-wandler** ist das Gegenstück zum `wc-merger`. Während `wc-merger` für Code-Repositories optimiert ist, kümmert sich der `all-ein-wandler` um **Inhalts-Ordner**:
 
-## Funktion
+- Schulunterlagen / Studienmaterial
+- Projektdokumente (PDFs, Word, Bilder)
+- Rechnungssammlungen
+- Gemischte Daten
 
-### 1. Wandler-Hub Workflow (Standardmodus auf iPad)
+Er konvertiert einen Ordner rekursiv in eine **einzelne Markdown-Datei** (+ JSON-Manifest), die perfekt für KI-Kontext-Fenster (ChatGPT, Claude, etc.) geeignet ist.
 
-Der all-ein-wandler arbeitet im Standardfall vollautomatisch im Verzeichnis:
+## ✨ Features
 
-Auf meinem iPad / Pythonista 3 / `wandler-hub`
+- **iOS First:** Optimierte UI für Pythonista auf dem iPad.
+- **Hub-Workflow:** Wirf Ordner in `~/Documents/wandler-hub`, und das Tool verarbeitet sie automatisch.
+- **OCR-Integration:** Nutzt iOS Shortcuts, um Text aus Bildern und (in Zukunft) PDFs zu extrahieren.
+- **Binär-Handling:** Bilder und Medien werden erkannt und im Markdown referenziert (nicht als Buchstabensalat ausgegeben).
+- **Auto-Cleanup:** Im Hub-Modus wird der Quellordner nach Erfolg gelöscht, um Speicherplatz zu sparen.
 
-Ablauf:
-1.  Im Ordner `wandler-hub` liegt genau ein Ordner, der gewandelt werden soll
-    (z. B. ein exportierter Schulordner, Unterlagen, Dokumente, Fotos usw.).
-2.  Das Script erkennt automatisch den zuletzt geänderten Unterordner (außer `wandlungen`).
-3.  Der Inhalt dieses Ordners wird vollständig zu einer
-    Markdown-Datei + JSON-Manifest verarbeitet.
-4.  Das Ergebnis landet im Zielordner:
+## 🚀 Nutzung
 
-    `wandler-hub/wandlungen`
+### 1. Pythonista (iPad) - Hub Modus (Empfohlen)
 
-5.  Nach erfolgreicher Wandlung:
-    - Der gewandelte Quellordner wird automatisch gelöscht.
-    - Im Ordner `wandlungen` bleiben stets nur die letzten 5 Wandlungen bestehen
-      (ältere Versionen werden automatisch entfernt).
+1.  Erstelle (oder lass erstellen) den Ordner `wandler-hub` in deinen Pythonista-Dokumenten.
+2.  Lege einen Ordner, den du konvertieren willst, dort hinein.
+3.  Starte `all_ein_wandler.py`.
+4.  Wähle den Ordner in der Liste aus.
+5.  Ergebnis landet in `wandler-hub/wandlungen`.
 
-Damit eignet sich der Workflow ideal für iPad-Shortcuts („Ordner auswählen → wandeln → löschen → fertig“).
-
-### 2. Direkter Aufruf mit Pfad (CLI/AEW_SOURCE)
-
-Wenn du das Tool manuell oder mit einer expliziten Quelle startest – z. B. durch:
+### 2. CLI / Desktop
 
 ```bash
-python3 all_ein_wandler.py --source-dir /Pfad/zum/Ordner
-export AEW_SOURCE=/Pfad
+# Einen spezifischen Ordner wandeln (Ausgabe im Elternverzeichnis)
+python3 merger/all-ein-wandler/all_ein_wandler.py /Pfad/zum/Ordner
+
+# Via Environment Variable
+export AEW_SOURCE="/Pfad/zum/Ordner"
+python3 merger/all-ein-wandler/all_ein_wandler.py
 ```
 
-…dann gilt:
-- Kein Auto-Löschen
-- Kein „nur letzte 5 behalten“
-- Zielordner = Elternordner der Quelle
-- Verhalten entspricht der klassischen, sicheren Nutzung
+## ⚙️ Konfiguration
 
-Damit ist der all-ein-wandler sowohl ein One-Tap iPad Tool
-als auch ein Präzisionswerkzeug für Desktop-Workflows.
+Erstelle `~/.config/all-ein-wandler/config.toml` (optional):
 
-### 3. Ausgabeformat
+```toml
+[general]
+max_file_bytes = 10485760   # 10 MB Limit für Textdateien
 
-Der Wandler erzeugt zwei Dateien:
-1.  `<name>_all-ein_<timestamp>.md`
-    – enthält die gesamte lesbare Information
-    – inkl. Ordnerstruktur, Kategorien, Inhalte, OCR-Texte (falls konfiguriert)
-2.  `<name>_all-ein_<timestamp>.manifest.json`
-    – maschinenlesbare Metadaten
-    – Dateiliste, Kategorien, Checksummen, OCR-Status, Chunk-Informationen
+[ocr]
+backend = "shortcut"        # "none" oder "shortcut"
+shortcut_name = "AllEin OCR" # Name des iOS Shortcuts
+```
 
-Beides ist optimal auf KI-Systeme abgestimmt.
+## 🤖 Unterschied zu `wc-merger`
 
-### 4. OCR-Integration
-
-OCR ist optional und kann genutzt werden über:
-- iOS Shortcuts
-- Tesseract (falls installiert)
-
-Konfiguration:
-
-`~/.config/all-ein-wandler/config.toml`
-
-## Kurzfassung
-- Ordner rein → ein vollständiger, KI-geeigneter Textdump raus
-- Automatischer Hub-Modus auf iPad (Quellordner löschen, nur letzte 5 behalten)
-- Manuelle Nutzung optional ohne Auto-Löschen
-- PDFs, Bilder, Office-Dateien → werden bestmöglich extrahiert
-- Markdown + JSON → optimale Weitergabe an KI-Systeme
+| Feature | `all-ein-wandler` | `wc-merger` |
+| :--- | :--- | :--- |
+| **Ziel** | Dokumente, PDFs, Bilder, Notizen | Code-Repositories, Software-Projekte |
+| **Output** | Fokus auf Lesbarkeit & Content | Fokus auf Struktur, Diff & Code-Kontext |
+| **OCR** | Ja (via Shortcuts) | Nein (nur Text) |
+| **Filter** | Ignoriert Code-Noise (node_modules) | Strikte `.gitignore` & Profil-Logik |
+| **Modus** | Hub-Verarbeitung (Löschen nach Erfolg) | Non-destructive (Liest nur) |
