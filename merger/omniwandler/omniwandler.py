@@ -449,10 +449,24 @@ class OmniWandlerUI:
         hdr.add_subview(path_lbl)
         self.path_lbl = path_lbl
 
-        # Add Source Button (Manual Pick)
-        add_btn = ui.Button(frame=(v.width - 50, 10, 40, 40))
-        add_btn.image = ui.Image.named('iob:plus_round_24')
+        # Close Button (oben rechts)
+        close_btn = ui.Button(frame=(v.width - 60, 10, 50, 40))
+        close_btn.title = "Close"
+        close_btn.font = ("<system>", 14)
+        close_btn.background_color = "#444444"
+        close_btn.tint_color = "white"
+        close_btn.corner_radius = 6
+        close_btn.flex = "L"
+        close_btn.action = self._close
+        hdr.add_subview(close_btn)
+
+        # Add Source Button (manuelle Ordnerwahl) – links neben Close
+        add_btn = ui.Button(frame=(v.width - 120, 10, 50, 40))
+        add_btn.title = "Add"
+        add_btn.font = ("<system>", 14)
+        add_btn.background_color = "#444444"
         add_btn.tint_color = "white"
+        add_btn.corner_radius = 6
         add_btn.action = self._pick_folder
         add_btn.flex = "L"
         hdr.add_subview(add_btn)
@@ -483,7 +497,11 @@ class OmniWandlerUI:
 
         # Labels
         lbl = ui.Label(frame=(10, 10, v.width-20, 20))
-        lbl.text = "Tap a folder to convert."
+        # Anfangsstatus: gefundene Ordner anzeigen, falls vorhanden
+        if self.files:
+            lbl.text = f"{len(self.files)} folders found. Tap to convert."
+        else:
+            lbl.text = "Tap a folder to convert."
         lbl.text_color = "#aaaaaa"
         lbl.flex = "W"
         bb.add_subview(lbl)
@@ -492,7 +510,8 @@ class OmniWandlerUI:
         # Delete switch
         sw = ui.Switch()
         sw.frame = (10, 40, 50, 32)
-        sw.value = True
+        # Voreinstellung aus der Config übernehmen
+        sw.value = bool(getattr(self.core.config, "auto_delete_source", True))
         bb.add_subview(sw)
         self.del_switch = sw
 
@@ -511,7 +530,24 @@ class OmniWandlerUI:
         btn.flex = "L"
         bb.add_subview(btn)
 
+        # Wandeln Button (convert selection)
+        convert_btn = ui.Button(frame=(v.width - 200, 40, 90, 32))
+        convert_btn.title = "Wandeln"
+        convert_btn.background_color = "#555555"
+        convert_btn.tint_color = "white"
+        convert_btn.corner_radius = 6
+        convert_btn.action = self._convert_selected
+        convert_btn.flex = "L"
+        bb.add_subview(convert_btn)
+
         return v
+
+    def _close(self, sender):
+        """Schließt die OmniWandler-UI."""
+        try:
+            self.view.close()
+        except Exception:
+            pass
 
     def _refresh(self, sender):
         self.files = self._scan_hub()
@@ -558,11 +594,25 @@ class OmniWandlerUI:
             self._run_conversion(src, manual_mode=True)
 
     def _on_select(self, sender):
-        idx = self.tv.selected_row
-        if idx < 0 or idx >= len(self.files): return
+        # In Pythonista ist selected_row ein Tupel (section, row) oder None
+        sel = self.tv.selected_row
+        if sel is None:
+            return
 
-        src = self.files[idx]
+        if isinstance(sel, tuple):
+            _, row = sel
+        else:
+            row = sel
+
+        if row is None or row < 0 or row >= len(self.files):
+            return
+
+        src = self.files[row]
         self._run_conversion(src)
+
+    def _convert_selected(self, sender):
+        """Konvertiert den aktuell ausgewählten Ordner per Button."""
+        self._on_select(sender)
 
     def _run_conversion(self, src: Path, manual_mode: bool = False):
         self.status_lbl.text = f"Processing {src.name}..."
