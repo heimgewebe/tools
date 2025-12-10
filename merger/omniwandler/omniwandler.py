@@ -374,6 +374,9 @@ class OmniWandlerUI:
         # tilde-based inputs that may come from environment variables.
         self.hub_dir = hub_dir.expanduser()
         self.files = self._scan_hub()
+        # Merkauswahl der Zeilen (Index in self.files)
+        self.selected_rows: Set[int] = set()
+
         self.view = self._build_view()
 
     def _scan_hub(self) -> List[Path]:
@@ -473,12 +476,12 @@ class OmniWandlerUI:
 
         # List
         tv = ui.TableView()
-        tv.frame = (0, hdr_h, v.width, v.height - (hdr_h + 120))
+        # etwas Abstand nach unten vom Header
+        tv.frame = (0, hdr_h + 10, v.width, v.height - (hdr_h + 130))
         tv.flex = "WH"
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
-
-        # Eigenes DataSource/Delegate-Objekt: die OmniWandlerUI selbst
+        # DataSource / Delegate = diese Klasse selbst
         tv.data_source = self
         tv.delegate = self
         v.add_subview(tv)
@@ -493,11 +496,10 @@ class OmniWandlerUI:
 
         # Labels
         lbl = ui.Label(frame=(10, 10, v.width-20, 20))
-        # Anfangsstatus: gefundene Ordner anzeigen, falls vorhanden
         if self.files:
-            lbl.text = f"{len(self.files)} folders found. Tap to convert."
+            lbl.text = f"{len(self.files)} folders found. Tap to select, then press Wandeln."
         else:
-            lbl.text = "Tap a folder to convert."
+            lbl.text = "Tap to select folders, then press Wandeln."
         lbl.text_color = "#aaaaaa"
         lbl.flex = "W"
         bb.add_subview(lbl)
@@ -547,10 +549,12 @@ class OmniWandlerUI:
 
     def _refresh(self, sender):
         self.files = self._scan_hub()
+        # Auswahl zurücksetzen, wenn sich der Inhalt geändert haben könnte
+        self.selected_rows.clear()
         # TableView komplett neu zeichnen
         self.tv.reload_data()
         if self.files:
-            self.status_lbl.text = f"{len(self.files)} folders found."
+            self.status_lbl.text = f"{len(self.files)} folders found. Tap to select."
         else:
             self.status_lbl.text = "No folders found in Hub."
 
@@ -579,13 +583,32 @@ class OmniWandlerUI:
             cell.text_label.text = "?"
         cell.text_label.text_color = "white"
         cell.background_color = "#111111"
+        # Auswahl visualisieren (Checkmark)
+        try:
+            if row in self.selected_rows:
+                cell.accessory_type = _ui.ACCESSORY_CHECKMARK
+            else:
+                cell.accessory_type = _ui.ACCESSORY_NONE
+        except Exception:
+            # Falls ACCESSORY_* nicht verfügbar ist, ignorieren wir das still
+            pass
         return cell
 
     def tableview_did_select(self, tv, section, row):
-        # Direkt konvertieren, wenn auf eine Zeile getippt wird
-        if 0 <= row < len(self.files):
-            src = self.files[row]
-            self._run_conversion(src)
+        """
+        Tap toggelt nur die Auswahl, wandelt aber nicht.
+        Das eigentliche Wandeln passiert über den Button.
+        """
+        if row < 0 or row >= len(self.files):
+            return
+
+        if row in self.selected_rows:
+            self.selected_rows.remove(row)
+        else:
+            self.selected_rows.add(row)
+
+        # UI aktualisieren (einfach, aber robust)
+        self.tv.reload_data()
 
     def _pick_hub_location(self, sender):
         """Allows re-selecting the Hub directory if detection failed."""
@@ -616,18 +639,83 @@ class OmniWandlerUI:
             self._run_conversion(src, manual_mode=True)
 
     def _convert_selected(self, sender):
-        """Konvertiert den aktuell ausgewählten Ordner per Button."""
-        sel = self.tv.selected_row  # (section, row) oder None
-        if not sel:
+        """
+        Konvertiert ALLE aktuell ausgewählten Ordner in EINEM Merge.
+
+        Strategie:
+        - Jeder Ordner wird einzeln durch core.run() gejagt (damit die Logik
+          für Kategorien/OCR/etc. wiederverwendet wird).
+        - Die erzeugten Einzel-MD-Dateien werden danach zu einer großen
+          Combined-Datei zusammengeführt und wieder gelöscht.
+        """
+        if not self.selected_rows:
+            if console:
+                console.hud_alert("Keine Ordner ausgewählt", "error", 1.0)
             return
-        if isinstance(sel, tuple):
-            _, row = sel
-        else:
-            row = sel
-        if row is None or row < 0 or row >= len(self.files):
+
+        rows = sorted(r for r in self.selected_rows if 0 <= r < len(self.files))
+        if not rows:
+            if console:
+                console.hud_alert("Auswahl leer", "error", 1.0)
             return
-        src = self.files[row]
-        self._run_conversion(src)
+
+        selected_paths = [self.files[r] for r in rows]
+
+        # Output directory
+        dest = self.hub_dir / "wandlungen"
+        dest.mkdir(exist_ok=True)
+
+        self.status_lbl.text = f"Merging {len(selected_paths)} folders…"
+
+        def worker():
+            try:
+                ts = datetime.now().strftime("%Y%m%d-%H%M")
+                stem = f"combined_{len(selected_paths)}_folders_{ts}"
+                md_path = dest / f"{stem}.md"
+
+                with md_path.open("w", encoding="utf-8", errors="replace") as out:
+                    out.write(f"# OmniWandler Combined Report\n\n")
+                    out.write("## Ordner\n\n")
+                    for p in selected_paths:
+                        out.write(f"- {p}\n")
+                    out.write("\n## Inhalte\n\n")
+
+                    for p in selected_paths:
+                        # Einzel-Wandlung (inkl. Lösch-Option)
+                        partial_md, _ = self.core.run(
+                            p,
+                            dest,
+                            delete_source=self.del_switch.value,
+                        )
+
+                        out.write(f"\n\n# --- {p.name} ---\n\n")
+                        try:
+                            with partial_md.open("r", encoding="utf-8") as f:
+                                out.write(f.read())
+                        except Exception as e:
+                            out.write(f"> Error reading partial result for {p.name}: {e}\n\n")
+
+                        # Einzel-Output wieder entfernen
+                        try:
+                            partial_md.unlink()
+                            partial_md.with_suffix(".manifest.json").unlink()
+                        except Exception:
+                            pass
+
+                if console:
+                    console.hud_alert("Combined Success!", "success", 1.0)
+
+                # Auswahl zurücksetzen
+                self.selected_rows.clear()
+                self._refresh(None)
+                self.status_lbl.text = f"Done: {md_path.name}"
+            except Exception as e:
+                traceback.print_exc()
+                if console:
+                    console.hud_alert(f"Error: {e}", "error", 2.0)
+                self.status_lbl.text = "Error occurred."
+
+        ui.delay(worker, 0.1)
 
     def _run_conversion(self, src: Path, manual_mode: bool = False):
         self.status_lbl.text = f"Processing {src.name}..."
