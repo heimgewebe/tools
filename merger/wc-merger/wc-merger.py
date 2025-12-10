@@ -255,6 +255,8 @@ class MergerUI(object):
 
         # Pfad zur State-Datei
         self._state_path = (self.hub / LAST_STATE_FILENAME).resolve()
+        # Beim Start nur die persistierte Ignore-Liste laden – nicht die gesamte UI-Config
+        self._load_ignored_repos_from_state()
 
         # Basic argv parsing for UI defaults
         # Expected format: wc-merger.py --level max --mode gesamt ...
@@ -326,7 +328,7 @@ class MergerUI(object):
             tf.autocapitalization_type = ui.AUTOCAPITALIZE_NONE
 
         margin = 10
-        top_padding = 14
+        top_padding = 22  # etwas mehr Abstand zur iOS-Statusleiste
         y = 10 + top_padding
 
         # --- TOP HEADER ---
@@ -705,8 +707,8 @@ class MergerUI(object):
         self.tv = tv
         self.ds = ds
 
-        # Restore persisted UI state (selected repos, filters, ignored list, etc.)
-        self.restore_last_state(sender=None)
+        # Beim Start: Defaults verwenden, nur Ignore-Liste wurde bereits geladen.
+        # Info-Zeile initial aktualisieren.
         self._update_repo_info()
 
     def _tableview_did_select(self, tableview, section, row):
@@ -984,6 +986,26 @@ class MergerUI(object):
                 tv.selected_row = rows[0]
             except Exception:
                 pass
+
+    def _load_ignored_repos_from_state(self) -> None:
+        """Lädt beim Start nur die persistierte Ignore-Liste."""
+        # _state_path wird im __init__ gesetzt
+        try:
+            raw = self._state_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except Exception as exc:
+            print(f"[wc-merger] could not read ignore state: {exc!r}")
+            return
+
+        try:
+            data = json.loads(raw)
+        except Exception as exc:
+            print(f"[wc-merger] invalid ignore state JSON: {exc!r}")
+            return
+
+        if isinstance(data, dict):
+            self.ignored_repos = set(data.get("ignored_repos", []))
 
     def save_last_state(self, ignore_only: bool = False) -> None:
         """
