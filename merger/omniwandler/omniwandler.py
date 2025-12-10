@@ -95,6 +95,10 @@ MEDIA_IMAGE_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico", ".tif", ".tiff"
 }
 
+# Ort für den Hub-Override (wird von der "Pfadfinderin" geschrieben)
+HUB_CONFIG_DIR = Path.home() / ".config" / "omniwandler"
+HUB_CONFIG_PATH = HUB_CONFIG_DIR / "hub-path.txt"
+
 LANG_MAP = {
     "py": "python", "js": "javascript", "ts": "typescript", "html": "html",
     "css": "css", "scss": "scss", "sass": "sass",
@@ -607,10 +611,11 @@ def detect_wandler_hub(script_path: Path) -> Path:
 
     Reihenfolge:
     1. OMNIWANDLER_HUB (falls gesetzt und existiert)
-    2. Falls das Skript selbst in einem „wandler-hub“-Ordner liegt → genau dieser
-    3. Bekannte Standardpfade (iOS/Desktop)
-    4. Relativ zum Script (für „alles liegt in einem Ordner“-Setup)
-    5. Fallback: bevorzugt ~/wandler-hub
+    2. Override-Datei (~/.config/omniwandler/hub-path.txt)
+    3. Falls das Skript selbst in einem „wandler-hub“-Ordner liegt → genau dieser
+    4. Bekannte Standardpfade (iOS/Desktop)
+    5. Relativ zum Script (für „alles liegt in einem Ordner“-Setup)
+    6. Fallback: bevorzugt ~/wandler-hub
     """
     print(f"[OmniWandler] script_path={script_path}")
     home = Path.home()
@@ -625,9 +630,24 @@ def detect_wandler_hub(script_path: Path) -> Path:
             print("[OmniWandler] Using env hub dir")
             return p
 
+    # 2) Override-Datei (wenn vorhanden und gültig)
+    try:
+        if HUB_CONFIG_PATH.exists():
+            raw = HUB_CONFIG_PATH.read_text(encoding="utf-8").strip()
+            if raw:
+                p = Path(raw).expanduser()
+                print(f"[OmniWandler] hub override file → {p}")
+                if p.is_dir():
+                    print("[OmniWandler] Using hub dir from override file")
+                    return p
+                else:
+                    print("[OmniWandler] Override path does not exist, ignoring.")
+    except Exception as e:
+        print(f"[OmniWandler] Error reading hub override file: {e}")
+
     candidates: list[Path] = []
 
-    # 2) Spezialfall iPad: Script liegt direkt im wandler-hub,
+    # 3) Spezialfall iPad: Script liegt direkt im wandler-hub,
     # z. B. „Auf meinem iPad › Pythonista 3 › wandler-hub › omniwandler.py“
     script_dir = script_path.parent
     print(f"[OmniWandler] script_dir={script_dir}")
@@ -635,7 +655,7 @@ def detect_wandler_hub(script_path: Path) -> Path:
         print("[OmniWandler] Adding script_dir as preferred hub candidate")
         candidates.append(script_dir)
 
-    # 3) Standardpfade anhand von Path.home()
+    # 4) Standardpfade anhand von Path.home()
 
     # Pythonista-Shared-Container: home zeigt auf …/Pythonista3
     # → offizieller wandler-hub typischerweise unter ~/Documents/wandler-hub
@@ -645,7 +665,7 @@ def detect_wandler_hub(script_path: Path) -> Path:
         candidates.append(home / "Documents" / "wandler-hub")
         candidates.append(home / "wandler-hub")
 
-    # 4) Noch ein paar Varianten relativ zum Skript
+    # 5) Noch ein paar Varianten relativ zum Skript
     for up in range(4):
         base = script_path
         for _ in range(up):
@@ -661,7 +681,7 @@ def detect_wandler_hub(script_path: Path) -> Path:
             print(f"[OmniWandler] Error checking {path} for content: {e}")
         return False
 
-    # 5) Deduplizieren und ersten existierenden Kandidaten nehmen
+    # 6) Deduplizieren und ersten existierenden Kandidaten nehmen
     seen: set[Path] = set()
     unique: list[Path] = []
     for c in candidates:
