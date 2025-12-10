@@ -512,9 +512,22 @@ class OmniWandlerUI:
 
         ds.tableview_cell_for_row = make_cell
 
+        # Selektions-Callback direkt auf der ListDataSource
+        def did_select(tableview, section, row, ds=ds, outer=self):
+            if row < 0 or row >= len(outer.files):
+                return
+            if row in outer.selected_rows:
+                outer.selected_rows.remove(row)
+            else:
+                outer.selected_rows.add(row)
+            # Liste neu zeichnen, damit Checkmarks sichtbar werden
+            tableview.reload_data()
+
+        ds.tableview_did_select = did_select
+
         tv.data_source = ds
-        # Wichtig: Delegate ist jetzt die OmniWandlerUI selbst
-        tv.delegate = self
+        # Delegate ist wieder die ListDataSource (Pythonista-Standard)
+        tv.delegate = ds
 
         v.add_subview(tv)
         self.tv = tv
@@ -599,24 +612,6 @@ class OmniWandlerUI:
         if path_str.startswith(home):
             path_str = "~" + path_str[len(home):]
         self.path_lbl.title = f"Hub: {path_str}"
-
-    # --- TableView Delegate: Selektion steuern ---
-
-    def tableview_did_select(self, tableview, section, row):
-        """
-        Tap toggelt nur die Auswahl, wandelt aber nicht.
-        Das eigentliche Wandeln passiert über den Button.
-        """
-        if row < 0 or row >= len(self.files):
-            return
-
-        if row in self.selected_rows:
-            self.selected_rows.remove(row)
-        else:
-            self.selected_rows.add(row)
-
-        # Liste neu zeichnen, damit Checkmarks sichtbar werden
-        self.tv.reload_data()
 
     def _pick_hub_location(self, sender):
         """Allows re-selecting the Hub directory if detection failed."""
