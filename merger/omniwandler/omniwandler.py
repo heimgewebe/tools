@@ -595,39 +595,56 @@ class OmniWandlerUI:
 
 def detect_wandler_hub(script_path: Path) -> Path:
     """
-    Smarter Hub detection logic.
-    1. Env var: OMNIWANDLER_HUB
-    2. Check relative paths (../../wandler-hub, etc.)
-    3. Check standard iOS Documents path (~/Documents/wandler-hub)
-    4. Fallback to script parent
+    Versucht den wandler-hub möglichst robust zu finden.
+
+    Reihenfolge:
+    1. OMNIWANDLER_HUB (falls gesetzt und existiert)
+    2. Bekannte Standardpfade (iOS/Desktop)
+    3. Relativ zum Script (für „alles liegt in einem Ordner“-Setups)
+    4. Fallback: bevorzugt ~/wandler-hub
     """
-    env_hub = os.environ.get("OMNIWANDLER_HUB")
-    if env_hub:
-        p = Path(env_hub).expanduser()
-        if p.is_dir(): return p
+    env = os.environ.get("OMNIWANDLER_HUB", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        if p.is_dir():
+            return p
 
-    # Standard iOS Pythonista location
-    ios_docs = Path.home() / "Documents" / "wandler-hub"
-    if ios_docs.is_dir(): return ios_docs
+    home = Path.home()
+    candidates: list[Path] = []
 
-    # Relative to script (up to 3 levels)
-    # script/../../wandler-hub
-    current = script_path.parent
-    for _ in range(3):
-        candidate = current / "wandler-hub"
-        if candidate.is_dir(): return candidate
-        if current.parent == current: break
-        current = current.parent
+    # Pythonista: home ist bereits der Documents-Ordner → wandler-hub direkt darunter
+    if home.name.lower() == "documents":
+        candidates.append(home / "wandler-hub")
+    else:
+        # Desktop: typischerweise ~/Documents/wandler-hub
+        candidates.append(home / "Documents" / "wandler-hub")
+        # zusätzlich ~/wandler-hub erlauben
+        candidates.append(home / "wandler-hub")
 
-    # Check if we are INSIDE the hub (e.g. script is in wandler-hub/tools/omniwandler.py)
-    # Not common but possible.
+    # Falls Script irgendwo „unterhalb“ des Hubs liegt, noch ein paar relative Varianten
+    for up in range(4):
+        base = script_path
+        for _ in range(up):
+            base = base.parent
+        candidates.append(base / "wandler-hub")
 
-    # If standard path doesn't exist but we are in standard environment (iOS),
-    # we might want to CREATE it there.
-    # So returning ios_docs is a good default even if it doesn't exist yet,
-    # as main() will try to create it.
+    # Deduplizieren und existierende Kandidaten bevorzugen
+    seen: set[Path] = set()
+    unique: list[Path] = []
+    for c in candidates:
+        c = c.expanduser()
+        if c in seen:
+            continue
+        seen.add(c)
+        unique.append(c)
 
-    return ios_docs
+    for c in unique:
+        if c.is_dir():
+            return c
+
+    # Nichts gefunden → ersten Kandidaten als Fallback benutzen
+    # Auf iOS ist das garantiert ~/wandler-hub
+    return unique[0] if unique else (home / "wandler-hub")
 
 
 # --- Main ---
@@ -661,6 +678,8 @@ def main():
         # Hub Mode
         script_path = safe_script_path()
         hub_dir = detect_wandler_hub(script_path)
+
+        print(f"[OmniWandler] Using hub directory: {hub_dir}")
 
         # Fix for crash: Auto-create if missing
         if not hub_dir.exists():
