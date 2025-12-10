@@ -396,7 +396,7 @@ class MergerUI(object):
             frame=(10, cy, 130, 24),
             text="Filter: Extensions",
             text_color="white",
-            font=ui.Font.bold_system_font_of_size(12),
+            font=("<System>", 12),
         )
         bottom_container.add_subview(ext_label)
 
@@ -412,7 +412,7 @@ class MergerUI(object):
             frame=(10, cy, 130, 24),
             text="Filter: Pfad",
             text_color="white",
-            font=ui.Font.bold_system_font_of_size(12),
+            font=("<System>", 12),
         )
         bottom_container.add_subview(path_label)
 
@@ -431,7 +431,7 @@ class MergerUI(object):
             frame=(10, cy, 130, 24),
             text="SET: Ignore",
             text_color="white",
-            font=ui.Font.bold_system_font_of_size(12),
+            font=("<System>", 12),
         )
         bottom_container.add_subview(set_ignore_label)
 
