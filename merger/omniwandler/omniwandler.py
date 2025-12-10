@@ -478,13 +478,9 @@ class OmniWandlerUI:
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
 
-        ds = ui.ListDataSource([p.name for p in self.files])
-        ds.text_color = "white"
-        ds.highlight_color = "#0050ff"
-        ds.action = self._on_select
-
-        tv.data_source = ds
-        tv.delegate = ds
+        # Eigenes DataSource/Delegate-Objekt: die OmniWandlerUI selbst
+        tv.data_source = self
+        tv.delegate = self
         v.add_subview(tv)
         self.tv = tv
 
@@ -551,7 +547,7 @@ class OmniWandlerUI:
 
     def _refresh(self, sender):
         self.files = self._scan_hub()
-        self.tv.data_source.items = [p.name for p in self.files]
+        # TableView komplett neu zeichnen
         self.tv.reload_data()
         if self.files:
             self.status_lbl.text = f"{len(self.files)} folders found."
@@ -564,6 +560,32 @@ class OmniWandlerUI:
         if path_str.startswith(home):
             path_str = "~" + path_str[len(home):]
         self.path_lbl.title = f"Hub: {path_str}"
+
+    # --- TableView DataSource / Delegate ---
+
+    def tableview_number_of_sections(self, tv):
+        # Eine Sektion, alle Ordner darin
+        return 1
+
+    def tableview_number_of_rows(self, tv, section):
+        return len(self.files)
+
+    def tableview_cell_for_row(self, tv, section, row):
+        import ui as _ui  # lokal, um Namenskollision zu vermeiden
+        cell = _ui.TableViewCell()
+        if 0 <= row < len(self.files):
+            cell.text_label.text = self.files[row].name
+        else:
+            cell.text_label.text = "?"
+        cell.text_label.text_color = "white"
+        cell.background_color = "#111111"
+        return cell
+
+    def tableview_did_select(self, tv, section, row):
+        # Direkt konvertieren, wenn auf eine Zeile getippt wird
+        if 0 <= row < len(self.files):
+            src = self.files[row]
+            self._run_conversion(src)
 
     def _pick_hub_location(self, sender):
         """Allows re-selecting the Hub directory if detection failed."""
@@ -593,26 +615,19 @@ class OmniWandlerUI:
             # to avoid UI thread issues
             self._run_conversion(src, manual_mode=True)
 
-    def _on_select(self, sender):
-        # In Pythonista ist selected_row ein Tupel (section, row) oder None
-        sel = self.tv.selected_row
-        if sel is None:
+    def _convert_selected(self, sender):
+        """Konvertiert den aktuell ausgewählten Ordner per Button."""
+        sel = self.tv.selected_row  # (section, row) oder None
+        if not sel:
             return
-
         if isinstance(sel, tuple):
             _, row = sel
         else:
             row = sel
-
         if row is None or row < 0 or row >= len(self.files):
             return
-
         src = self.files[row]
         self._run_conversion(src)
-
-    def _convert_selected(self, sender):
-        """Konvertiert den aktuell ausgewählten Ordner per Button."""
-        self._on_select(sender)
 
     def _run_conversion(self, src: Path, manual_mode: bool = False):
         self.status_lbl.text = f"Processing {src.name}..."
