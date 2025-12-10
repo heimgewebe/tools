@@ -326,7 +326,8 @@ class MergerUI(object):
             tf.autocapitalization_type = ui.AUTOCAPITALIZE_NONE
 
         margin = 10
-        y = 10
+        top_padding = 14
+        y = 10 + top_padding
 
         # --- TOP HEADER ---
         # Gemeinsame Button-Leiste rechts oben: [Ignore] [Set] [Close]
@@ -340,7 +341,7 @@ class MergerUI(object):
         close_btn.title = "Close"
         close_btn.frame = (
             v.width - btn_margin_right - btn_width,
-            y + 3,
+            y,
             btn_width,
             btn_height,
         )
@@ -703,6 +704,10 @@ class MergerUI(object):
         v.add_subview(tv)
         self.tv = tv
         self.ds = ds
+
+        # Restore persisted UI state (selected repos, filters, ignored list, etc.)
+        self.restore_last_state(sender=None)
+        self._update_repo_info()
 
     def _tableview_did_select(self, tableview, section, row):
         if self.ignore_mode:
