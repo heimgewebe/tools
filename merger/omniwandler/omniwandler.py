@@ -599,36 +599,44 @@ def detect_wandler_hub(script_path: Path) -> Path:
 
     Reihenfolge:
     1. OMNIWANDLER_HUB (falls gesetzt und existiert)
-    2. Bekannte Standardpfade (iOS/Desktop)
-    3. Relativ zum Script (für „alles liegt in einem Ordner“-Setups)
-    4. Fallback: bevorzugt ~/wandler-hub
+    2. Falls das Skript selbst in einem „wandler-hub“-Ordner liegt → genau dieser
+    3. Bekannte Standardpfade (iOS/Desktop)
+    4. Relativ zum Script (für „alles liegt in einem Ordner“-Setup)
+    5. Fallback: bevorzugt ~/wandler-hub
     """
+    # 1) Explizite Vorgabe schlägt alles
     env = os.environ.get("OMNIWANDLER_HUB", "").strip()
     if env:
         p = Path(env).expanduser()
         if p.is_dir():
             return p
 
+    # 2) Spezialfall iPad: Script liegt direkt im wandler-hub,
+    # z. B. „Auf meinem iPad › Pythonista 3 › wandler-hub › omniwandler.py“
+    script_dir = script_path.parent
+    if script_dir.name == "wandler-hub" and script_dir.is_dir():
+        return script_dir
+
+    # 3) Standardpfade anhand von Path.home()
     home = Path.home()
     candidates: list[Path] = []
 
-    # Pythonista: home ist bereits der Documents-Ordner → wandler-hub direkt darunter
+    # Pythonista-Shared-Container: home zeigt auf …/Pythonista3
+    # → offizieller wandler-hub typischerweise unter ~/Documents/wandler-hub
     if home.name.lower() == "documents":
         candidates.append(home / "wandler-hub")
     else:
-        # Desktop: typischerweise ~/Documents/wandler-hub
         candidates.append(home / "Documents" / "wandler-hub")
-        # zusätzlich ~/wandler-hub erlauben
         candidates.append(home / "wandler-hub")
 
-    # Falls Script irgendwo „unterhalb“ des Hubs liegt, noch ein paar relative Varianten
+    # 4) Noch ein paar Varianten relativ zum Skript
     for up in range(4):
         base = script_path
         for _ in range(up):
             base = base.parent
         candidates.append(base / "wandler-hub")
 
-    # Deduplizieren und existierende Kandidaten bevorzugen
+    # 5) Deduplizieren und ersten existierenden Kandidaten nehmen
     seen: set[Path] = set()
     unique: list[Path] = []
     for c in candidates:
@@ -642,8 +650,7 @@ def detect_wandler_hub(script_path: Path) -> Path:
         if c.is_dir():
             return c
 
-    # Nichts gefunden → ersten Kandidaten als Fallback benutzen
-    # Auf iOS ist das garantiert ~/wandler-hub
+    # Fallback: wenn wirklich gar nichts existiert
     return unique[0] if unique else (home / "wandler-hub")
 
 
