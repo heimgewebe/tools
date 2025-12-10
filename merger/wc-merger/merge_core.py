@@ -1347,37 +1347,84 @@ def make_output_filename(
     merges_dir: Path,
     repo_names: List[str],
     detail: str,
-    part_suffix: str = "",
-    path_filter: Optional[str] = None,
-    ext_filter: Optional[List[str]] = None
+    part_suffix: str,
+    path_filter: Optional[str],
+    ext_filter: Optional[str],
 ) -> Path:
-    # Zeitstempel ohne Sekunden, damit die Namen ruhiger werden
+    """
+    Erzeugt den endgültigen Dateinamen für den Merge-Report.
+
+    Neuer Wunsch:
+    - Zuerst der Block aus dem Pfad-Filter (ohne 'path-'-Präfix)
+    - Danach der bisherige Rest (Repo-Block, Detail, Timestamp, evtl. Filter/Part)
+    """
+
+    # 1. Timestamp (wie bisher)
     ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
-    base = "+".join(repo_names) if repo_names else "no-repos"
-    if len(base) > 40:
-        base = base[:37] + "..."
-    base = base.replace(" ", "-").replace("/", "_")
 
-    # Filter im Dateinamen (2.3 Spec Update)
-    filter_parts = []
-    if ext_filter:
-        # e.g. .md,.yml -> md-yml
-        ext_str = "-".join(sorted(ext_filter)).replace(".", "").replace(",", "-")
-        if len(ext_str) > 20: ext_str = ext_str[:17] + "..."
-        filter_parts.append(f"ext-{ext_str}")
+    # 2. Repo-Block (wie bisher grob: z. B. 'tools', 'multi', etc.)
+    if not repo_names:
+        repo_block = "no-repo"
+    elif len(repo_names) == 1:
+        repo_block = repo_names[0]
+    else:
+        # Kurzform für mehrere Repos; Detail steckt im Report selbst.
+        repo_block = "multi"
 
+    # etwas säubern
+    repo_block = repo_block.replace("/", "-")
+
+    # 3. Detail-Block (overview/summary/dev/max)
+    detail_block = detail
+
+    # 4. Pfad-Block: aus path_filter, aber OHNE 'path-' Präfix
+    #    Beispiel: path_filter="wc-merger" → "wc-merger"
+    path_block = None
     if path_filter:
-        # e.g. docs/ -> docs
-        path_str = path_filter.replace("/", "").replace(",", "-")
-        if len(path_str) > 20: path_str = path_str[:17] + "..."
-        filter_parts.append(f"path-{path_str}")
+        slug = path_filter.strip().strip("/")
+        if not slug:
+            slug = "root"
+        # Slug minimal säubern
+        slug = slug.replace("/", "-")
+        path_block = slug
 
-    filter_suffix = ("_" + "_".join(filter_parts)) if filter_parts else ""
+    # 5. Optional: Extension-Filter-Block (nur, wenn bewusst gesetzt)
+    ext_block = None
+    if ext_filter:
+        # z. B. ".py,.rs,.md" → "ext-py+rs+md"
+        cleaned = ext_filter.replace(" ", "")
+        cleaned = cleaned.replace(".", "")
+        cleaned = cleaned.replace(",", "+")
+        if cleaned:
+            ext_block = f"ext-{cleaned}"
 
-    # Neues Schema:
-    #   <repos>_<detail>_<YYMMDD-HHMM>[_filters][_partXofY]_merge.md
-    # Removed: 'mode' (single/multi) as it is redundant
-    return merges_dir / f"{base}_{detail}_{ts}{filter_suffix}{part_suffix}_merge.md"
+    # 6. Optional: Part-Suffix (_partXofY o. ä.) – kommt schon fertig rein
+    part_block = part_suffix.lstrip("_") if part_suffix else ""
+
+    # 7. Reihenfolge bauen:
+    #    1. path_block (falls vorhanden)
+    #    2. repo_block
+    #    3. detail_block
+    #    4. ts
+    #    5. ext_block (falls vorhanden)
+    #    6. part_block (falls vorhanden)
+    parts: List[str] = []
+
+    if path_block:
+        parts.append(path_block)
+
+    parts.append(repo_block)
+    parts.append(detail_block)
+    parts.append(ts)
+
+    if ext_block:
+        parts.append(ext_block)
+
+    if part_block:
+        parts.append(part_block)
+
+    filename = "_".join(parts) + "_merge.md"
+    return merges_dir / filename
 
 def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[str, bool, str]:
     """
@@ -2242,6 +2289,8 @@ def write_reports_v2(
 ) -> List[Path]:
     out_paths = []
 
+    ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
+
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
         if split_size > 0:
@@ -2353,7 +2402,7 @@ def write_reports_v2(
         process_and_write(
             all_files,
             sources,
-            lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter),
+            lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str),
         )
 
     else:
@@ -2362,6 +2411,6 @@ def write_reports_v2(
             s_files = s["files"]
             s_root = s["root"]
 
-            process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter))
+            process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str))
 
     return out_paths
