@@ -357,14 +357,14 @@ class MergerUI(object):
         # Platz lassen für „Alle auswählen“-Button rechts
         repo_label.frame = (10, y, v.width - 110, 20)
         repo_label.flex = "W"
-        repo_label.text = "Repos (Tap to select – None = All):"
+        repo_label.text = "Repos (Tap = Auswahl, None = All, SET = Heimgewebe):"
         repo_label.text_color = "white"
         repo_label.background_color = "#111111"
         repo_label.font = ("<System>", 13)
         v.add_subview(repo_label)
 
         select_all_btn = ui.Button()
-        select_all_btn.title = "All"
+        select_all_btn.title = "Set"
         select_all_btn.frame = (v.width - 90, y - 2, 80, 24)
         select_all_btn.flex = "L"
         select_all_btn.background_color = "#333333"
@@ -392,27 +392,55 @@ class MergerUI(object):
         bottom_container.frame = (0, 0, cw, 100)
         bottom_container.background_color = "#111111" # Same as v
 
-        ext_field = ui.TextField()
-        ext_field.frame = (10, cy, cw - 20, 28)
-        ext_field.flex = "W"
-        ext_field.placeholder = ".md,.yml,.rs (empty = all)"
-        ext_field.text = ""
-        _style_textfield(ext_field)
-        _wrap_textfield_in_dark_bg(bottom_container, ext_field)
-        self.ext_field = ext_field
+        ext_label = ui.Label(
+            frame=(10, cy, 130, 24),
+            text="Filter: Extensions",
+            text_color="white",
+            font=ui.Font.bold_system_font_of_size(12),
+        )
+        bottom_container.add_subview(ext_label)
 
-        cy += 34
+        self.ext_field = ui.TextField(
+            frame=(140, cy, cw - 150, 28),
+            placeholder=".py,.rs,.md (leer = alle)",
+        )
+        _style_textfield(self.ext_field)
+        _wrap_textfield_in_dark_bg(bottom_container, self.ext_field)
+        cy += 30
 
-        path_field = ui.TextField()
-        path_field.frame = (10, cy, cw - 20, 28)
-        path_field.flex = "W"
-        path_field.placeholder = "Path contains (e.g. docs/ or .github/)"
-        _style_textfield(path_field)
-        path_field.autocorrection_type = False
-        path_field.spellchecking_type = False
-        _wrap_textfield_in_dark_bg(bottom_container, path_field)
-        self.path_field = path_field
+        path_label = ui.Label(
+            frame=(10, cy, 130, 24),
+            text="Filter: Pfad",
+            text_color="white",
+            font=ui.Font.bold_system_font_of_size(12),
+        )
+        bottom_container.add_subview(path_label)
 
+        self.path_field = ui.TextField(
+            frame=(140, cy, cw - 150, 28),
+            placeholder="z. B. merger/, src/, docs/",
+        )
+        _style_textfield(self.path_field)
+        self.path_field.autocorrection_type = False
+        self.path_field.spellchecking_type = False
+        _wrap_textfield_in_dark_bg(bottom_container, self.path_field)
+        cy += 30
+
+        # Neues Feld: SET ignoriert diese Repos (Heimgewebe-Set)
+        set_ignore_label = ui.Label(
+            frame=(10, cy, 130, 24),
+            text="SET: Ignore",
+            text_color="white",
+            font=ui.Font.bold_system_font_of_size(12),
+        )
+        bottom_container.add_subview(set_ignore_label)
+
+        self.set_ignore_field = ui.TextField(
+            frame=(140, cy, cw - 150, 28),
+            placeholder="Repos, die SET ignoriert (Komma-getrennt)",
+        )
+        _style_textfield(self.set_ignore_field)
+        _wrap_textfield_in_dark_bg(bottom_container, self.set_ignore_field)
         cy += 36
 
         # --- Detail: eigene Zeile ---
@@ -679,23 +707,36 @@ class MergerUI(object):
 
     def select_all_repos(self, sender) -> None:
         """
-        Toggle: nichts → alle ausgewählt, alles ausgewählt → Auswahl löschen.
-        Semantik bleibt: „keine Auswahl = alle Repos“, nur die Optik ändert sich.
+        SET: Wählt das Heimgewebe-Set an Repositories aus.
+
+        Semantik:
+        - Wenn die Ignore-Liste leer ist:
+          → Alle Repos selektieren (wie früher „All“).
+        - Wenn die Ignore-Liste gefüllt ist:
+          → Alle Repos selektieren, deren Name NICHT in der Ignore-Liste steht.
+
+        „None = All“-Semantik bleibt außerhalb von SET bestehen:
+        - Keine Selektion = alle Repos mergen.
         """
         if not self.repos:
             return
 
+        excluded = set(self._get_set_excluded_repos())
         tv = self.tv
-        rows = tv.selected_rows or []
 
-        if rows and len(rows) == len(self.repos):
-            # alles war ausgewählt → Auswahl löschen (zurück zu „none = all“)
+        rows: List[tuple[int, int]] = []
+        for idx, name in enumerate(self.repos):
+            if name in excluded:
+                continue
+            rows.append((0, idx))
+
+        # Wenn nichts übrig bleibt → lieber keine Selektion setzen,
+        # damit das Verhalten klar sichtbar bleibt.
+        if not rows:
             tv.selected_rows = []
         else:
-            # explizit alle Zeilen selektieren
-            tv.selected_rows = [(0, i) for i in range(len(self.repos))]
+            tv.selected_rows = rows
 
-        # Info-Zeile aktualisieren
         self._update_repo_info()
 
     def close_view(self, sender=None) -> None:
@@ -829,6 +870,34 @@ class MergerUI(object):
                 except Exception:
                     self.split_field.text = ""
 
+    # --- SET-Heimgewebe-Helfer --------------------------------------------
+
+    def _get_set_excluded_repos(self) -> List[str]:
+        """
+        Parst die Ignore-Liste für den SET-Button aus dem Textfeld.
+
+        Erwartet eine Komma- oder Semikolon-getrennte Liste von Repo-Namen,
+        z. B.: "metarepo, tools, irgendwas-anderes".
+        """
+        raw = getattr(self, "set_ignore_field", None)
+        if not raw:
+            return []
+
+        text = self.set_ignore_field.text or ""
+        if not text.strip():
+            return []
+
+        parts = (
+            text.replace(";", ",")
+            .split(",")
+        )
+        names: List[str] = []
+        for part in parts:
+            name = part.strip()
+            if name:
+                names.append(name)
+        return names
+
     # --- State-Persistenz -------------------------------------------------
 
     def _collect_selected_repo_names(self) -> List[str]:
@@ -841,7 +910,7 @@ class MergerUI(object):
             rows = getattr(self.tv, "selected_rows", None) or []
             for idx, name in enumerate(ds.items):
                 # selected_rows ist eine Liste von Tupeln (section, row)
-                if any(r == idx for sec, r in rows):
+                if any(sec == 0 and r == idx for sec, r in rows):
                     selected.append(name)
         return selected
 
@@ -899,6 +968,9 @@ class MergerUI(object):
             "max_bytes": self.max_field.text or "",
             "split_mb": self.split_field.text or "",
             "plan_only": bool(self.plan_only_switch.value),
+            "set_excluded_repos": getattr(self, "set_ignore_field", None)
+            and (self.set_ignore_field.text or "")
+            or "",
             "extras": {
                 "health": self.extras_config.health,
                 "organism_index": self.extras_config.organism_index,
@@ -945,6 +1017,10 @@ class MergerUI(object):
         self.max_field.text = data.get("max_bytes", "")
         self.split_field.text = data.get("split_mb", "")
         self.plan_only_switch.value = bool(data.get("plan_only", False))
+
+        # SET-Ignore-Feld
+        if hasattr(self, "set_ignore_field"):
+            self.set_ignore_field.text = data.get("set_excluded_repos", "")
 
         # Restore Extras
         extras_data = data.get("extras", {})
