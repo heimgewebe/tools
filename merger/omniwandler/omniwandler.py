@@ -625,16 +625,17 @@ def detect_wandler_hub(script_path: Path) -> Path:
             print("[OmniWandler] Using env hub dir")
             return p
 
+    candidates: list[Path] = []
+
     # 2) Spezialfall iPad: Script liegt direkt im wandler-hub,
     # z. B. „Auf meinem iPad › Pythonista 3 › wandler-hub › omniwandler.py“
     script_dir = script_path.parent
     print(f"[OmniWandler] script_dir={script_dir}")
     if script_dir.name == "wandler-hub" and script_dir.is_dir():
-        print("[OmniWandler] Using script_dir as hub")
-        return script_dir
+        print("[OmniWandler] Adding script_dir as preferred hub candidate")
+        candidates.append(script_dir)
 
     # 3) Standardpfade anhand von Path.home()
-    candidates: list[Path] = []
 
     # Pythonista-Shared-Container: home zeigt auf …/Pythonista3
     # → offizieller wandler-hub typischerweise unter ~/Documents/wandler-hub
@@ -651,6 +652,15 @@ def detect_wandler_hub(script_path: Path) -> Path:
             base = base.parent
         candidates.append(base / "wandler-hub")
 
+    def has_content(path: Path) -> bool:
+        try:
+            for child in path.iterdir():
+                if child.is_dir() and child.name != "wandlungen" and not child.name.startswith("."):
+                    return True
+        except Exception as e:
+            print(f"[OmniWandler] Error checking {path} for content: {e}")
+        return False
+
     # 5) Deduplizieren und ersten existierenden Kandidaten nehmen
     seen: set[Path] = set()
     unique: list[Path] = []
@@ -663,8 +673,15 @@ def detect_wandler_hub(script_path: Path) -> Path:
 
     print("[OmniWandler] Hub candidates:")
     for c in unique:
-        print(f"  {c}  exists={c.is_dir()}")
+        print(f"  {c}  exists={c.is_dir()}  has_content={has_content(c) if c.is_dir() else False}")
 
+    # Priorisiere Hubs, die tatsächlich Unterordner (Kandidaten) enthalten.
+    for c in unique:
+        if c.is_dir() and has_content(c):
+            print(f"[OmniWandler] Using hub candidate with content: {c}")
+            return c
+
+    # Danach erster existierender Kandidat
     for c in unique:
         if c.is_dir():
             print(f"[OmniWandler] Using hub candidate: {c}")
