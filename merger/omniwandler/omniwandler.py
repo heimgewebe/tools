@@ -366,7 +366,9 @@ class OmniWandlerCore:
 class OmniWandlerUI:
     def __init__(self, core: OmniWandlerCore, hub_dir: Path):
         self.core = core
-        self.hub_dir = hub_dir
+        # Normalize the hub path to avoid surprises with relative or
+        # tilde-based inputs that may come from environment variables.
+        self.hub_dir = hub_dir.expanduser()
         self.files = self._scan_hub()
         self.view = self._build_view()
 
@@ -519,8 +521,10 @@ class OmniWandlerUI:
         """Allows re-selecting the Hub directory if detection failed."""
         if not dialogs: return
 
-        # We need a folder picker for the Hub root
-        folder = dialogs.pick_document(types=['public.folder'])
+        # We need a folder picker for the Hub root. Explicitly enable
+        # folder-picking mode because the default file picker on iOS
+        # ignores folders even when a folder UTI is provided.
+        folder = dialogs.pick_document(file_mode=False)
         if folder:
             self.hub_dir = Path(folder)
             self._refresh(None)
@@ -532,8 +536,8 @@ class OmniWandlerUI:
             if console: console.alert("Dialogs module not available.")
             return
 
-        # Pick a folder manually
-        folder = dialogs.pick_document(types=['public.folder'])
+        # Pick a folder manually (explicitly enable folder mode)
+        folder = dialogs.pick_document(file_mode=False)
         if folder:
             src = Path(folder)
             self.status_lbl.text = f"Manual pick: {src.name}"
