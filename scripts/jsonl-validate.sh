@@ -39,7 +39,7 @@ SCHEMA_PATH="$WORK_DIR/schema.json"
 # Create the JS validator script
 cat <<'JS' > "$WORK_DIR/validate.js"
 const fs = require('fs');
-const Ajv2020 = require('ajv/dist/2020');
+const Ajv2020 = require('ajv/dist/2020').default;
 const addFormats = require('ajv-formats');
 
 const schemaPath = process.argv[2];
