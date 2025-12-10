@@ -483,12 +483,14 @@ class OmniWandlerUI:
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
 
-        # ListDataSource mit eigener Mehrfachauswahl
+        # ListDataSource liefert die Daten
         ds = ui.ListDataSource([p.name for p in self.files])
         ds.text_color = "white"
         ds.background_color = "#111111"
         ds.highlight_color = "#0050ff"
-        ds.action = self._row_tapped  # wird bei Tap aufgerufen
+        # Swipe-Delete & Move deaktivieren, damit nicht „nur aus der Liste“ gelöscht wird
+        ds.delete_enabled = False
+        ds.move_enabled = False
 
         # Cell-Factory mit Checkmarks
         def make_cell(tableview, section, row, ds=ds, outer=self):
@@ -511,7 +513,8 @@ class OmniWandlerUI:
         ds.tableview_cell_for_row = make_cell
 
         tv.data_source = ds
-        tv.delegate = ds
+        # Wichtig: Delegate ist jetzt die OmniWandlerUI selbst
+        tv.delegate = self
 
         v.add_subview(tv)
         self.tv = tv
@@ -597,18 +600,14 @@ class OmniWandlerUI:
             path_str = "~" + path_str[len(home):]
         self.path_lbl.title = f"Hub: {path_str}"
 
-    def _row_tapped(self, sender):
-        """Wird von ListDataSource bei Tap aufgerufen – toggelt Auswahl."""
-        sel = sender.selected_row  # (section, row) oder int
-        if sel is None:
-            return
+    # --- TableView Delegate: Selektion steuern ---
 
-        if isinstance(sel, tuple):
-            _, row = sel
-        else:
-            row = sel
-
-        if row is None or row < 0 or row >= len(self.files):
+    def tableview_did_select(self, tableview, section, row):
+        """
+        Tap toggelt nur die Auswahl, wandelt aber nicht.
+        Das eigentliche Wandeln passiert über den Button.
+        """
+        if row < 0 or row >= len(self.files):
             return
 
         if row in self.selected_rows:
