@@ -376,6 +376,7 @@ class OmniWandlerUI:
         self.files = self._scan_hub()
         # Merkauswahl der Zeilen (Index in self.files)
         self.selected_rows: Set[int] = set()
+        self.ds = None  # wird in _build_view gesetzt
 
         self.view = self._build_view()
 
@@ -481,11 +482,40 @@ class OmniWandlerUI:
         tv.flex = "WH"
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
-        # DataSource / Delegate = diese Klasse selbst
-        tv.data_source = self
-        tv.delegate = self
+
+        # ListDataSource mit eigener Mehrfachauswahl
+        ds = ui.ListDataSource([p.name for p in self.files])
+        ds.text_color = "white"
+        ds.background_color = "#111111"
+        ds.highlight_color = "#0050ff"
+        ds.action = self._row_tapped  # wird bei Tap aufgerufen
+
+        # Cell-Factory mit Checkmarks
+        def make_cell(tableview, section, row, ds=ds, outer=self):
+            cell = ui.TableViewCell()
+            if 0 <= row < len(ds.items):
+                cell.text_label.text = ds.items[row]
+            else:
+                cell.text_label.text = "?"
+            cell.text_label.text_color = "white"
+            cell.background_color = "#111111"
+            try:
+                if row in outer.selected_rows:
+                    cell.accessory_type = ui.ACCESSORY_CHECKMARK
+                else:
+                    cell.accessory_type = ui.ACCESSORY_NONE
+            except Exception:
+                pass
+            return cell
+
+        ds.tableview_cell_for_row = make_cell
+
+        tv.data_source = ds
+        tv.delegate = ds
+
         v.add_subview(tv)
         self.tv = tv
+        self.ds = ds
 
         # Bottom Bar
         bb = ui.View()
@@ -551,6 +581,8 @@ class OmniWandlerUI:
         self.files = self._scan_hub()
         # Auswahl zurücksetzen, wenn sich der Inhalt geändert haben könnte
         self.selected_rows.clear()
+        if self.ds is not None:
+            self.ds.items = [p.name for p in self.files]
         # TableView komplett neu zeichnen
         self.tv.reload_data()
         if self.files:
@@ -565,41 +597,18 @@ class OmniWandlerUI:
             path_str = "~" + path_str[len(home):]
         self.path_lbl.title = f"Hub: {path_str}"
 
-    # --- TableView DataSource / Delegate ---
+    def _row_tapped(self, sender):
+        """Wird von ListDataSource bei Tap aufgerufen – toggelt Auswahl."""
+        sel = sender.selected_row  # (section, row) oder int
+        if sel is None:
+            return
 
-    def tableview_number_of_sections(self, tv):
-        # Eine Sektion, alle Ordner darin
-        return 1
-
-    def tableview_number_of_rows(self, tv, section):
-        return len(self.files)
-
-    def tableview_cell_for_row(self, tv, section, row):
-        import ui as _ui  # lokal, um Namenskollision zu vermeiden
-        cell = _ui.TableViewCell()
-        if 0 <= row < len(self.files):
-            cell.text_label.text = self.files[row].name
+        if isinstance(sel, tuple):
+            _, row = sel
         else:
-            cell.text_label.text = "?"
-        cell.text_label.text_color = "white"
-        cell.background_color = "#111111"
-        # Auswahl visualisieren (Checkmark)
-        try:
-            if row in self.selected_rows:
-                cell.accessory_type = _ui.ACCESSORY_CHECKMARK
-            else:
-                cell.accessory_type = _ui.ACCESSORY_NONE
-        except Exception:
-            # Falls ACCESSORY_* nicht verfügbar ist, ignorieren wir das still
-            pass
-        return cell
+            row = sel
 
-    def tableview_did_select(self, tv, section, row):
-        """
-        Tap toggelt nur die Auswahl, wandelt aber nicht.
-        Das eigentliche Wandeln passiert über den Button.
-        """
-        if row < 0 or row >= len(self.files):
+        if row is None or row < 0 or row >= len(self.files):
             return
 
         if row in self.selected_rows:
@@ -607,7 +616,7 @@ class OmniWandlerUI:
         else:
             self.selected_rows.add(row)
 
-        # UI aktualisieren (einfach, aber robust)
+        # Liste neu zeichnen, damit Checkmarks sichtbar werden
         self.tv.reload_data()
 
     def _pick_hub_location(self, sender):
