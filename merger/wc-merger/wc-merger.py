@@ -11,7 +11,7 @@ import os
 import json
 import traceback
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple, Any, Dict
 from importlib.machinery import SourceFileLoader
 
 try:
@@ -769,7 +769,8 @@ class MergerUI(object):
             if newly_ignored:
                 self.ignored_repos = newly_ignored
             self.ignore_button.title = "Ignore…"
-            self.save_last_state()
+            # Nur die Ignore-Liste persistent machen, nicht die gesamte Merge-Config
+            self.save_last_state(ignore_only=True)
 
             # Zurück in den Merge-Modus ohne Vorauswahl
             self.tv.selected_rows = []
@@ -984,43 +985,63 @@ class MergerUI(object):
             except Exception:
                 pass
 
-    def save_last_state(self) -> None:
+    def save_last_state(self, ignore_only: bool = False) -> None:
         """
-        Persistiert den aktuellen UI-Zustand in einer JSON-Datei.
+        Speichert den UI-Zustand in einer JSON-Datei.
 
-        Speichert die ausgewählten Repositories, Filtereinstellungen, das gewählte Profil,
-        sowie weitere relevante UI-Parameter in einer Datei unter `self._state_path`.
-        Dies ermöglicht das Wiederherstellen des letzten Zustands beim nächsten Start.
+        ignore_only = True:
+            Nur die Ignore-Liste aktualisieren, sonstige Felder unangetastet lassen.
+        ignore_only = False:
+            Vollständige Config (Filter, Profile, Auswahl, Extras) + Ignore-Liste speichern.
         """
-        if not self.repos:
-            return
+        data: Dict[str, Any] = {}
 
-        detail_idx = self.seg_detail.selected_index
-        if 0 <= detail_idx < len(self.seg_detail.segments):
-            detail = self.seg_detail.segments[detail_idx]
-        elif self.seg_detail.segments:
-            detail = self.seg_detail.segments[0]
-        else:
-            detail = ""
+        # Bestehenden Zustand laden, damit wir bei ignore_only nicht alles überschreiben
+        if self._state_path.exists():
+            try:
+                raw = self._state_path.read_text(encoding="utf-8")
+                existing = json.loads(raw)
+                if isinstance(existing, dict):
+                    data.update(existing)
+            except Exception as exc:
+                print(f"[wc-merger] could not read existing state: {exc!r}")
 
-        data = {
-            "selected_repos": self._collect_selected_repo_names(),
-            "ext_filter": self.ext_field.text or "",
-            "path_filter": self.path_field.text or "",
-            "detail_profile": detail,
-            "max_bytes": self.max_field.text or "",
-            "split_mb": self.split_field.text or "",
-            "plan_only": bool(self.plan_only_switch.value),
-            "ignored_repos": list(self.ignored_repos),
-            "extras": {
-                "health": self.extras_config.health,
-                "organism_index": self.extras_config.organism_index,
-                "fleet_panorama": self.extras_config.fleet_panorama,
-                "delta_reports": self.extras_config.delta_reports,
-                "augment_sidecar": self.extras_config.augment_sidecar,
-                "heatmap": self.extras_config.heatmap,
-            }
-        }
+        # Ignore-Liste wird *immer* aktualisiert
+        data["ignored_repos"] = sorted(self.ignored_repos)
+
+        # Nur wenn wir *nicht* im ignore_only-Modus sind, die restliche Config überschreiben
+        if not ignore_only:
+            profile = None
+            try:
+                segments = getattr(self.seg_detail, "segments", [])
+                idx = getattr(self.seg_detail, "selected_index", 0)
+                if 0 <= idx < len(segments):
+                    profile = segments[idx]
+            except Exception:
+                profile = None
+
+            if profile is not None:
+                data["detail_profile"] = profile
+
+            data.update(
+                {
+                    "ext_filter": self.ext_field.text or "",
+                    "path_filter": self.path_field.text or "",
+                    "max_bytes": self.max_field.text or "",
+                    "split_mb": self.split_field.text or "",
+                    "plan_only": bool(self.plan_only_switch.value),
+                    "selected_repos": self._get_selected_repos(),
+                    "extras": {
+                        "health": self.extras_config.health,
+                        "organism_index": self.extras_config.organism_index,
+                        "fleet_panorama": self.extras_config.fleet_panorama,
+                        "delta_reports": self.extras_config.delta_reports,
+                        "augment_sidecar": self.extras_config.augment_sidecar,
+                        "heatmap": self.extras_config.heatmap,
+                    },
+                }
+            )
+
         try:
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:
