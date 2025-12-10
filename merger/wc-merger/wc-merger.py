@@ -249,6 +249,10 @@ class MergerUI(object):
         self.hub = hub
         self.repos = find_repos_in_hub(hub)
 
+        # Ignore-Konfiguration für das Heimgewebe-Set
+        self.ignore_mode = False
+        self.ignored_repos = set()
+
         # Pfad zur State-Datei
         self._state_path = (self.hub / LAST_STATE_FILENAME).resolve()
 
@@ -373,6 +377,18 @@ class MergerUI(object):
         select_all_btn.action = self.select_all_repos
         v.add_subview(select_all_btn)
         self.select_all_button = select_all_btn
+
+        ignore_btn = ui.Button(
+            frame=(select_all_btn.x - 90, select_all_btn.y, 80, 26),
+            title="Ignore…",
+            background_color="#444444",
+            tint_color="white",
+            corner_radius=4,
+        )
+        ignore_btn.flex = "L"
+        ignore_btn.action = self.toggle_ignore_mode
+        self.ignore_button = ignore_btn
+        v.add_subview(ignore_btn)
         # interner Toggle-Status für den All-Button
         self._all_toggle_selected = False
 
@@ -424,23 +440,6 @@ class MergerUI(object):
         self.path_field.autocorrection_type = False
         self.path_field.spellchecking_type = False
         _wrap_textfield_in_dark_bg(bottom_container, self.path_field)
-        cy += 30
-
-        # Neues Feld: SET ignoriert diese Repos (Heimgewebe-Set)
-        set_ignore_label = ui.Label(
-            frame=(10, cy, 130, 24),
-            text="SET: Ignore",
-            text_color="white",
-            font=("<System>", 12),
-        )
-        bottom_container.add_subview(set_ignore_label)
-
-        self.set_ignore_field = ui.TextField(
-            frame=(140, cy, cw - 150, 28),
-            placeholder="Repos, die SET ignoriert (Komma-getrennt)",
-        )
-        _style_textfield(self.set_ignore_field)
-        _wrap_textfield_in_dark_bg(bottom_container, self.set_ignore_field)
         cy += 36
 
         # --- Detail: eigene Zeile ---
@@ -673,6 +672,8 @@ class MergerUI(object):
         ds.text_color = "white"
         # Bei Auswahl/Deselektion die Statuszeile aktualisieren
         ds.action = self._on_repo_selection_changed
+        ds.tableview_did_select = self._tableview_did_select
+        ds.tableview_did_deselect = self._tableview_did_deselect
         # deutliche Selektion: kräftiges Blau statt „grau auf schwarz“
         ds.highlight_color = "#0050ff"
         ds.tableview_cell_for_row = self._tableview_cell
@@ -681,6 +682,18 @@ class MergerUI(object):
         v.add_subview(tv)
         self.tv = tv
         self.ds = ds
+
+    def _tableview_did_select(self, tableview, section, row):
+        if self.ignore_mode:
+            self._update_repo_info()
+            return
+        self._on_repo_selection_changed(tableview)
+
+    def _tableview_did_deselect(self, tableview, section, row):
+        if self.ignore_mode:
+            self._update_repo_info()
+            return
+        self._on_repo_selection_changed(tableview)
 
     def _on_repo_selection_changed(self, sender) -> None:
         """Callback des ListDataSource – hält die Info-Zeile in Sync."""
@@ -705,6 +718,34 @@ class MergerUI(object):
         else:
             self.info_label.text = f"{total} Repos found ({len(rows)} selected)."
 
+    def toggle_ignore_mode(self, sender) -> None:
+        """Umschalten zwischen Normalmodus und Ignore-Auswahlmodus."""
+        self.ignore_mode = not self.ignore_mode
+
+        if self.ignore_mode:
+            # Bisher ignorierte Repos markieren
+            self.tv.selected_rows = [
+                (0, idx) for idx, name in enumerate(self.repos)
+                if name in self.ignored_repos
+            ]
+            self.ignore_button.title = "Save"
+        else:
+            rows = self.tv.selected_rows or []
+            newly_ignored = set()
+
+            for sec, idx in rows:
+                if sec == 0 and 0 <= idx < len(self.repos):
+                    newly_ignored.add(self.repos[idx])
+
+            self.ignored_repos = newly_ignored
+            self.ignore_button.title = "Ignore…"
+            self.save_last_state()
+
+            # Zurück in den Merge-Modus ohne Vorauswahl
+            self.tv.selected_rows = []
+
+        self._update_repo_info()
+
     def select_all_repos(self, sender) -> None:
         """
         SET: Wählt das Heimgewebe-Set an Repositories aus.
@@ -721,7 +762,7 @@ class MergerUI(object):
         if not self.repos:
             return
 
-        excluded = set(self._get_set_excluded_repos())
+        excluded = self.ignored_repos
         tv = self.tv
 
         rows: List[tuple[int, int]] = []
@@ -870,34 +911,6 @@ class MergerUI(object):
                 except Exception:
                     self.split_field.text = ""
 
-    # --- SET-Heimgewebe-Helfer --------------------------------------------
-
-    def _get_set_excluded_repos(self) -> List[str]:
-        """
-        Parst die Ignore-Liste für den SET-Button aus dem Textfeld.
-
-        Erwartet eine Komma- oder Semikolon-getrennte Liste von Repo-Namen,
-        z. B.: "metarepo, tools, irgendwas-anderes".
-        """
-        raw = getattr(self, "set_ignore_field", None)
-        if not raw:
-            return []
-
-        text = self.set_ignore_field.text or ""
-        if not text.strip():
-            return []
-
-        parts = (
-            text.replace(";", ",")
-            .split(",")
-        )
-        names: List[str] = []
-        for part in parts:
-            name = part.strip()
-            if name:
-                names.append(name)
-        return names
-
     # --- State-Persistenz -------------------------------------------------
 
     def _collect_selected_repo_names(self) -> List[str]:
@@ -968,9 +981,7 @@ class MergerUI(object):
             "max_bytes": self.max_field.text or "",
             "split_mb": self.split_field.text or "",
             "plan_only": bool(self.plan_only_switch.value),
-            "set_excluded_repos": getattr(self, "set_ignore_field", None)
-            and (self.set_ignore_field.text or "")
-            or "",
+            "ignored_repos": list(self.ignored_repos),
             "extras": {
                 "health": self.extras_config.health,
                 "organism_index": self.extras_config.organism_index,
@@ -1018,9 +1029,7 @@ class MergerUI(object):
         self.split_field.text = data.get("split_mb", "")
         self.plan_only_switch.value = bool(data.get("plan_only", False))
 
-        # SET-Ignore-Feld
-        if hasattr(self, "set_ignore_field"):
-            self.set_ignore_field.text = data.get("set_excluded_repos", "")
+        self.ignored_repos = set(data.get("ignored_repos", []))
 
         # Restore Extras
         extras_data = data.get("extras", {})
