@@ -329,9 +329,67 @@ class MergerUI(object):
         y = 10
 
         # --- TOP HEADER ---
+        # Gemeinsame Button-Leiste rechts oben: [Ignore] [Set] [Close]
+        btn_width = 76
+        btn_height = 28
+        btn_margin_right = 10
+        btn_spacing = 6
+
+        # Close ganz rechts
+        close_btn = ui.Button()
+        close_btn.title = "Close"
+        close_btn.frame = (
+            v.width - btn_margin_right - btn_width,
+            y + 3,
+            btn_width,
+            btn_height,
+        )
+        close_btn.flex = "L"
+        close_btn.background_color = "#333333"
+        close_btn.tint_color = "white"
+        close_btn.corner_radius = 4.0
+        close_btn.action = self.close_view
+        v.add_subview(close_btn)
+        self.close_button = close_btn
+
+        # Set links neben Close
+        select_all_btn = ui.Button()
+        select_all_btn.title = "Set"
+        select_all_btn.frame = (
+            close_btn.frame[0] - btn_spacing - btn_width,
+            close_btn.frame[1],
+            btn_width,
+            btn_height,
+        )
+        select_all_btn.flex = "L"
+        select_all_btn.background_color = "#333333"
+        select_all_btn.tint_color = "white"
+        select_all_btn.corner_radius = 4.0
+        select_all_btn.action = self.select_all_repos
+        v.add_subview(select_all_btn)
+        self.select_all_button = select_all_btn
+
+        # Ignore links von Set
+        ignore_btn = ui.Button()
+        ignore_btn.title = "Ignore…"
+        ignore_btn.frame = (
+            select_all_btn.frame[0] - btn_spacing - btn_width,
+            close_btn.frame[1],
+            btn_width,
+            btn_height,
+        )
+        ignore_btn.flex = "L"
+        ignore_btn.background_color = "#444444"
+        ignore_btn.tint_color = "white"
+        ignore_btn.corner_radius = 4.0
+        ignore_btn.action = self.toggle_ignore_mode
+        v.add_subview(ignore_btn)
+        self.ignore_button = ignore_btn
+
+        # Base-Dir-Label bekommt rechts ausreichend Platz vor der Button-Leiste
         base_label = ui.Label()
-        # etwas Platz rechts für den Close-Button lassen
-        base_label.frame = (10, y, v.width - 80, 34)
+        max_label_width = ignore_btn.frame[0] - 10 - 4  # kleiner Sicherheitsabstand
+        base_label.frame = (10, y, max_label_width, 34)
         base_label.flex = "W"
         base_label.number_of_lines = 2
         base_label.text = f"Base-Dir: {hub}"
@@ -340,20 +398,6 @@ class MergerUI(object):
         base_label.font = ("<System>", 11)
         v.add_subview(base_label)
         self.base_label = base_label
-
-        # Close-Button rechts oben – leicht nach innen versetzt,
-        # damit er nicht mit iOS-Ecken kollidiert.
-        close_btn = ui.Button()
-        close_btn.title = "Close"
-        # etwas mehr Rand nach rechts: ca. 20pt Abstand
-        close_btn.frame = (v.width - 80, y + 3, 60, 28)
-        close_btn.flex = "L"
-        close_btn.background_color = "#333333"
-        close_btn.tint_color = "white"
-        close_btn.corner_radius = 4.0
-        close_btn.action = self.close_view
-        v.add_subview(close_btn)
-        self.close_button = close_btn
 
         y += 40
 
@@ -366,29 +410,6 @@ class MergerUI(object):
         repo_label.background_color = "#111111"
         repo_label.font = ("<System>", 13)
         v.add_subview(repo_label)
-
-        select_all_btn = ui.Button()
-        select_all_btn.title = "Set"
-        select_all_btn.frame = (v.width - 90, y - 2, 80, 24)
-        select_all_btn.flex = "L"
-        select_all_btn.background_color = "#333333"
-        select_all_btn.tint_color = "white"
-        select_all_btn.corner_radius = 4.0
-        select_all_btn.action = self.select_all_repos
-        v.add_subview(select_all_btn)
-        self.select_all_button = select_all_btn
-
-        ignore_btn = ui.Button(
-            frame=(select_all_btn.x - 90, select_all_btn.y, 80, 26),
-            title="Ignore…",
-            background_color="#444444",
-            tint_color="white",
-            corner_radius=4,
-        )
-        ignore_btn.flex = "L"
-        ignore_btn.action = self.toggle_ignore_mode
-        self.ignore_button = ignore_btn
-        v.add_subview(ignore_btn)
         # interner Toggle-Status für den All-Button
         self._all_toggle_selected = False
 
@@ -731,13 +752,17 @@ class MergerUI(object):
             self.ignore_button.title = "Save"
         else:
             rows = self.tv.selected_rows or []
-            newly_ignored = set()
+            newly_ignored: set[str] = set()
 
             for sec, idx in rows:
                 if sec == 0 and 0 <= idx < len(self.repos):
                     newly_ignored.add(self.repos[idx])
 
-            self.ignored_repos = newly_ignored
+            # Wenn aus irgendeinem Grund keine Zeilen selektiert sind,
+            # lassen wir eine bereits existierende Ignore-Liste intakt,
+            # statt sie stillschweigend zu leeren.
+            if newly_ignored:
+                self.ignored_repos = newly_ignored
             self.ignore_button.title = "Ignore…"
             self.save_last_state()
 
