@@ -95,6 +95,8 @@ MEDIA_IMAGE_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp", ".ico", ".tif", ".tiff"
 }
 
+PDF_EXTS = {".pdf"}
+
 # Ort für den Hub-Override (wird von der "Pfadfinderin" geschrieben)
 HUB_CONFIG_DIR = Path.home() / ".config" / "omniwandler"
 HUB_CONFIG_PATH = HUB_CONFIG_DIR / "hub-path.txt"
@@ -274,6 +276,7 @@ class OmniWandlerCore:
             out.write("## 📦 Content\n\n")
 
             for abs_path, rel_path in files:
+                ext = abs_path.suffix.lower()
                 size = abs_path.stat().st_size
                 stats["total_bytes"] += size
 
@@ -288,10 +291,15 @@ class OmniWandlerCore:
                 out.write(f"- MD5: `{md5}`\n\n")
 
                 is_text = cat != "media" and is_probably_text(abs_path)
+                if cat == "pdf":
+                    is_text = False
                 ocr_text = None
                 ocr_status = "none"
 
-                if cat == "media" and self.config.ocr_backend == "shortcut":
+                if (
+                    self.config.ocr_backend == "shortcut"
+                    and ext in MEDIA_IMAGE_EXTS.union(PDF_EXTS)
+                ):
                     ocr_text = self.ocr_via_shortcut(abs_path)
                     ocr_status = "ok" if ocr_text else "failed"
 
@@ -299,8 +307,13 @@ class OmniWandlerCore:
                     lang = LANG_MAP.get(abs_path.suffix.lower().lstrip("."), "")
                     self._write_content(out, abs_path, lang, size)
                 else:
-                    out.write(f"> Binary/Media file. Not included as text.\n\n")
-                    if abs_path.suffix.lower() in MEDIA_IMAGE_EXTS:
+                    if cat == "pdf":
+                        out.write(
+                            "> PDF-Datei. Originalinhalt nicht inline, Text ggf. über OCR.\n\n"
+                        )
+                    else:
+                        out.write(f"> Binary/Media file. Not included as text.\n\n")
+                    if ext in MEDIA_IMAGE_EXTS:
                         out.write(f"![{rel_path}]({rel_path})\n\n")
 
                     if ocr_text:
@@ -339,7 +352,10 @@ class OmniWandlerCore:
 
     def _categorize(self, path: Path) -> str:
         ext = path.suffix.lower()
-        if ext in MEDIA_IMAGE_EXTS or ext == ".pdf": return "media"
+        if ext in MEDIA_IMAGE_EXTS:
+            return "media"
+        if ext in PDF_EXTS:
+            return "pdf"
         if ext in {".md", ".txt", ".rst"}: return "doc"
         if ext in {".json", ".yaml", ".yml", ".toml"}: return "config"
         return "other"
