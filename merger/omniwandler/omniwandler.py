@@ -385,6 +385,14 @@ class OmniWandlerUI:
             return []
 
         print(f"Scanning Hub: {self.hub_dir}")
+
+        # Debug log every entry to diagnose candidate detection issues
+        try:
+            for p in self.hub_dir.iterdir():
+                print(f"[OmniWandler] Hub entry: {p}  is_dir={p.is_dir()}  name={p.name}")
+        except Exception as e:
+            print(f"[OmniWandler] Error iterating hub_dir: {e}")
+
         cands = []
         try:
             for p in self.hub_dir.iterdir():
@@ -604,21 +612,28 @@ def detect_wandler_hub(script_path: Path) -> Path:
     4. Relativ zum Script (für „alles liegt in einem Ordner“-Setup)
     5. Fallback: bevorzugt ~/wandler-hub
     """
+    print(f"[OmniWandler] script_path={script_path}")
+    home = Path.home()
+    print(f"[OmniWandler] Path.home()={home}")
+
     # 1) Explizite Vorgabe schlägt alles
     env = os.environ.get("OMNIWANDLER_HUB", "").strip()
     if env:
         p = Path(env).expanduser()
+        print(f"[OmniWandler] OMNIWANDLER_HUB set to {p}")
         if p.is_dir():
+            print("[OmniWandler] Using env hub dir")
             return p
 
     # 2) Spezialfall iPad: Script liegt direkt im wandler-hub,
     # z. B. „Auf meinem iPad › Pythonista 3 › wandler-hub › omniwandler.py“
     script_dir = script_path.parent
+    print(f"[OmniWandler] script_dir={script_dir}")
     if script_dir.name == "wandler-hub" and script_dir.is_dir():
+        print("[OmniWandler] Using script_dir as hub")
         return script_dir
 
     # 3) Standardpfade anhand von Path.home()
-    home = Path.home()
     candidates: list[Path] = []
 
     # Pythonista-Shared-Container: home zeigt auf …/Pythonista3
@@ -646,12 +661,19 @@ def detect_wandler_hub(script_path: Path) -> Path:
         seen.add(c)
         unique.append(c)
 
+    print("[OmniWandler] Hub candidates:")
+    for c in unique:
+        print(f"  {c}  exists={c.is_dir()}")
+
     for c in unique:
         if c.is_dir():
+            print(f"[OmniWandler] Using hub candidate: {c}")
             return c
 
     # Fallback: wenn wirklich gar nichts existiert
-    return unique[0] if unique else (home / "wandler-hub")
+    fallback = unique[0] if unique else (home / "wandler-hub")
+    print(f"[OmniWandler] Fallback hub: {fallback}")
+    return fallback
 
 
 # --- Main ---
