@@ -355,7 +355,7 @@ class OmniWandlerCore:
                         out.write("> PDF-Datei. Text wurde extrahiert.\n\n")
                     elif cat == "pdf":
                         out.write(
-                            "> PDF-Datei. Konnte keinen Text extrahieren (keine PDF-Bibliothek / OCR?).\n\n"
+                            "> PDF-Datei. Konnte keinen Text extrahieren – vermutlich gescannt oder typografisch schwer lesbar. Bitte OCR-Backend (config.toml) prüfen.\n\n"
                         )
                     else:
                         out.write(f"> Binary/Media file. Not included as text.\n\n")
@@ -377,12 +377,21 @@ class OmniWandlerCore:
                         out.write(ocr_text)
                         out.write("\n```\n\n")
 
+                text_source: str
+                sources: List[str] = []
+                if pdf_text:
+                    sources.append("pdf")
+                if ocr_text:
+                    sources.append("ocr")
+                text_source = "+".join(sources) if sources else "none"
+
                 manifest_files.append({
                     "path": str(rel_path),
                     "size": size,
                     "md5": md5,
                     "category": cat,
-                    "ocr": ocr_status
+                    "ocr": ocr_status,
+                    "text_source": text_source
                 })
 
         # Write Manifest
