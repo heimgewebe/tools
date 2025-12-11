@@ -96,6 +96,34 @@
           "description": "Sum of all file sizes in bytes.",
           "minimum": 0
         },
+        "coverage": {
+          "type": "object",
+          "description": "Abdeckungs-Metriken für diesen Merge-Report (optional).",
+          "additionalProperties": false,
+          "properties": {
+            "included_files": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Anzahl der Dateien, deren Inhalt vollständig im Content-Block enthalten ist."
+            },
+            "text_files": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Anzahl aller als textlich klassifizierten Dateien, die für den Merge relevant waren."
+            },
+            "coverage_pct": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Prozentualer Anteil der inkludierten Textdateien (included_files / text_files * 100, auf 1 Nachkommastelle gerundet)."
+            }
+          },
+          "required": [
+            "included_files",
+            "text_files",
+            "coverage_pct"
+          ]
+        },
         "extras": {
           "type": "object",
           "description": "Aktivierte Zusatzschichten des Super-Mergers.",
