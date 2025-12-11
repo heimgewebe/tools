@@ -1853,6 +1853,15 @@ def iter_report_blocks(
         meta_lines.append("<!-- @meta:start -->")
         meta_lines.append("```yaml")
 
+        # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
+        total_files = len(files)
+        text_files_count = len(text_files)
+        if text_files_count:
+            coverage_raw = (included_count / text_files_count) * 100.0
+            coverage_pct = round(coverage_raw, 1)
+        else:
+            coverage_pct = 0.0
+
         meta_dict: Dict[str, Any] = {
             "merge": {
                 "spec_version": SPEC_VERSION,
@@ -1866,8 +1875,13 @@ def iter_report_blocks(
                 "path_filter": path_filter,  # Use actual value, not description
                 "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
                 "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
-                "total_files": len(files),  # Total number of included files
-                "total_size_bytes": total_size,  # Sum of all file sizes
+                "total_files": total_files,        # Total number of files in the merge
+                "total_size_bytes": total_size,    # Sum of all file sizes
+                "coverage": {
+                    "included_files": included_count,
+                    "text_files": text_files_count,
+                    "coverage_pct": coverage_pct,
+                },
             }
         }
 
