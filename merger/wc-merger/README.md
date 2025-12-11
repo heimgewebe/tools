@@ -41,7 +41,7 @@ Für die Weiterentwicklung (und speziell für Agenten wie Jules) gelten folgende
 
 4.  **KI-Safety:**
     *   Timestamps immer in UTC (`YYYY-MM-DD HH:MM:SS (UTC)`).
-    *   `Spec-Version: 2.3` Header immer setzen.
+    *   `Spec-Version: 2.4` Header immer setzen.
 
 ---
 
@@ -60,21 +60,47 @@ Ein idealer wc-merge erfüllt:
 
 ---
 
+## Manifest und Roles
+
+Das Manifest listet alle Dateien des Merges mit ihren Metadaten auf. Neben Kategorie und Tags gibt es eine **Roles**-Spalte.
+
+### Was sind „Roles"?
+
+**Roles** sind semantische Kurzlabels, die automatisch aus Kategorie, Tags und Pfad abgeleitet werden. Sie helfen KIs und Menschen, die Funktion einer Datei auf einen Blick zu erkennen.
+
+**Wofür sind sie gedacht?**
+- Schnelle Filterung: „Zeige mir alle Contracts", „Wo sind die CI-Pipelines?"  
+- Semantische Navigation: Roles ergänzen die technische Kategorie um den Anwendungskontext.
+
+**Wie entstehen sie?**
+- **Aus Tags:** `ai-context` → Role `ai-context`, `ci` → Role `ci`, `adr` → Role `policy`, `script` → Role `tool`, `runbook` → Role `execution`
+- **Aus Pfaden:** `.github/workflows/` → Role `ci`, `contracts/` → Role `contract`, `.wgx/profile.yml` → Role `wgx-profile`
+- **Aus Kategorie (selektiv):** Nur für Contracts und wichtige Config-Dateien (z.B. `pyproject.toml`, `Dockerfile`)
+- **Trivialfälle:** Plain Source-Dateien ohne besondere Tags → **keine Rolle** (Redundanz vermeiden)
+
+**Beispiele:**
+- `README.md` + Tag `ai-context` → Role `ai-context`
+- `.github/workflows/ci.yml` → Roles `ci`
+- `src/main.rs` ohne Tags → **keine Rolle** (Category `source` reicht)
+- `pyproject.toml` → Roles `config`
+
+---
+
 ## Meta-Contract & Schema (`wc-merge-report`)
 
-Ab Spec-Version `2.3` existiert ein formaler Merge-Contract:
+Ab Spec-Version `2.4` existiert ein formaler Merge-Contract:
 
 - **Contract-Name:** `wc-merge-report`
-- **Contract-Version:** `2.3`
+- **Contract-Version:** `2.4`
 
 Jeder Report muss:
 
 1. Im Header (Block „Source & Profile“) diese Felder tragen:
 
    ```markdown
-   - **Spec-Version:** 2.3
+   - **Spec-Version:** 2.4
    - **Contract:** wc-merge-report
-   - **Contract-Version:** 2.3
+   - **Contract-Version:** 2.4
    ```
 
 2. Im `@meta`-Block die Contract-Information maschinenlesbar haben:
@@ -84,10 +110,10 @@ Jeder Report muss:
    <!-- @meta:start -->
    ```yaml
    merge:
-     spec_version: "2.3"
+     spec_version: "2.4"
      profile: "max"
      contract: "wc-merge-report"
-     contract_version: "2.3"
+     contract_version: "2.4"
      plan_only: false
      max_file_bytes: 0
      scope: "single repo `tools`"
@@ -95,6 +121,9 @@ Jeder Report muss:
        - tools
      path_filter: null
      ext_filter: null
+     generated_at: "2025-12-11T05:55:00Z"
+     total_files: 42
+     total_size_bytes: 1234567
    ```
    <!-- @meta:end -->
    ```

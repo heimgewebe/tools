@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2.3 Standard).
+merge_core – Core functions for wc-merger (v2.4 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
 import os
 import sys
+import json
 import hashlib
 import datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ except ImportError:
 
 # --- Configuration & Heuristics ---
 
-SPEC_VERSION = "2.3"
+SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
 
 # Formale Contract-Deklaration für alle wc-merger-Reports.
@@ -115,6 +116,7 @@ class ExtrasConfig:
     augment_sidecar: bool = False
     delta_reports: bool = False
     heatmap: bool = False
+    json_sidecar: bool = False  # NEW: Enable JSON sidecar output
 
     @classmethod
     def none(cls):
@@ -863,15 +865,18 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
     Compute semantic roles for a file based on category, tags, and path.
     Roles help AI agents understand the purpose/function of files.
     
-    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, governance, doc
+    Roles are ONLY set where they add semantic value beyond the category.
+    Plain source files without special tags → no role (avoid redundancy).
+    
+    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, doc, config
     """
     roles = []
     
-    # Role from category
+    # Role from category - only for special categories
     if fi.category == "contract":
         roles.append("contract")
     
-    # Roles from tags
+    # Roles from tags (these always add value)
     if fi.tags:
         if "ai-context" in fi.tags:
             roles.append("ai-context")
@@ -914,10 +919,23 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
         if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
             roles.append("policy")
     
-    # Documentation role
-    if fi.category == "doc" and "doc" not in roles:
-        roles.append("doc")
+    # Config role - only for centrally important config files
+    if fi.category == "config" and fi.rel_path.name.lower() in {
+        "pyproject.toml", "package.json", "cargo.toml", "dockerfile", 
+        "docker-compose.yml", "docker-compose.yaml", ".ai-context.yml"
+    }:
+        if "config" not in roles:
+            roles.append("config")
     
+    # Documentation role - only for docs WITH value-adding tags or in docs/ folder
+    # Plain READMEs get ai-context tag, so they'll get that role already
+    if fi.category == "doc":
+        # Only add doc role if it's in docs/ or has meaningful tags
+        if "docs/" in path_str or fi.tags:
+            if "doc" not in roles:
+                roles.append("doc")
+    
+    # Return empty list for trivial cases (plain source without tags)
     return roles
 
 def is_noise_file(fi: "FileInfo") -> bool:
@@ -1847,6 +1865,9 @@ def iter_report_blocks(
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
                 "path_filter": path_filter,  # Use actual value, not description
                 "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
+                "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
+                "total_files": len(files),  # Total number of included files
+                "total_size_bytes": total_size,  # Sum of all file sizes
             }
         }
 
@@ -2133,44 +2154,54 @@ def iter_report_blocks(
     yield "\n".join(structure) + "\n"
 
     # --- Index (Patch B) ---
-    # Generated Categories Index
+    # Generated Categories Index - Only show non-empty categories/tags
     index_blocks = []
     index_blocks.append("## Index")
-
-    # List of categories to index
-    # CI ist ein Tag, keine eigene Kategorie – wird separat indiziert.
-    cats_to_idx = ["source", "doc", "config", "contract", "test"]
-    for c in cats_to_idx:
-        index_blocks.append(f"- [{c.capitalize()}](#cat-{c})")
-
-    # Tags can be indexed too if needed, e.g. wgx-profile
-    index_blocks.append("- [CI Pipelines](#tag-ci)")
-    index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
     index_blocks.append("")
 
-    # Category Lists
+    # Pre-check which categories/tags have files
+    cats_to_idx = ["source", "doc", "config", "contract", "test"]
+    non_empty_cats = []
     for c in cats_to_idx:
         cat_files = [f for f in files if f.category == c]
         if cat_files:
-            index_blocks.append(f"## Category: {c} {{#cat-{c}}}")
-            for f in cat_files:
-                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-            index_blocks.append("")
-
-    # Tag Lists – CI-Pipelines
+            non_empty_cats.append(c)
+    
+    # Check tag presence
     ci_files = [f for f in files if "ci" in (f.tags or [])]
+    wgx_files = [f for f in files if "wgx-profile" in f.tags]
+    
+    # Build TOC - only for non-empty sections
+    for c in non_empty_cats:
+        index_blocks.append(f"- [{c.capitalize()}](#cat-{c})")
+    
+    # Add tag TOC entries only if they have files
+    if ci_files:
+        index_blocks.append("- [CI Pipelines](#tag-ci)")
+    if wgx_files:
+        index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
+    
+    index_blocks.append("")
+
+    # Category Lists - only non-empty
+    for c in non_empty_cats:
+        cat_files = [f for f in files if f.category == c]
+        index_blocks.append(f"## Category: {c} {{#cat-{c}}}")
+        for f in cat_files:
+            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+        index_blocks.append("")
+
+    # Tag Lists – only non-empty
     if ci_files:
         index_blocks.append("## Tag: ci {#tag-ci}")
         for f in ci_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
-    # Tag Lists (example)
-    wgx_files = [f for f in files if "wgx-profile" in f.tags]
     if wgx_files:
         index_blocks.append("## Tag: wgx-profile {#tag-wgx-profile}")
         for f in wgx_files:
-             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     yield "\n".join(index_blocks) + "\n"
@@ -2211,6 +2242,7 @@ def iter_report_blocks(
 
     # --- 8. Content ---
     # Per Spec v2.3 / Validator requirements
+    # Content is now level 2, repos are level 3 for proper hierarchy
     yield "## 📄 Content\n\n"
 
     current_root = None
@@ -2220,12 +2252,12 @@ def iter_report_blocks(
             continue
 
         if fi.root_label != current_root:
-            yield f"## 📦 {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
+            yield f"### 📦 {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
             current_root = fi.root_label
 
         block = []
         block.append(f'<a id="{fi.anchor}"></a>')
-        block.append(f"### `{fi.rel_path}`")
+        block.append(f"#### `{fi.rel_path}`")  # File headers now level 4
         block.append(f"- Category: {fi.category}")
         if fi.tags:
             block.append(f"- Tags: {', '.join(fi.tags)}")
@@ -2271,6 +2303,87 @@ def generate_report_content(
         # So we should probably re-raise.
         raise
     return report
+
+def generate_json_sidecar(
+    files: List[FileInfo],
+    level: str,
+    max_file_bytes: int,
+    sources: List[Path],
+    plan_only: bool,
+    path_filter: Optional[str] = None,
+    ext_filter: Optional[List[str]] = None,
+    total_size: int = 0,
+    delta_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a JSON sidecar structure for machine consumption.
+    Contains meta, files array, and index object.
+    """
+    now = datetime.datetime.utcnow()
+    
+    # Build meta block
+    meta = {
+        "spec_version": SPEC_VERSION,
+        "profile": level,
+        "contract": MERGE_CONTRACT_NAME,
+        "contract_version": MERGE_CONTRACT_VERSION,
+        "plan_only": plan_only,
+        "max_file_bytes": max_file_bytes,
+        "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "total_files": len(files),
+        "total_size_bytes": total_size,
+        "source_repos": sorted([s.name for s in sources]) if sources else [],
+        "path_filter": path_filter,
+        "ext_filter": sorted(ext_filter) if ext_filter else None,
+    }
+    
+    if delta_meta:
+        meta["delta"] = delta_meta
+    
+    # Build files array
+    files_data = []
+    for fi in files:
+        file_obj = {
+            "path": fi.rel_path.as_posix(),
+            "repo": fi.root_label,
+            "category": fi.category,
+            "tags": fi.tags or [],
+            "roles": compute_file_roles(fi),
+            "size_bytes": fi.size,
+            "md5": fi.md5,
+            "is_text": fi.is_text,
+            "ext": fi.ext,
+        }
+        files_data.append(file_obj)
+    
+    # Build index
+    index = {
+        "categories": {},
+        "tags": {},
+    }
+    
+    # Group by category
+    for cat in ["source", "doc", "config", "contract", "test", "other"]:
+        cat_files = [f.rel_path.as_posix() for f in files if f.category == cat]
+        if cat_files:
+            index["categories"][cat] = cat_files
+    
+    # Group by tags
+    all_tags = set()
+    for fi in files:
+        if fi.tags:
+            all_tags.update(fi.tags)
+    
+    for tag in sorted(all_tags):
+        tag_files = [f.rel_path.as_posix() for f in files if tag in (f.tags or [])]
+        if tag_files:
+            index["tags"][tag] = tag_files
+    
+    return {
+        "meta": meta,
+        "files": files_data,
+        "index": index,
+    }
 
 def write_reports_v2(
     merges_dir: Path,
@@ -2404,6 +2517,19 @@ def write_reports_v2(
             sources,
             lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str),
         )
+        
+        # Write JSON sidecar if enabled
+        if extras and extras.json_sidecar and not plan_only:
+            total_size = sum(f.size for f in all_files)
+            json_data = generate_json_sidecar(
+                all_files, detail, max_bytes, sources, plan_only,
+                path_filter, ext_filter, total_size, delta_meta
+            )
+            # Generate JSON filename based on the first markdown file
+            if out_paths:
+                json_path = out_paths[0].with_suffix('.json')
+                json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                out_paths.append(json_path)
 
     else:
         for s in repo_summaries:
@@ -2412,5 +2538,18 @@ def write_reports_v2(
             s_root = s["root"]
 
             process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str))
+            
+            # Write JSON sidecar if enabled
+            if extras and extras.json_sidecar and not plan_only:
+                total_size = sum(f.size for f in s_files)
+                json_data = generate_json_sidecar(
+                    s_files, detail, max_bytes, [s_root], plan_only,
+                    path_filter, ext_filter, total_size, delta_meta
+                )
+                # Generate JSON filename based on the last markdown file
+                if out_paths:
+                    json_path = out_paths[-1].with_suffix('.json')
+                    json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    out_paths.append(json_path)
 
     return out_paths

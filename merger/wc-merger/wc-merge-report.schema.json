@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://heimgewebe.local/schema/wc-merge-report.schema.json",
-  "title": "wc-merger Report Contract (wc-merge-report v2.3)",
-  "description": "JSON Schema für den maschinenlesbaren Meta-Block (`merge:`) in WC-Merger-Reports (Spec 2.3, Contract `wc-merge-report`).",
+  "title": "wc-merger Report Contract (wc-merge-report v2.4)",
+  "description": "JSON Schema für den maschinenlesbaren Meta-Block (`merge:`) in WC-Merger-Reports (Spec 2.4, Contract `wc-merge-report`).",
   "type": "object",
   "additionalProperties": false,
   "required": ["merge"],
@@ -21,13 +21,16 @@
         "scope",
         "source_repos",
         "path_filter",
-        "ext_filter"
+        "ext_filter",
+        "generated_at",
+        "total_files",
+        "total_size_bytes"
       ],
       "properties": {
         "spec_version": {
           "type": "string",
           "description": "Version der WC-Merger-Spezifikation.",
-          "const": "2.3"
+          "const": "2.4"
         },
         "profile": {
           "type": "string",
@@ -41,8 +44,8 @@
         },
         "contract_version": {
           "type": "string",
-          "description": "Version des Merge-Contracts. Entspricht der Spec-Version für v2.3.",
-          "const": "2.3"
+          "description": "Version des Merge-Contracts. Entspricht der Spec-Version für v2.4.",
+          "const": "2.4"
         },
         "plan_only": {
           "type": "boolean",
@@ -50,7 +53,7 @@
         },
         "max_file_bytes": {
           "type": "integer",
-          "description": "Per-File-Limit in Bytes (0 = kein Limit / „unlimited“).",
+          "description": "Per-File-Limit in Bytes (0 = kein Limit / „unlimited").",
           "minimum": 0
         },
         "scope": {
@@ -78,6 +81,21 @@
             "pattern": "^\\.[A-Za-z0-9._-]+$"
           }
         },
+        "generated_at": {
+          "type": "string",
+          "description": "ISO-8601 UTC timestamp of when the merge was generated (e.g., 2025-12-11T05:55:00Z).",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+        },
+        "total_files": {
+          "type": "integer",
+          "description": "Total number of files included in the merge.",
+          "minimum": 0
+        },
+        "total_size_bytes": {
+          "type": "integer",
+          "description": "Sum of all file sizes in bytes.",
+          "minimum": 0
+        },
         "extras": {
           "type": "object",
           "description": "Aktivierte Zusatzschichten des Super-Mergers.",
@@ -86,7 +104,8 @@
             "organism_index": { "type": "boolean" },
             "fleet_panorama": { "type": "boolean" },
             "augment_sidecar": { "type": "boolean" },
-            "delta_reports": { "type": "boolean" }
+            "delta_reports": { "type": "boolean" },
+            "heatmap": { "type": "boolean" }
           },
           "additionalProperties": false
         },

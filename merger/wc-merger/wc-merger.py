@@ -834,7 +834,8 @@ class MergerUI(object):
             ("Fleet Panorama", "fleet_panorama"),
             ("Delta Reports", "delta_reports"),
             ("Augment Sidecar", "augment_sidecar"),
-            ("AI Heatmap", "heatmap")
+            ("AI Heatmap", "heatmap"),
+            ("JSON Sidecar", "json_sidecar")
         ]
 
         row_h = 44
@@ -1060,6 +1061,7 @@ class MergerUI(object):
                         "delta_reports": self.extras_config.delta_reports,
                         "augment_sidecar": self.extras_config.augment_sidecar,
                         "heatmap": self.extras_config.heatmap,
+                        "json_sidecar": self.extras_config.json_sidecar,
                     },
                 }
             )
@@ -1113,6 +1115,7 @@ class MergerUI(object):
             self.extras_config.delta_reports = extras_data.get("delta_reports", False)
             self.extras_config.augment_sidecar = extras_data.get("augment_sidecar", False)
             self.extras_config.heatmap = extras_data.get("heatmap", False)
+            self.extras_config.json_sidecar = extras_data.get("json_sidecar", False)
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
@@ -1480,9 +1483,10 @@ def main_cli():
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
-    parser.add_argument("--extras", help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar) or 'none'", default="none")
+    parser.add_argument("--extras", help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap) or 'none'", default="none")
     parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
+    parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
 
     args = parser.parse_args()
 
@@ -1539,6 +1543,10 @@ def main_cli():
                 setattr(extras_config, part, True)
             else:
                 print(f"Warning: Unknown extra '{part}' ignored.")
+    
+    # Handle --json-sidecar flag
+    if args.json_sidecar:
+        extras_config.json_sidecar = True
 
     merges_dir = get_merges_dir(hub)
     
