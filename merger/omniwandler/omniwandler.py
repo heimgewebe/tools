@@ -25,7 +25,7 @@ import time
 import traceback
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 # --- Pythonista Imports (Safe) ---
 try:
@@ -391,6 +391,8 @@ class OmniWandlerUI:
         self.hub_dir = hub_dir.expanduser()
         self.files = self._scan_hub()
         self.ds = None  # ListDataSource für die Tabelle
+        # Eigene Mehrfachauswahl (Index in self.files)
+        self.marked_rows: Set[int] = set()
 
         self.view = self._build_view()
 
@@ -499,6 +501,7 @@ class OmniWandlerUI:
 
         # ListDataSource liefert die Daten
         ds = ui.ListDataSource([p.name for p in self.files])
+        # Basisfarben (werden in der Cell-Factory überschrieben)
         ds.text_color = "white"
         ds.background_color = "#111111"
         ds.highlight_color = "#0050ff"
@@ -506,10 +509,27 @@ class OmniWandlerUI:
         ds.delete_enabled = False
         ds.move_enabled = False
 
-        tv.data_source = ds
-        tv.delegate = ds
+        # Eigene Cell-Factory: dunkler Hintergrund, weiße Schrift, Checkmark bei Markierung
+        def make_cell(tableview, section, row, ds=ds, outer=self):
+            cell = ui.TableViewCell()
+            if 0 <= row < len(ds.items):
+                cell.text_label.text = ds.items[row]
+            else:
+                cell.text_label.text = "?"
+            cell.text_label.text_color = "white"
+            cell.background_color = "#111111"
+            try:
+                if row in outer.marked_rows:
+                    cell.accessory_type = ui.ACCESSORY_CHECKMARK
+                else:
+                    cell.accessory_type = ui.ACCESSORY_NONE
+            except Exception:
+                pass
+            return cell
 
-        # Action: nur merken, welcher Ordner ausgewählt wurde
+        ds.tableview_cell_for_row = make_cell
+
+        # Action: Row-Tap → Markierung toggeln + Status updaten
         def on_row_tapped(sender):
             sel = sender.selected_row  # (section, row) oder int
             if sel is None:
@@ -520,11 +540,33 @@ class OmniWandlerUI:
                 row = sel
             if row is None or row < 0 or row >= len(self.files):
                 return
-            # Status-Label updaten – visuelles Feedback
-            sel_name = self.files[row].name
-            self.status_lbl.text = f"Ausgewählt: {sel_name}"
+
+            # Markierung toggeln
+            if row in self.marked_rows:
+                self.marked_rows.remove(row)
+            else:
+                self.marked_rows.add(row)
+
+            if self.marked_rows:
+                names = [self.files[r].name for r in sorted(self.marked_rows)]
+                if len(names) == 1:
+                    self.status_lbl.text = f"Ausgewählt: {names[0]}"
+                else:
+                    self.status_lbl.text = f"{len(names)} Ordner ausgewählt"
+            else:
+                # Keine Markierung → Hinweis
+                if self.files:
+                    self.status_lbl.text = f"{len(self.files)} folders found. Tap to select, then press Wandeln."
+                else:
+                    self.status_lbl.text = "Tap to select folders, then press Wandeln."
+
+            # Checkmarks neu zeichnen
+            tableview.reload_data()
 
         ds.action = on_row_tapped
+
+        tv.data_source = ds
+        tv.delegate = ds
 
         v.add_subview(tv)
         self.tv = tv
@@ -592,6 +634,8 @@ class OmniWandlerUI:
 
     def _refresh(self, sender):
         self.files = self._scan_hub()
+        # Markierte Zeilen zurücksetzen (Hub kann sich verändert haben)
+        self.marked_rows.clear()
         if self.ds is not None:
             self.ds.items = [p.name for p in self.files]
         # TableView komplett neu zeichnen
@@ -638,10 +682,78 @@ class OmniWandlerUI:
 
     def _convert_selected(self, sender):
         """
-        Wandelt den aktuell in der Liste ausgewählten Ordner.
-        Die Auswahl erfolgt über Tipp auf die Zeile.
+        Wandelt:
+        - alle markierten Ordner gemeinsam (Combined-File), falls vorhanden
+        - sonst den aktuell selektierten Ordner (Single-Run).
         """
-        # selected_row kommt vom TableView (nicht von der DataSource)
+        # 1) Falls markierte Ordner existieren → Combined
+        if self.marked_rows:
+            rows = sorted(r for r in self.marked_rows if 0 <= r < len(self.files))
+            if not rows:
+                if console:
+                    console.hud_alert("Auswahl ungültig", "error", 1.0)
+                return
+
+            selected_paths = [self.files[r] for r in rows]
+            dest = self.hub_dir / "wandlungen"
+            dest.mkdir(exist_ok=True)
+
+            self.status_lbl.text = f"Merging {len(selected_paths)} folders…"
+
+            def worker():
+                try:
+                    ts = datetime.now().strftime("%Y%m%d-%H%M")
+                    stem = f"combined_{len(selected_paths)}_folders_{ts}"
+                    md_path = dest / f"{stem}.md"
+
+                    with md_path.open("w", encoding=ENCODING, errors="replace") as out:
+                        out.write("# OmniWandler Combined Report\n\n")
+                        out.write("## Ordner\n\n")
+                        for p in selected_paths:
+                            out.write(f"- {p}\n")
+                        out.write("\n## Inhalte\n\n")
+
+                        for p in selected_paths:
+                            partial_md, _ = self.core.run(
+                                p,
+                                dest,
+                                delete_source=self.del_switch.value,
+                            )
+
+                            out.write(f"\n\n# --- {p.name} ---\n\n")
+                            try:
+                                with partial_md.open("r", encoding=ENCODING) as f:
+                                    out.write(f.read())
+                            except Exception as e:
+                                out.write(f"> Error reading partial result for {p.name}: {e}\n\n")
+
+                            # Einzel-Outputs wieder entfernen
+                            try:
+                                partial_md.unlink()
+                                partial_md.with_suffix(".manifest.json").unlink()
+                            except Exception:
+                                pass
+
+                    # Retention wie üblich
+                    self.core.enforce_retention(dest)
+
+                    if console:
+                        console.hud_alert("Combined Success!", "success", 1.0)
+
+                    # Auswahl leeren + UI refresh
+                    self.marked_rows.clear()
+                    self._refresh(None)
+                    self.status_lbl.text = f"Done: {md_path.name}"
+                except Exception as e:
+                    traceback.print_exc()
+                    if console:
+                        console.hud_alert(f"Error: {e}", "error", 2.0)
+                    self.status_lbl.text = "Error occurred."
+
+            ui.delay(worker, 0.1)
+            return
+
+        # 2) Kein markierter Ordner → Single-Run via selected_row
         sel = self.tv.selected_row
         if sel is None:
             if console:
