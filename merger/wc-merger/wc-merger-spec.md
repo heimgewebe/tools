@@ -1,4 +1,4 @@
-# WC-MERGER SPEC v2.3
+# WC-MERGER SPEC v2.4
 
 (Normative Spezifikation)
 
@@ -30,7 +30,7 @@ Reihenfolge falsch → Fehler.
 
 Header muss enthalten:
 
-- Spec-Version: 2.3
+- Spec-Version: 2.4
 
 ---
 
@@ -108,14 +108,14 @@ Pflichtfelder:
 Im Abschnitt **Source & Profile**:
 
 - `Contract: wc-merge-report`
-- `Contract-Version: 2.3`
+- `Contract-Version: 2.4`
 
 Im `@meta`-Block (eingebettet in HTML-Kommentare `<!-- @meta:start -->` ... `<!-- @meta:end -->`):
 
 ```yaml
 merge:
   contract: "wc-merge-report"
-  contract_version: "2.3"
+  contract_version: "2.4"
 ```
 
 - Es gibt **kein hartes globales Merge-Size-Limit**.

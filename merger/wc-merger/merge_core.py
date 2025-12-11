@@ -20,7 +20,7 @@ except ImportError:
 
 # --- Configuration & Heuristics ---
 
-SPEC_VERSION = "2.3"
+SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
 
 # Formale Contract-Deklaration für alle wc-merger-Reports.
@@ -863,15 +863,18 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
     Compute semantic roles for a file based on category, tags, and path.
     Roles help AI agents understand the purpose/function of files.
     
-    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, governance, doc
+    Roles are ONLY set where they add semantic value beyond the category.
+    Plain source files without special tags → no role (avoid redundancy).
+    
+    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, doc, config
     """
     roles = []
     
-    # Role from category
+    # Role from category - only for special categories
     if fi.category == "contract":
         roles.append("contract")
     
-    # Roles from tags
+    # Roles from tags (these always add value)
     if fi.tags:
         if "ai-context" in fi.tags:
             roles.append("ai-context")
@@ -914,10 +917,23 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
         if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
             roles.append("policy")
     
-    # Documentation role
-    if fi.category == "doc" and "doc" not in roles:
-        roles.append("doc")
+    # Config role - only for centrally important config files
+    if fi.category == "config" and fi.rel_path.name.lower() in {
+        "pyproject.toml", "package.json", "cargo.toml", "dockerfile", 
+        "docker-compose.yml", "docker-compose.yaml", ".ai-context.yml"
+    }:
+        if "config" not in roles:
+            roles.append("config")
     
+    # Documentation role - only for docs WITH value-adding tags or in docs/ folder
+    # Plain READMEs get ai-context tag, so they'll get that role already
+    if fi.category == "doc":
+        # Only add doc role if it's in docs/ or has meaningful tags
+        if "docs/" in path_str or fi.tags:
+            if "doc" not in roles:
+                roles.append("doc")
+    
+    # Return empty list for trivial cases (plain source without tags)
     return roles
 
 def is_noise_file(fi: "FileInfo") -> bool:
@@ -1847,6 +1863,9 @@ def iter_report_blocks(
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
                 "path_filter": path_filter,  # Use actual value, not description
                 "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
+                "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
+                "total_files": len(files),  # Total number of included files
+                "total_size_bytes": total_size,  # Sum of all file sizes
             }
         }
 
@@ -2133,44 +2152,54 @@ def iter_report_blocks(
     yield "\n".join(structure) + "\n"
 
     # --- Index (Patch B) ---
-    # Generated Categories Index
+    # Generated Categories Index - Only show non-empty categories/tags
     index_blocks = []
     index_blocks.append("## Index")
-
-    # List of categories to index
-    # CI ist ein Tag, keine eigene Kategorie – wird separat indiziert.
-    cats_to_idx = ["source", "doc", "config", "contract", "test"]
-    for c in cats_to_idx:
-        index_blocks.append(f"- [{c.capitalize()}](#cat-{c})")
-
-    # Tags can be indexed too if needed, e.g. wgx-profile
-    index_blocks.append("- [CI Pipelines](#tag-ci)")
-    index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
     index_blocks.append("")
 
-    # Category Lists
+    # Pre-check which categories/tags have files
+    cats_to_idx = ["source", "doc", "config", "contract", "test"]
+    non_empty_cats = []
     for c in cats_to_idx:
         cat_files = [f for f in files if f.category == c]
         if cat_files:
-            index_blocks.append(f"## Category: {c} {{#cat-{c}}}")
-            for f in cat_files:
-                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-            index_blocks.append("")
-
-    # Tag Lists – CI-Pipelines
+            non_empty_cats.append(c)
+    
+    # Check tag presence
     ci_files = [f for f in files if "ci" in (f.tags or [])]
+    wgx_files = [f for f in files if "wgx-profile" in f.tags]
+    
+    # Build TOC - only for non-empty sections
+    for c in non_empty_cats:
+        index_blocks.append(f"- [{c.capitalize()}](#cat-{c})")
+    
+    # Add tag TOC entries only if they have files
+    if ci_files:
+        index_blocks.append("- [CI Pipelines](#tag-ci)")
+    if wgx_files:
+        index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
+    
+    index_blocks.append("")
+
+    # Category Lists - only non-empty
+    for c in non_empty_cats:
+        cat_files = [f for f in files if f.category == c]
+        index_blocks.append(f"## Category: {c} {{#cat-{c}}}")
+        for f in cat_files:
+            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+        index_blocks.append("")
+
+    # Tag Lists – only non-empty
     if ci_files:
         index_blocks.append("## Tag: ci {#tag-ci}")
         for f in ci_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
-    # Tag Lists (example)
-    wgx_files = [f for f in files if "wgx-profile" in f.tags]
     if wgx_files:
         index_blocks.append("## Tag: wgx-profile {#tag-wgx-profile}")
         for f in wgx_files:
-             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     yield "\n".join(index_blocks) + "\n"
