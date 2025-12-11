@@ -13,6 +13,7 @@ This module provides common functions used across different merger tools:
 import hashlib
 import os
 from pathlib import Path
+from typing import Optional
 
 # Erweiterungen, die sehr wahrscheinlich Text sind
 TEXT_EXTENSIONS = {
@@ -38,7 +39,7 @@ TEXT_EXTENSIONS = {
     ".zsh",
     ".fish",
     ".dockerfile",
-    "dockerfile",
+    "dockerfile",  # Files named "Dockerfile" without extension
     ".svelte",
     ".css",
     ".scss",
@@ -120,7 +121,7 @@ def is_text(path: Path) -> bool:
     return True
 
 
-def md5(path: Path, limit_bytes: int = None) -> str:
+def md5(path: Path, limit_bytes: Optional[int] = None) -> str:
     """
     Berechnet MD5-Hash einer Datei.
     
@@ -137,7 +138,7 @@ def md5(path: Path, limit_bytes: int = None) -> str:
         h = hashlib.md5(usedforsecurity=False)
     except TypeError:
         # Fallback for Python < 3.9
-        h = hashlib.md5()
+        h = hashlib.md5()  # nosec B303
     
     try:
         with path.open("rb") as f:
