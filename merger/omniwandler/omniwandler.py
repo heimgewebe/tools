@@ -27,6 +27,11 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Set
 
+try:
+    import PyPDF2  # type: ignore
+except ImportError:
+    PyPDF2 = None
+
 # --- Pythonista Imports (Safe) ---
 try:
     import ui
@@ -240,6 +245,36 @@ class OmniWandlerCore:
         files.sort(key=lambda t: str(t[1]).lower())
         return files
 
+    def _extract_pdf_text(self, path: Path, max_pages: int = 200) -> Optional[str]:
+        """
+        Versucht, Text direkt aus einem PDF zu extrahieren.
+        Nutzt PyPDF2, falls verfügbar. Gibt None zurück, wenn nichts geht.
+        """
+        if PyPDF2 is None:
+            return None
+
+        try:
+            texts: List[str] = []
+            with path.open("rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                for i, page in enumerate(reader.pages):
+                    if i >= max_pages:
+                        break
+                    try:
+                        t = page.extract_text() or ""
+                    except Exception:
+                        t = ""
+                    t = t.strip()
+                    if t:
+                        texts.append(t)
+
+            if not texts:
+                return None
+
+            return "\n\n".join(texts)
+        except Exception:
+            return None
+
     def run(self, source: Path, dest_dir: Path, delete_source: bool = False) -> Tuple[Path, Path]:
         files = self.gather_files(source)
 
@@ -292,10 +327,14 @@ class OmniWandlerCore:
 
                 is_text = cat != "media" and is_probably_text(abs_path)
                 if cat == "pdf":
+                    # PDFs behandeln wir speziell – nicht als „plain text file“
                     is_text = False
+
                 ocr_text = None
                 ocr_status = "none"
+                pdf_text = None
 
+                # 1) Optionaler OCR-Shortcut (iOS)
                 if (
                     self.config.ocr_backend == "shortcut"
                     and ext in MEDIA_IMAGE_EXTS.union(PDF_EXTS)
@@ -303,20 +342,36 @@ class OmniWandlerCore:
                     ocr_text = self.ocr_via_shortcut(abs_path)
                     ocr_status = "ok" if ocr_text else "failed"
 
+                # 2) Direkte PDF-Extraktion (falls möglich)
+                if cat == "pdf":
+                    pdf_text = self._extract_pdf_text(abs_path)
+
                 if is_text:
+                    # Normale Textdatei → direkt einbetten
                     lang = LANG_MAP.get(abs_path.suffix.lower().lstrip("."), "")
                     self._write_content(out, abs_path, lang, size)
                 else:
-                    if cat == "pdf":
+                    if cat == "pdf" and (pdf_text or ocr_text):
+                        out.write("> PDF-Datei. Text wurde extrahiert.\n\n")
+                    elif cat == "pdf":
                         out.write(
-                            "> PDF-Datei. Originalinhalt nicht inline, Text ggf. über OCR.\n\n"
+                            "> PDF-Datei. Konnte keinen Text extrahieren (keine PDF-Bibliothek / OCR?).\n\n"
                         )
                     else:
                         out.write(f"> Binary/Media file. Not included as text.\n\n")
+
                     if ext in MEDIA_IMAGE_EXTS:
                         out.write(f"![{rel_path}]({rel_path})\n\n")
 
-                    if ocr_text:
+                    # 2a) PDF-Text
+                    if pdf_text:
+                        out.write("#### 📄 PDF Extracted Text\n\n")
+                        out.write("```text\n")
+                        out.write(pdf_text)
+                        out.write("\n```\n\n")
+
+                    # 2b) OCR-Text (wenn vorhanden)
+                    if ocr_text and (not pdf_text or ocr_text.strip() != pdf_text.strip()):
                         out.write("#### 🖹 OCR Extracted Text\n\n")
                         out.write("```text\n")
                         out.write(ocr_text)
