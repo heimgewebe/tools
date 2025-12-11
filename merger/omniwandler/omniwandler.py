@@ -371,8 +371,12 @@ class OmniWandlerCore:
         except Exception as e:
             out.write(f"> Error reading file: {e}\n\n")
 
-    def enforce_retention(self, dest_dir: Path, keep: int = 5):
+    def enforce_retention(self, dest_dir: Path, keep: Optional[int] = None):
+        """Löscht alte OmniWandler-Outputs gemäß Config.keep_last_n."""
         try:
+            if keep is None:
+                keep = int(getattr(self.config, "keep_last_n", 5))
+
             files = list(dest_dir.glob("*_omniwandler_*.md"))
             files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
             for f in files[keep:]:
@@ -512,12 +516,23 @@ class OmniWandlerUI:
         # Eigene Cell-Factory: dunkler Hintergrund, weiße Schrift, Checkmark bei Markierung
         def make_cell(tableview, section, row, ds=ds, outer=self):
             cell = ui.TableViewCell()
+
+            # Basisname aus der DataSource
             if 0 <= row < len(ds.items):
-                cell.text_label.text = ds.items[row]
+                base_name = ds.items[row]
             else:
-                cell.text_label.text = "?"
+                base_name = "?"
+
+            # Sichtbare Markierung im Text
+            if row in outer.marked_rows:
+                cell.text_label.text = f"✓ {base_name}"
+            else:
+                cell.text_label.text = base_name
+
             cell.text_label.text_color = "white"
             cell.background_color = "#111111"
+
+            # Optional weiterhin Accessory-Checkmark setzen (falls Pythonista es anzeigt)
             try:
                 if row in outer.marked_rows:
                     cell.accessory_type = ui.ACCESSORY_CHECKMARK
@@ -525,6 +540,7 @@ class OmniWandlerUI:
                     cell.accessory_type = ui.ACCESSORY_NONE
             except Exception:
                 pass
+
             return cell
 
         ds.tableview_cell_for_row = make_cell
@@ -641,9 +657,9 @@ class OmniWandlerUI:
         # TableView komplett neu zeichnen
         self.tv.reload_data()
         if self.files:
-            self.status_lbl.text = f"{len(self.files)} folders found. Tap to select."
+            self.status_lbl.text = f"{len(self.files)} folders found. Tap to select, then press Wandeln."
         else:
-            self.status_lbl.text = "No folders found in Hub."
+            self.status_lbl.text = "Tap to select folders, then press Wandeln."
 
         # Update Hub Label text in case it changed
         path_str = str(self.hub_dir)
