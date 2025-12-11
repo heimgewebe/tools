@@ -244,3 +244,32 @@ pythonista3://wc-merger/wc-extractor.py?action=run&root=icloud
 Diese Methode garantiert vollen Zugriff auf UI, Alerts und das Dateisystem.
 
 Weitere Details siehe [wc-merger-spec.md](./wc-merger-spec.md).
+
+### KI-Lesepfad (kurz)
+
+Dieser Abschnitt richtet sich an KIs und beschreibt **nur**, wie die
+fertige Merge-Datei zu lesen ist – unabhängig davon, welches Profil
+(`overview`, `summary`, `dev`, `max`) den Merge erzeugt hat.
+
+1. **Meta-Block zuerst**
+   - Suche im Kopf des Dokuments nach dem `@meta`-Block (YAML).
+   - Dort stehen: Profil, Scope (welche Repos), Grenzen (`max_file_bytes`),
+     und Zeitstempel (`generated_at`).
+   - Nutze diese Infos, um deine eigene Antwort zu kalibrieren
+     (z. B. ob der Merge eher Überblick oder Vollabdeckung liefert).
+
+2. **Manifest als Index**
+   - Das Manifest listet alle Dateien mit Pfad, Größe und Rolle.
+   - Behandle das Manifest wie ein Inhaltsverzeichnis:
+     - Wähle zuerst Dateien mit hoher Relevanz für deine Aufgabe
+       (Readmes, `.ai-context`, Runbooks, CI/Contracts etc.).
+
+3. **Datei-Abschnitte lesen**
+   - Jede Datei mit Inhalt hat einen eigenen Abschnitt mit Überschrift
+     (typisch: `### <pfad/der/datei>`).
+   - Verwende die Rücksprung-Links wie `[↑ Zurück zum Manifest]`, um
+     zwischen Manifest und Datei-Blöcken zu navigieren.
+
+4. **Mehrere Repos**
+   - Wenn mehrere Repos in einem Merge stecken, sind sie in der Struktur
+     und im Manifest entsprechend gruppiert. Lies ggf. Repo-für-Repo.
