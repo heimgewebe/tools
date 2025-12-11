@@ -11,7 +11,7 @@ import json
 import hashlib
 import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple
+from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass, asdict
 
 try:
@@ -38,6 +38,8 @@ DEFAULT_MAX_BYTES = 0
 
 # Debug-Config (kann später bei Bedarf erweitert werden)
 ALLOWED_CATEGORIES = {"source", "test", "doc", "config", "contract", "other"}
+# Kategorien, die im Code-only-Modus sichtbar bleiben sollen
+CODE_ONLY_CATEGORIES: Set[str] = {"source", "test", "config", "contract"}
 ALLOWED_TAGS = {
     "ai-context",
     "runbook",
@@ -1618,6 +1620,7 @@ def iter_report_blocks(
     max_file_bytes: int,
     sources: List[Path],
     plan_only: bool,
+    code_only: bool = False,
     debug: bool = False,
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
@@ -1632,6 +1635,10 @@ def iter_report_blocks(
 
     # Sort files according to strict multi-repo order and then path
     files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
+
+    # Optional Code-only-Filter
+    if code_only:
+        files = [fi for fi in files if fi.category in CODE_ONLY_CATEGORIES]
 
     # Pre-calculate status based on Profile Strict Logic
     processed_files = []
@@ -1822,6 +1829,7 @@ def iter_report_blocks(
                 "contract": MERGE_CONTRACT_NAME,
                 "contract_version": MERGE_CONTRACT_VERSION,
                 "plan_only": plan_only,
+                "code_only": code_only,
                 "max_file_bytes": max_file_bytes,
                 "scope": scope_desc,
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
@@ -2258,13 +2266,28 @@ def generate_report_content(
     max_file_bytes: int,
     sources: List[Path],
     plan_only: bool,
+    code_only: bool = False,
     debug: bool = False,
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
 ) -> str:
-    report = "".join(iter_report_blocks(files, level, max_file_bytes, sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta))
+    report = "".join(
+        iter_report_blocks(
+            files,
+            level,
+            max_file_bytes,
+            sources,
+            plan_only,
+            code_only,
+            debug,
+            path_filter,
+            ext_filter,
+            extras,
+            delta_meta,
+        )
+    )
     if plan_only:
         return report
     try:
@@ -2284,6 +2307,7 @@ def generate_json_sidecar(
     max_file_bytes: int,
     sources: List[Path],
     plan_only: bool,
+    code_only: bool = False,
     path_filter: Optional[str] = None,
     ext_filter: Optional[List[str]] = None,
     total_size: int = 0,
@@ -2294,7 +2318,12 @@ def generate_json_sidecar(
     Contains meta, files array, and index object.
     """
     now = datetime.datetime.utcnow()
+    if code_only:
+        files = [fi for fi in files if fi.category in CODE_ONLY_CATEGORIES]
+
     scope_desc = describe_scope(files)
+
+    total_size = sum(fi.size for fi in files)
 
     processed = []
     included_count = 0
@@ -2315,6 +2344,7 @@ def generate_json_sidecar(
         "contract": MERGE_CONTRACT_NAME,
         "contract_version": MERGE_CONTRACT_VERSION,
         "plan_only": plan_only,
+        "code_only": code_only,
         "max_file_bytes": max_file_bytes,
         "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
         "total_files": len(files),
@@ -2405,6 +2435,7 @@ def write_reports_v2(
     mode: str,
     max_bytes: int,
     plan_only: bool,
+    code_only: bool = False,
     split_size: int = 0,
     debug: bool = False,
     path_filter: Optional[str] = None,
@@ -2446,7 +2477,19 @@ def write_reports_v2(
                 else:
                     current_size = 0
 
-            iterator = iter_report_blocks(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta)
+            iterator = iter_report_blocks(
+                target_files,
+                detail,
+                max_bytes,
+                target_sources,
+                plan_only,
+                code_only,
+                debug,
+                path_filter,
+                ext_filter,
+                extras,
+                delta_meta,
+            )
 
             for block in iterator:
                 block_len = len(block.encode('utf-8'))
@@ -2510,7 +2553,19 @@ def write_reports_v2(
 
         else:
             # Standard single file (no split logic active, e.g. split_size=0)
-            content = generate_report_content(target_files, detail, max_bytes, target_sources, plan_only, debug, path_filter, ext_filter, extras, delta_meta)
+            content = generate_report_content(
+                target_files,
+                detail,
+                max_bytes,
+                target_sources,
+                plan_only,
+                code_only,
+                debug,
+                path_filter,
+                ext_filter,
+                extras,
+                delta_meta,
+            )
             out_path = output_filename_base_func(part_suffix="")
             out_path.write_text(content, encoding="utf-8")
             out_paths.append(out_path)
@@ -2532,10 +2587,20 @@ def write_reports_v2(
         
         # Write JSON sidecar if enabled
         if extras and extras.json_sidecar and not plan_only:
-            total_size = sum(f.size for f in all_files)
+            total_size = sum(
+                f.size for f in all_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
+            )
             json_data = generate_json_sidecar(
-                all_files, detail, max_bytes, sources, plan_only,
-                path_filter, ext_filter, total_size, delta_meta
+                all_files,
+                detail,
+                max_bytes,
+                sources,
+                plan_only,
+                code_only,
+                path_filter,
+                ext_filter,
+                total_size,
+                delta_meta,
             )
             # Generate JSON filename based on the first markdown file
             if out_paths:
@@ -2553,10 +2618,20 @@ def write_reports_v2(
             
             # Write JSON sidecar if enabled
             if extras and extras.json_sidecar and not plan_only:
-                total_size = sum(f.size for f in s_files)
+                total_size = sum(
+                    f.size for f in s_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
+                )
                 json_data = generate_json_sidecar(
-                    s_files, detail, max_bytes, [s_root], plan_only,
-                    path_filter, ext_filter, total_size, delta_meta
+                    s_files,
+                    detail,
+                    max_bytes,
+                    [s_root],
+                    plan_only,
+                    code_only,
+                    path_filter,
+                    ext_filter,
+                    total_size,
+                    delta_meta,
                 )
                 # Generate JSON filename based on the last markdown file
                 if out_paths:
