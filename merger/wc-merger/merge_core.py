@@ -115,6 +115,7 @@ class ExtrasConfig:
     augment_sidecar: bool = False
     delta_reports: bool = False
     heatmap: bool = False
+    json_sidecar: bool = False  # NEW: Enable JSON sidecar output
 
     @classmethod
     def none(cls):
@@ -2240,6 +2241,7 @@ def iter_report_blocks(
 
     # --- 8. Content ---
     # Per Spec v2.3 / Validator requirements
+    # Content is now level 2, repos are level 3 for proper hierarchy
     yield "## 📄 Content\n\n"
 
     current_root = None
@@ -2249,12 +2251,12 @@ def iter_report_blocks(
             continue
 
         if fi.root_label != current_root:
-            yield f"## 📦 {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
+            yield f"### 📦 {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
             current_root = fi.root_label
 
         block = []
         block.append(f'<a id="{fi.anchor}"></a>')
-        block.append(f"### `{fi.rel_path}`")
+        block.append(f"#### `{fi.rel_path}`")  # File headers now level 4
         block.append(f"- Category: {fi.category}")
         if fi.tags:
             block.append(f"- Tags: {', '.join(fi.tags)}")
@@ -2300,6 +2302,87 @@ def generate_report_content(
         # So we should probably re-raise.
         raise
     return report
+
+def generate_json_sidecar(
+    files: List[FileInfo],
+    level: str,
+    max_file_bytes: int,
+    sources: List[Path],
+    plan_only: bool,
+    path_filter: Optional[str] = None,
+    ext_filter: Optional[List[str]] = None,
+    total_size: int = 0,
+    delta_meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a JSON sidecar structure for machine consumption.
+    Contains meta, files array, and index object.
+    """
+    now = datetime.datetime.utcnow()
+    
+    # Build meta block
+    meta = {
+        "spec_version": SPEC_VERSION,
+        "profile": level,
+        "contract": MERGE_CONTRACT_NAME,
+        "contract_version": MERGE_CONTRACT_VERSION,
+        "plan_only": plan_only,
+        "max_file_bytes": max_file_bytes,
+        "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "total_files": len(files),
+        "total_size_bytes": total_size,
+        "source_repos": sorted([s.name for s in sources]) if sources else [],
+        "path_filter": path_filter,
+        "ext_filter": sorted(ext_filter) if ext_filter else None,
+    }
+    
+    if delta_meta:
+        meta["delta"] = delta_meta
+    
+    # Build files array
+    files_data = []
+    for fi in files:
+        file_obj = {
+            "path": fi.rel_path.as_posix(),
+            "repo": fi.root_label,
+            "category": fi.category,
+            "tags": fi.tags or [],
+            "roles": compute_file_roles(fi),
+            "size_bytes": fi.size,
+            "md5": fi.md5,
+            "is_text": fi.is_text,
+            "ext": fi.ext,
+        }
+        files_data.append(file_obj)
+    
+    # Build index
+    index = {
+        "categories": {},
+        "tags": {},
+    }
+    
+    # Group by category
+    for cat in ["source", "doc", "config", "contract", "test", "other"]:
+        cat_files = [f.rel_path.as_posix() for f in files if f.category == cat]
+        if cat_files:
+            index["categories"][cat] = cat_files
+    
+    # Group by tags
+    all_tags = set()
+    for fi in files:
+        if fi.tags:
+            all_tags.update(fi.tags)
+    
+    for tag in sorted(all_tags):
+        tag_files = [f.rel_path.as_posix() for f in files if tag in (f.tags or [])]
+        if tag_files:
+            index["tags"][tag] = tag_files
+    
+    return {
+        "meta": meta,
+        "files": files_data,
+        "index": index,
+    }
 
 def write_reports_v2(
     merges_dir: Path,
@@ -2433,6 +2516,19 @@ def write_reports_v2(
             sources,
             lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str),
         )
+        
+        # Write JSON sidecar if enabled
+        if extras and extras.json_sidecar and not plan_only:
+            total_size = sum(f.size for f in all_files)
+            json_data = generate_json_sidecar(
+                all_files, detail, max_bytes, sources, plan_only,
+                path_filter, ext_filter, total_size, delta_meta
+            )
+            # Generate JSON filename based on the first markdown file
+            if out_paths:
+                json_path = out_paths[0].with_suffix('.json')
+                json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                out_paths.append(json_path)
 
     else:
         for s in repo_summaries:
@@ -2441,5 +2537,18 @@ def write_reports_v2(
             s_root = s["root"]
 
             process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str))
+            
+            # Write JSON sidecar if enabled
+            if extras and extras.json_sidecar and not plan_only:
+                total_size = sum(f.size for f in s_files)
+                json_data = generate_json_sidecar(
+                    s_files, detail, max_bytes, [s_root], plan_only,
+                    path_filter, ext_filter, total_size, delta_meta
+                )
+                # Generate JSON filename based on the last markdown file
+                if out_paths:
+                    json_path = out_paths[-1].with_suffix('.json')
+                    json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                    out_paths.append(json_path)
 
     return out_paths
