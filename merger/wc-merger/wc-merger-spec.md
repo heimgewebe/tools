@@ -138,6 +138,28 @@ Optional:
 
 - Spec-Checksum: <sha256>
 
+### KI-Lesepfad-Minimum (nur Output, keine Configs)
+
+Dieser Abschnitt definiert den minimalen Lesepfad für KIs, die
+nur die Merge-Datei sehen – nicht den ausführenden Code und
+nicht die Profile/Configs.
+
+- Schritt 1 – @meta lesen:
+  - KIs sollen zuerst den merge-Block lesen (Profil, Scope, Limits,
+    `generated_at`). Der Block beschreibt, wie der Merge erzeugt wurde,
+    ohne dass die KI Zugriff auf die ausführende Umgebung braucht.
+
+- Schritt 2 – Manifest nutzen:
+  - Das Manifest ist der zentrale Index über alle Dateien. KIs sollen es
+    nutzen, um relevante Dateien zu identifizieren und zielgerichtet in
+    die entsprechenden Abschnitte zu springen.
+
+- Schritt 3 – Datei-Blöcke:
+  - Jeder Datei-Block ist in Markdown sauber abgegrenzt, inkl. Rücksprung-
+    Links zum Manifest. Es gibt keine versteckten Bedeutungen; KIs sollen
+    die Inhalte so lesen, wie sie sind – ohne eigene Struktur in den Merge
+    „hineinzuphantasieren“.
+
 ---
 
 ## 4. Kategorien
