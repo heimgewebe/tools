@@ -2018,12 +2018,23 @@ def iter_report_blocks(
 
     # --- 4. Reading Plan ---
     header.append("## Reading Plan")
-    header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
-    if level == "machine-lean":
-        header.append("2. Danach: `Manifest` -> `Content`")
+    header.append("")
+    if plan_only:
+        # Plan-Only: explizit machen, dass nur Plan & Meta im Merge sind.
+        header.append("1. Hinweis: Dieser Merge wurde im **PLAN-ONLY** Modus erzeugt.")
+        header.append("   - Enthält nur: Profilbeschreibung, Plan und Meta (`@meta`).")
+        header.append("   - Enthält **nicht**: `Structure`, `Manifest` oder `Content`-Blöcke.")
+        header.append("")
+        header.append("2. Nutze diesen Merge, um schnell zu entscheiden, ob sich ein Voll-Merge lohnt,")
+        header.append("   ohne Tokens für Dateiinhalte zu verbrauchen.")
     else:
-        header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
-    header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
+        # Standard-Lesepfad für Voll-Merges
+        header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
+        if level == "machine-lean":
+            header.append("2. Danach: `Manifest` -> `Content`")
+        else:
+            header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
+        header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
     header.append("")
 
     yield "\n".join(header) + "\n"
