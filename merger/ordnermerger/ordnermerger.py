@@ -165,7 +165,7 @@ def parse_args(argv):
     ap.add_argument("-y", "--yes", action="store_true", help="Rückfragen überspringen (z.B. bei --delete)")
     ap.add_argument("--utc", action="store_true", help="UTC statt lokale Zeit im Dateinamen verwenden")
     ap.add_argument("--pattern", default=DEFAULT_NAME_PATTERN,
-                    help=f"Namensmuster für Zieldatei (Default: {DEFAULT_NAME_PATTERN})")
+                    help=f"Namensmuster für Zieldatei (Default: {DEFAULT_NAME_PATTERN})".replace("%", "%%"))
     return ap.parse_args(argv)
 
 

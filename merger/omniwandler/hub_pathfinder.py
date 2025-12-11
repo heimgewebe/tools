@@ -48,7 +48,7 @@ def main() -> None:
     msg_lines = [
         "=== OmniWandler Hub-Pathfinder ===",
         "",
-        f"Dieses Script liegt bei:",
+        "Dieses Script liegt bei:",
         f"  {script_dir}",
         "",
         "Geschriebene Konfiguration:",

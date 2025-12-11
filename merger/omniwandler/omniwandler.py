@@ -21,11 +21,10 @@ import io
 import json
 import hashlib
 import shutil
-import time
 import traceback
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Set
+from typing import List, Optional, Tuple, Set
 
 try:
     import PyPDF2  # type: ignore
@@ -143,7 +142,12 @@ def human_size(n: int) -> str:
     return f"{f:.1f} {units[i]}"
 
 def file_md5(path: Path) -> str:
-    h = hashlib.md5()
+    # MD5 is used for file integrity checking, not cryptographic security
+    try:
+        h = hashlib.md5(usedforsecurity=False)
+    except TypeError:
+        # Fallback for Python < 3.9
+        h = hashlib.md5()  # nosec B303
     try:
         with path.open("rb") as f:
             for chunk in iter(lambda: f.read(1 << 16), b""):
@@ -289,13 +293,13 @@ class OmniWandlerCore:
         with md_path.open("w", encoding=ENCODING, errors="replace") as out:
             # Header matching wc-merger style roughly
             out.write(f"# OmniWandler Report: {source.name}\n\n")
-            out.write(f"<!-- @meta:start -->\n")
-            out.write(f"tool: omniwandler\n")
-            out.write(f"version: 2.2\n")
+            out.write("<!-- @meta:start -->\n")
+            out.write("tool: omniwandler\n")
+            out.write("version: 2.2\n")
             out.write(f"source: {source.name}\n")
             out.write(f"timestamp: {datetime.now().isoformat()}\n")
             out.write(f"files: {len(files)}\n")
-            out.write(f"<!-- @meta:end -->\n\n")
+            out.write("<!-- @meta:end -->\n\n")
 
             out.write("## 🧭 Meta & Plan\n\n")
             out.write(f"- **Source:** `{source}`\n")
@@ -358,7 +362,7 @@ class OmniWandlerCore:
                             "> PDF-Datei. Konnte keinen Text extrahieren – vermutlich gescannt oder typografisch schwer lesbar. Bitte OCR-Backend (config.toml) prüfen.\n\n"
                         )
                     else:
-                        out.write(f"> Binary/Media file. Not included as text.\n\n")
+                        out.write("> Binary/Media file. Not included as text.\n\n")
 
                     if ext in MEDIA_IMAGE_EXTS:
                         out.write(f"![{rel_path}]({rel_path})\n\n")
