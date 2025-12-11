@@ -177,8 +177,8 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
         
         return build_delta_meta_from_diff(only_old, only_new, changed, base_timestamp)
     
-    except Exception:
-        # Silently fail - don't break the merge if delta extraction fails
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to extract delta meta from {diff_path}: {e}\n")
         return None
 
 

@@ -580,8 +580,9 @@ def _render_augment_block(sources: List[Path]) -> str:
 
     try:
         data = yaml.safe_load(raw)  # type: ignore[name-defined]
-    except Exception:
-        # If the augment file is malformed, fail silently and do not break the merge
+    except Exception as e:
+        # If the augment file is malformed, log error and do not break the merge
+        sys.stderr.write(f"Warning: Failed to parse augment sidecar {augment_path}: {e}\n")
         return ""
 
     if not isinstance(data, dict):
@@ -1027,7 +1028,8 @@ def is_noise_file(fi: "FileInfo") -> bool:
     try:
         path_str = str(fi.rel_path).replace("\\", "/").lower()
         name = fi.rel_path.name.lower()
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"Warning: is_noise_file failed for {fi.rel_path}: {e}\n")
         return False
 
     noisy_dirs = (
@@ -2677,8 +2679,8 @@ def write_reports_v2(
                      # Just rename if we couldn't read/edit content
                      try:
                          path.rename(new_path)
-                     except OSError:
-                         pass
+                     except OSError as e:
+                         sys.stderr.write(f"Error renaming {path} to {new_path}: {e}\n")
 
                 final_paths.append(new_path)
 
