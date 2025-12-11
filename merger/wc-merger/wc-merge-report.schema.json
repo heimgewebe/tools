@@ -35,7 +35,7 @@
         "profile": {
           "type": "string",
           "description": "Profil / Detailgrad des Merges.",
-          "enum": ["overview", "summary", "dev", "max"]
+          "enum": ["overview", "summary", "dev", "machine-lean", "max"]
         },
         "contract": {
           "type": "string",

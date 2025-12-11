@@ -144,6 +144,9 @@ PROFILE_DESCRIPTIONS = {
         "Arbeits-Profil: Code, Tests, Config, CI voll. "
         "Doku nur für README/Runbooks/ai-context voll."
     ),
+    "machine-lean": (
+        "Schlankes Maschinen-Profil: Manifest + Index + Content ohne Baum-Dekoration."
+    ),
     "max": (
         "Vollsnapshot: alle Textdateien mit Inhalt (bis zum Max-Bytes-Limit pro Datei)."
     ),
@@ -165,6 +168,10 @@ PROFILE_PRESETS = {
         "split_mb": 10,
     },
     "dev": {
+        "max_bytes": 0,
+        "split_mb": 10,
+    },
+    "machine-lean": {
         "max_bytes": 0,
         "split_mb": 10,
     },
