@@ -863,6 +863,26 @@ def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
     return " / ".join(roles)
 
 
+def summarize_repo(files: List["FileInfo"], included_count: int) -> Dict[str, Any]:
+    """
+    Build a compact stats dict for a repository.
+    """
+    total = len(files)
+    text_files = sum(
+        1
+        for f in files
+        if f.is_text and f.category in {"source", "doc", "config", "test", "ci", "contract"}
+    )
+    total_bytes = sum(f.size for f in files)
+
+    return {
+        "total": total,
+        "text_files": text_files,
+        "bytes": total_bytes,
+        "included": included_count,
+    }
+
+
 def compute_file_roles(fi: "FileInfo") -> List[str]:
     """
     Compute semantic roles with a lean, high-signal heuristic.
@@ -899,6 +919,54 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
             seen.add(r)
 
     return deduped
+
+
+def build_hotspots(processed_files: List[Tuple["FileInfo", str]], limit: int = 8) -> List[str]:
+    """
+    Build a concise hotspot list for quick navigation.
+
+    Focuses on included files and boosts likely entrypoints/configs.
+    """
+    candidates: List[Tuple[float, FileInfo]] = []
+
+    for fi, status in processed_files:
+        if status not in ("full", "truncated"):
+            continue
+
+        score = 0.0
+
+        if "entrypoint" in fi.roles:
+            score += 5.0
+        if fi.category == "contract":
+            score += 3.0
+        if "ai-context" in (fi.tags or []):
+            score += 2.5
+        if "ci" in (fi.tags or []):
+            score += 1.5
+        if fi.category == "config":
+            score += 1.0
+
+        # Light size bias to surface substantial files without overwhelming the list
+        score += min(fi.size / 1024.0, 50) / 50.0
+
+        candidates.append((score, fi))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (-item[0], -item[1].size, str(item[1].rel_path)))
+    top = candidates[:limit]
+
+    lines = ["### Hotspots (Einstiegspunkte)"]
+    for _, fi in top:
+        link = f"[`{fi.rel_path}`](#{fi.anchor})"
+        role_hint = f"roles: {', '.join(fi.roles)}" if fi.roles else "roles: -"
+        tag_hint = f"tags: {', '.join(fi.tags)}" if fi.tags else "tags: -"
+        lines.append(
+            f"- {link} — repo `{fi.root_label}`, {fi.category}; {role_hint}, {tag_hint}"
+        )
+
+    return lines
 
 
 def describe_scope(files: List["FileInfo"]) -> str:
@@ -1741,6 +1809,10 @@ def iter_report_blocks(
         if status in ("full", "truncated"):
             included_by_root[fi.root_label] = included_by_root.get(fi.root_label, 0) + 1
 
+    repo_stats: Dict[str, Dict[str, Any]] = {}
+    for root, root_files in files_by_root.items():
+        repo_stats[root] = summarize_repo(root_files, included_by_root.get(root, 0))
+
     # Pre-Calculation for Health (needed for Meta Block)
     health_collector = None
     if extras.health:
@@ -1754,6 +1826,11 @@ def iter_report_blocks(
     header = []
     header.append(f"# WC-Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
+
+    if code_only:
+        header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
+        header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
+        header.append("")
 
     # --- 2. Source & Profile ---
     header.append("## Source & Profile")
@@ -1994,6 +2071,11 @@ def iter_report_blocks(
                 f"({root_text} relevant text, {human_size(root_bytes)}, {root_included} with content)"
             )
         plan.append("")
+
+    hotspots = build_hotspots(processed_files)
+    if hotspots:
+        plan.extend(hotspots)
+        plan.append("")
     plan.append("**Folder Highlights:**")
     if code_folders: plan.append(f"- Code: `{', '.join(sorted(code_folders))}`")
     if doc_folders: plan.append(f"- Docs: `{', '.join(sorted(doc_folders))}`")
@@ -2191,26 +2273,68 @@ def iter_report_blocks(
 
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
-    manifest.append("## 🧾 Manifest {#manifest}")
+    manifest_heading = "## 🧾 Manifest {#manifest}"
+    if code_only:
+        manifest_heading = "## 🧾 Manifest (Code-Only) {#manifest}"
+    manifest.append(manifest_heading)
     manifest.append("")
-    manifest.append("| Root | Path | Category | Tags | Roles | Size | Included | MD5 |")
-    manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
-    for fi, status in processed_files:
-        tags_str = ", ".join(fi.tags) if fi.tags else "-"
-        roles_str = ", ".join(fi.roles) if fi.roles else "-"
-        # Noise kennzeichnen, ohne das Schema zu ändern
-        included_label = status
-        if is_noise_file(fi):
-            included_label = f"{status} (noise)"
 
-        # Link in Manifest
-        path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
+    roots_sorted = sorted(files_by_root.keys())
+    if roots_sorted:
+        manifest_nav = " · ".join(f"[{r}](#manifest-{r})" for r in roots_sorted)
+        manifest.append(f"**Repos im Merge:** {manifest_nav}")
+        manifest.append("")
+
+    if code_only:
         manifest.append(
-            f"| `{fi.root_label}` | {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
-            f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
+            "_Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: "
+            "`entrypoint`=CLIs/Starts, `config`=zentral, `ci`=Workflows, `test`=Tests._"
         )
-    manifest.append("")
-    yield "\n".join(manifest) + "\n"
+        manifest.append("")
+
+    if not roots_sorted:
+        manifest.append("_Keine Dateien im Manifest._")
+        manifest.append("")
+        yield "\n".join(manifest) + "\n"
+    else:
+        for root in roots_sorted:
+            root_files = files_by_root[root]
+            stats = repo_stats.get(root, {})
+            repo_role = infer_repo_role(root, root_files)
+
+            manifest.append(f"### Repo `{root}` {{#manifest-{root}}}")
+            manifest.append("")
+            manifest.append(
+                f"- Rolle: {repo_role}"
+            )
+            if stats:
+                manifest.append(
+                    f"- Umfang: {stats.get('total', 0)} Dateien "
+                    f"({stats.get('text_files', 0)} Text), {human_size(stats.get('bytes', 0))}; "
+                    f"Inhalt: {stats.get('included', 0)} mit Content"
+                )
+            manifest.append("")
+            manifest.append("| Path | Category | Tags | Roles | Size | Included | MD5 |")
+            manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
+
+            for fi, status in processed_files:
+                if fi.root_label != root:
+                    continue
+
+                tags_str = ", ".join(fi.tags) if fi.tags else "-"
+                roles_str = ", ".join(fi.roles) if fi.roles else "-"
+                included_label = status
+                if is_noise_file(fi):
+                    included_label = f"{status} (noise)"
+
+                path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
+                manifest.append(
+                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
+                    f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
+                )
+            manifest.append("")
+
+        yield "\n".join(manifest) + "\n"
 
     # --- Optional: Fleet Consistency ---
     consistency_warnings = check_fleet_consistency(files)
@@ -2225,7 +2349,16 @@ def iter_report_blocks(
 
     # --- 8. Content ---
     # Lean hierarchy: Content (#), Repo (##), File (###)
-    yield "# Content\n\n"
+    content_header: List[str] = ["# Content", ""]
+    content_roots = [fi.root_label for fi, status in processed_files if status in ("full", "truncated", "meta-only", "omitted")]
+    if content_roots:
+        nav_links = " · ".join(
+            f"[{root}](#repo-{root})" for root in sorted(set(content_roots))
+        )
+        content_header.append(f"**Repos im Merge:** {nav_links}")
+        content_header.append("")
+
+    yield "\n".join(content_header)
 
     current_root = None
 
@@ -2237,7 +2370,7 @@ def iter_report_blocks(
             yield f"## {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
             current_root = fi.root_label
 
-        block = []
+        block = ["---"]
         block.append(f'<a id="{fi.anchor}"></a>')
         block.append(f"### `{fi.rel_path}`")  # File headers now level 3
         block.append(f"- Category: {fi.category}")
