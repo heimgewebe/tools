@@ -789,6 +789,7 @@ PROFILE_USECASE = {
     "overview": "Tools – Index",
     "summary": "Tools – Doku/Kontext",
     "dev": "Tools – Code/Review Snapshot",
+    "machine-lean": "Tools – Machine-Lean",
     "max": "Tools – Vollsnapshot",
 }
 
@@ -862,81 +863,89 @@ def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
 
 def compute_file_roles(fi: "FileInfo") -> List[str]:
     """
-    Compute semantic roles for a file based on category, tags, and path.
-    Roles help AI agents understand the purpose/function of files.
-    
-    Roles are ONLY set where they add semantic value beyond the category.
-    Plain source files without special tags → no role (avoid redundancy).
-    
-    Possible roles: contract, ai-context, ci, wgx-profile, policy, tool, execution, doc, config
+    Compute semantic roles with a lean, high-signal heuristic.
+
+    Only adds roles that meaningfully refine the category:
+    - doc-essential: README-level docs
+    - config: configuration/contract-style paths or config extensions
+    - entrypoint: common entrypoint filenames
+    - ai-context: AI/context-bearing paths or tags
     """
-    roles = []
-    
-    # Role from category - only for special categories
-    if fi.category == "contract":
-        roles.append("contract")
-    
-    # Roles from tags (these always add value)
-    if fi.tags:
-        if "ai-context" in fi.tags:
-            roles.append("ai-context")
-        if "ci" in fi.tags:
-            roles.append("ci")
-        if "wgx-profile" in fi.tags:
-            roles.append("wgx-profile")
-        if "adr" in fi.tags:
-            roles.append("policy")
-        if "script" in fi.tags:
-            roles.append("tool")
-        if "runbook" in fi.tags:
-            roles.append("execution")
-    
-    # Role from path patterns (cache normalized path)
+    roles: List[str] = []
+
     path_str = fi.rel_path.as_posix().lower()
-    
-    # Contracts directory
-    if "contracts/" in path_str and fi.ext in {".json", ".yaml", ".yml"}:
-        if "contract" not in roles:
-            roles.append("contract")
-    
-    # CI/CD pipelines
-    if ".github/workflows/" in path_str:
-        if "ci" not in roles:
-            roles.append("ci")
-    
-    # WGX profiles
-    if ".wgx/" in path_str and "profile" in path_str:
-        if "wgx-profile" not in roles:
-            roles.append("wgx-profile")
-    
-    # AI context files
-    if "ai-context" in path_str or path_str.endswith(".ai-context.yml"):
-        if "ai-context" not in roles:
-            roles.append("ai-context")
-    
-    # Governance files (metarepo, policies, ADRs) - check role first to avoid expensive pattern matching
-    if "policy" not in roles:
-        if any(p in path_str for p in ["adr/", "decision/", "policy/", "governance/"]):
-            roles.append("policy")
-    
-    # Config role - only for centrally important config files
-    if fi.category == "config" and fi.rel_path.name.lower() in {
-        "pyproject.toml", "package.json", "cargo.toml", "dockerfile", 
-        "docker-compose.yml", "docker-compose.yaml", ".ai-context.yml"
-    }:
-        if "config" not in roles:
-            roles.append("config")
-    
-    # Documentation role - only for docs WITH value-adding tags or in docs/ folder
-    # Plain READMEs get ai-context tag, so they'll get that role already
-    if fi.category == "doc":
-        # Only add doc role if it's in docs/ or has meaningful tags
-        if "docs/" in path_str or fi.tags:
-            if "doc" not in roles:
-                roles.append("doc")
-    
-    # Return empty list for trivial cases (plain source without tags)
-    return roles
+    filename = fi.rel_path.name.lower()
+
+    if fi.category == "doc" and "readme" in filename:
+        roles.append("doc-essential")
+
+    if "config" in path_str or filename.endswith((".yml", ".yaml", ".toml")):
+        roles.append("config")
+
+    if filename.startswith(("run_", "main", "index")):
+        roles.append("entrypoint")
+
+    if "ai" in path_str or "context" in path_str or "ai-context" in (fi.tags or []):
+        roles.append("ai-context")
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for r in roles:
+        if r not in seen:
+            deduped.append(r)
+            seen.add(r)
+
+    return deduped
+
+
+def describe_scope(files: List["FileInfo"]) -> str:
+    """Build a human-readable scope string from the involved roots."""
+    roots = sorted({fi.root_label for fi in files})
+    if not roots:
+        return "empty (no matching files)"
+    if len(roots) == 1:
+        return f"single repo `{roots[0]}`"
+
+    preview = ", ".join(f"`{r}`" for r in roots[:5])
+    if len(roots) > 5:
+        preview += ", …"
+    return f"{len(roots)} repos: {preview}"
+
+
+def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) -> str:
+    """
+    Determine whether a file is included with content based on profile settings.
+    Returns one of {"full", "meta-only", "omitted", "truncated"} (truncated unused today).
+    """
+    if not fi.is_text:
+        return "omitted"
+
+    tags = fi.tags or []
+
+    if level == "overview":
+        return "full" if is_priority_file(fi) else "meta-only"
+
+    if level == "summary":
+        if fi.category in ["doc", "config", "contract", "ci"] or "ai-context" in tags or "wgx-profile" in tags:
+            return "full"
+        if fi.category in ["source", "test"]:
+            return "full" if is_priority_file(fi) else "meta-only"
+        return "full" if is_priority_file(fi) else "meta-only"
+
+    if level in ("dev", "machine-lean"):
+        if "lockfile" in tags:
+            return "meta-only" if fi.size > 20_000 else "full"
+        if fi.category in ["source", "test", "config", "ci", "contract"]:
+            return "full"
+        if fi.category == "doc":
+            return "full" if is_priority_file(fi) else "meta-only"
+        return "meta-only"
+
+    if level == "max":
+        return "full"
+
+    return "full" if fi.size <= max_file_bytes else "omitted"
 
 def is_noise_file(fi: "FileInfo") -> bool:
     """
@@ -1630,6 +1639,7 @@ def iter_report_blocks(
     unknown_categories = set()
     unknown_tags = set()
     files_missing_anchor = []
+    roots = set(f.root_label for f in files)
 
     for fi in files:
         # Generate deterministic anchor
@@ -1646,55 +1656,7 @@ def iter_report_blocks(
         if fi.category == "other" or fi.category not in ["source", "doc", "config", "test", "contract", "other"]:
             unknown_categories.add(fi.category)
 
-        status = "omitted"
-        if fi.is_text:
-            if level == "overview":
-                if is_priority_file(fi):
-                    status = "full"
-                else:
-                    status = "meta-only"
-            elif level == "summary":
-                # Summary: Dokumentation und Konfiguration voll,
-                # Code/Test eher manifest-orientiert – außer Prioritätsdateien.
-                if fi.category in ["doc", "config", "contract", "ci"] or "ai-context" in fi.tags or "wgx-profile" in fi.tags:
-                    status = "full"
-                elif fi.category in ["source", "test"]:
-                    if is_priority_file(fi):
-                        status = "full"
-                    else:
-                        status = "meta-only"
-                else:
-                    # Fallback: wie overview – wichtiges voll, Rest meta-only
-                    if is_priority_file(fi):
-                        status = "full"
-                    else:
-                        status = "meta-only"
-            elif level == "dev":
-                # Dev-Profil: Fokus auf arbeitsrelevante Dateien.
-                # - Source/Tests/Config/CI/Contracts → voll
-                # - Lockfiles: ab bestimmter Größe nur Manifest
-                # - Doku: nur Prioritätsdateien (README, Runbooks, ai-context) voll,
-                #         Rest Manifest
-                # - Sonstiges: Manifest
-                if "lockfile" in fi.tags:
-                    if fi.size > 20_000:
-                        status = "meta-only"
-                    else:
-                        status = "full"
-                elif fi.category in ["source", "test", "config", "ci", "contract"]:
-                    status = "full"
-                elif fi.category == "doc":
-                    if is_priority_file(fi):
-                        status = "full"
-                    else:
-                        status = "meta-only"
-                else:
-                    status = "meta-only"
-            elif level == "max":
-                status = "full"
-            else:
-                if fi.size <= max_file_bytes: status = "full"
-                else: status = "omitted"
+        status = determine_inclusion_status(fi, level, max_file_bytes)
 
         # Explicitly removed: automatic downgrade from "full" to "truncated"
         # if status == "full" and fi.size > max_file_bytes:
@@ -1809,16 +1771,7 @@ def iter_report_blocks(
     header.append(f"- **Declared Purpose:** {declared_purpose}")
 
     # Scope-Zeile: welche Roots/Repos sind beteiligt?
-    roots = sorted({fi.root_label for fi in files})
-    if not roots:
-        scope_desc = "empty (no matching files)"
-    elif len(roots) == 1:
-        scope_desc = f"single repo `{roots[0]}`"
-    else:
-        preview = ", ".join(f"`{r}`" for r in roots[:5])
-        if len(roots) > 5:
-            preview += ", …"
-        scope_desc = f"{len(roots)} repos: {preview}"
+    scope_desc = describe_scope(files)
     header.append(f"- **Scope:** {scope_desc}")
 
     # Neue, explizite Filterangaben
@@ -1959,6 +1912,10 @@ def iter_report_blocks(
         header.append("- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll")
         header.append("- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest")
         header.append("- Lockfiles / Artefakte: ab bestimmter Größe meta-only")
+    elif level == "machine-lean":
+        header.append("`machine-lean`")
+        header.append("- Lean Snapshot: volle Inhalte, reduzierter Baum/Decorations")
+        header.append("- Manifest + Index + Content für Maschinen-Parsing optimiert")
     elif level == "max":
         header.append("`max`")
         header.append("- alle Textdateien → voll")
@@ -1970,7 +1927,10 @@ def iter_report_blocks(
     # --- 4. Reading Plan ---
     header.append("## Reading Plan")
     header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
-    header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
+    if level == "machine-lean":
+        header.append("2. Danach: `Manifest` -> `Content`")
+    else:
+        header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
     header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
     header.append("")
 
@@ -2159,13 +2119,14 @@ def iter_report_blocks(
     if plan_only:
         return
 
-    # --- 6. Structure ---
-    structure = []
-    structure.append("## 📁 Structure")
-    structure.append("")
-    structure.append(build_tree(files))
-    structure.append("")
-    yield "\n".join(structure) + "\n"
+    # --- 6. Structure --- (skipped for machine-lean)
+    if level != "machine-lean":
+        structure = []
+        structure.append("## 📁 Structure")
+        structure.append("")
+        structure.append(build_tree(files))
+        structure.append("")
+        yield "\n".join(structure) + "\n"
 
     # --- Index (Patch B) ---
     # Generated Categories Index - Only show non-empty categories/tags
@@ -2255,9 +2216,8 @@ def iter_report_blocks(
         yield "\n".join(cons) + "\n"
 
     # --- 8. Content ---
-    # Per Spec v2.3 / Validator requirements
-    # Content is now level 2, repos are level 3 for proper hierarchy
-    yield "## 📄 Content\n\n"
+    # Lean hierarchy: Content (#), Repo (##), File (###)
+    yield "# Content\n\n"
 
     current_root = None
 
@@ -2266,12 +2226,12 @@ def iter_report_blocks(
             continue
 
         if fi.root_label != current_root:
-            yield f"### 📦 {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
+            yield f"## {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
             current_root = fi.root_label
 
         block = []
         block.append(f'<a id="{fi.anchor}"></a>')
-        block.append(f"#### `{fi.rel_path}`")  # File headers now level 4
+        block.append(f"### `{fi.rel_path}`")  # File headers now level 3
         block.append(f"- Category: {fi.category}")
         if fi.tags:
             block.append(f"- Tags: {', '.join(fi.tags)}")
@@ -2334,7 +2294,20 @@ def generate_json_sidecar(
     Contains meta, files array, and index object.
     """
     now = datetime.datetime.utcnow()
-    
+    scope_desc = describe_scope(files)
+
+    processed = []
+    included_count = 0
+    text_files = [f for f in files if f.is_text]
+
+    for fi in files:
+        status = determine_inclusion_status(fi, level, max_file_bytes)
+        if status in ("full", "truncated"):
+            included_count += 1
+        processed.append((fi, status))
+
+    coverage_pct = round((included_count / len(text_files)) * 100, 1) if text_files else 0.0
+
     # Build meta block
     meta = {
         "spec_version": SPEC_VERSION,
@@ -2349,6 +2322,12 @@ def generate_json_sidecar(
         "source_repos": sorted([s.name for s in sources]) if sources else [],
         "path_filter": path_filter,
         "ext_filter": sorted(ext_filter) if ext_filter else None,
+        "scope": scope_desc,
+        "coverage": {
+            "included_files": included_count,
+            "text_files": len(text_files),
+            "coverage_pct": coverage_pct,
+        },
     }
     
     if delta_meta:
@@ -2356,19 +2335,37 @@ def generate_json_sidecar(
     
     # Build files array
     files_data = []
-    for fi in files:
+    manifest_entries = []
+    for fi, status in processed:
+        roles = compute_file_roles(fi)
         file_obj = {
             "path": fi.rel_path.as_posix(),
             "repo": fi.root_label,
             "category": fi.category,
             "tags": fi.tags or [],
-            "roles": compute_file_roles(fi),
+            "roles": roles,
             "size_bytes": fi.size,
             "md5": fi.md5,
             "is_text": fi.is_text,
             "ext": fi.ext,
+            "included": status,
         }
         files_data.append(file_obj)
+
+        included_label = status
+        if is_noise_file(fi):
+            included_label = f"{status} (noise)"
+
+        manifest_entries.append({
+            "root": fi.root_label,
+            "path": fi.rel_path.as_posix(),
+            "category": fi.category,
+            "tags": fi.tags or [],
+            "roles": roles,
+            "size": fi.size,
+            "included": included_label,
+            "md5": fi.md5,
+        })
     
     # Build index
     index = {
@@ -2396,6 +2393,7 @@ def generate_json_sidecar(
     return {
         "meta": meta,
         "files": files_data,
+        "manifest": manifest_entries,
         "index": index,
     }
 

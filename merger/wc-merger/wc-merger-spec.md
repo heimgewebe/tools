@@ -53,7 +53,8 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
      - overview → `Tools – Index`
      - summary → `Tools – Doku/Kontext`
      - dev → `Tools – Code/Review Snapshot`
-     - max → `Tools – Vollsnapshot`
+      - machine-lean → `Tools – Machine-Lean`
+      - max → `Tools – Vollsnapshot`
    - Coverage-Zeile ergänzen, z. B.:
      - `Coverage: 17/35 Dateien mit vollem Inhalt`
    - Im `@meta`-Block:

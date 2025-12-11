@@ -73,10 +73,11 @@ Das Manifest listet alle Dateien des Merges mit ihren Metadaten auf. Neben Kateg
 - Semantische Navigation: Roles ergänzen die technische Kategorie um den Anwendungskontext.
 
 **Wie entstehen sie?**
-- **Aus Tags:** `ai-context` → Role `ai-context`, `ci` → Role `ci`, `adr` → Role `policy`, `script` → Role `tool`, `runbook` → Role `execution`
-- **Aus Pfaden:** `.github/workflows/` → Role `ci`, `contracts/` → Role `contract`, `.wgx/profile.yml` → Role `wgx-profile`
-- **Aus Kategorie (selektiv):** Nur für Contracts und wichtige Config-Dateien (z.B. `pyproject.toml`, `Dockerfile`)
-- **Trivialfälle:** Plain Source-Dateien ohne besondere Tags → **keine Rolle** (Redundanz vermeiden)
+- **Doc-Essentials:** README-Dokumente werden als `doc-essential` markiert.
+- **Config:** Pfade mit `config` oder die Endungen `.yml`, `.yaml`, `.toml` → Role `config`.
+- **Entrypoint:** Dateien, die mit `run_`, `main`, `index` beginnen → Role `entrypoint`.
+- **AI-Context:** Pfade/Tags mit `ai` oder `context` → Role `ai-context`.
+- **Trivialfälle:** Plain Source-Dateien ohne besondere Signale → **keine Rolle** (Redundanz vermeiden)
 
 **Beispiele:**
 - `README.md` + Tag `ai-context` → Role `ai-context`
