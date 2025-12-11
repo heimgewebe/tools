@@ -561,7 +561,7 @@ class OmniWandlerUI:
                     self.status_lbl.text = "Tap to select folders, then press Wandeln."
 
             # Checkmarks neu zeichnen
-            tableview.reload_data()
+            self.tv.reload_data()
 
         ds.action = on_row_tapped
 
