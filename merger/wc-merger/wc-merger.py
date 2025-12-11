@@ -96,8 +96,8 @@ def force_close_files(paths: List[Path]) -> None:
         if os.path.basename(fpath) in target_names:
             try:
                 editor.close_file(fpath)
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to close {fpath}: {e}\n")
 
 
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
@@ -1334,7 +1334,7 @@ class MergerUI(object):
                         print("[INFO] Keine delta.json gefunden – Delta deaktiviert.")
 
             except Exception as e:
-                print(f"[ERROR] Delta-Parsing fehlgeschlagen: {e}")
+                sys.stderr.write(f"[ERROR] Delta-Parsing fehlgeschlagen: {e}\n")
                 delta_meta = None
 
             # Determine extras config consistent with UI
