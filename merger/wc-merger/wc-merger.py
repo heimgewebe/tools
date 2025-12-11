@@ -594,6 +594,21 @@ class MergerUI(object):
         bottom_container.add_subview(plan_switch)
         self.plan_only_switch = plan_switch
 
+        # --- Code Only Switch (direkt neben Plan Only) ---
+        code_label = ui.Label()
+        code_label.text = "Code only:"
+        code_label.text_color = "white"
+        code_label.background_color = "#111111"
+        code_label.frame = (210, cy, 120, 22)
+        bottom_container.add_subview(code_label)
+
+        code_switch = ui.Switch()
+        code_switch.frame = (330, cy - 2, 60, 32)
+        code_switch.flex = "W"
+        code_switch.value = False
+        bottom_container.add_subview(code_switch)
+        self.code_only_switch = code_switch
+
         cy += 36
 
         info_label = ui.Label()
@@ -1060,6 +1075,7 @@ class MergerUI(object):
                     "max_bytes": self.max_field.text or "",
                     "split_mb": self.split_field.text or "",
                     "plan_only": bool(self.plan_only_switch.value),
+                    "code_only": bool(getattr(self, "code_only_switch", False) and self.code_only_switch.value),
                     "selected_repos": self._get_selected_repos(),
                     "extras": {
                         "health": self.extras_config.health,
@@ -1110,6 +1126,8 @@ class MergerUI(object):
         self.max_field.text = data.get("max_bytes", "")
         self.split_field.text = data.get("split_mb", "")
         self.plan_only_switch.value = bool(data.get("plan_only", False))
+        if getattr(self, "code_only_switch", None) is not None:
+            self.code_only_switch.value = bool(data.get("code_only", False))
 
         self.ignored_repos = set(data.get("ignored_repos", []))
 
@@ -1346,6 +1364,7 @@ class MergerUI(object):
                 "repo",
                 0,
                 plan_only=False,
+                code_only=False,
                 debug=False,
                 path_filter=None,
                 ext_filter=None,
@@ -1411,6 +1430,8 @@ class MergerUI(object):
         # bleibt der Modus aus.
         plan_switch = getattr(self, "plan_only_switch", None)
         plan_only = bool(plan_switch and plan_switch.value)
+        code_switch = getattr(self, "code_only_switch", None)
+        code_only = bool(code_switch and code_switch.value)
 
         summaries = []
         for name in selected:
@@ -1434,6 +1455,7 @@ class MergerUI(object):
             mode,
             max_bytes,
             plan_only,
+            code_only,
             split_size,
             debug=False,
             path_filter=path_contains,
@@ -1488,6 +1510,7 @@ def main_cli():
     )
     parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="10MB")
     parser.add_argument("--plan-only", action="store_true")
+    parser.add_argument("--code-only", action="store_true", help="Include only code/test/config/contract categories")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
     parser.add_argument("--extras", help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap) or 'none'", default="none")
@@ -1582,6 +1605,7 @@ def main_cli():
         args.mode,
         max_bytes,
         args.plan_only,
+        args.code_only,
         split_size,
         debug=args.debug,
         path_filter=path_filter,
