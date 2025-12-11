@@ -168,8 +168,8 @@ def load_config():
     try:
         if cfg_path.exists():
             cfg.read(cfg_path, encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: Failed to read config: {e}", file=sys.stderr)
     return cfg, cfg_path
 
 def cfg_get_int(cfg, section, key, default):
@@ -258,8 +258,8 @@ def find_dir_by_basename(basename: str, aliases, search_depth: int = DEF_SRCH_DE
                 if p.is_dir() and p.name == basename:
                     if len(str(p).split(os.sep)) <= max_depth_abs:
                         candidates.append(p)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Error searching {base}: {e}", file=sys.stderr)
 
     uniq = []
     seen = set()
@@ -329,8 +329,8 @@ def parse_manifest(md: Path):
                             try: size = int(p[5:].strip())
                             except Exception: size = 0
                     if rel: m[rel] = (md5, size)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: Failed to parse manifest {md}: {e}", file=sys.stderr)
     return m
 
 def build_diff(current, merge_dir: Path, merge_prefix: str):
@@ -363,7 +363,7 @@ def keep_last_n(merge_dir: Path, keep: int, keep_new: Path = None, merge_prefix:
     if len(merges) <= keep: return
     for old in merges[:-keep]:
         try: old.unlink()
-        except Exception: pass
+        except Exception as e: print(f"Warning: Failed to delete {old}: {e}", file=sys.stderr)
 
 # ===== Dateinamen-Logik =====================================================
 

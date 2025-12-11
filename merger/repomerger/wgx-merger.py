@@ -181,8 +181,8 @@ def load_config() -> tuple[configparser.ConfigParser, Path]:
     try:
         if cfg_path.exists():
             cfg.read(cfg_path, encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: Failed to read config: {e}", file=sys.stderr)
     return cfg, cfg_path
 
 
@@ -275,8 +275,8 @@ def find_dir_by_basename(basename: str, aliases: dict[str, str], search_depth: i
             for p in base.rglob(basename):
                 if p.is_dir() and p.name == basename and len(str(p).split(os.sep)) <= max_depth_abs:
                     candidates.append(p)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Error searching {base}: {e}", file=sys.stderr)
 
     uniq: list[Path] = []
     seen: set[str] = set()
@@ -375,8 +375,8 @@ def parse_manifest(md: Path) -> dict[str, tuple[str, int]]:
                                 size = 0
                     if rel:
                         m[rel] = (md5, size)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: Failed to parse manifest {md}: {e}", file=sys.stderr)
     return m
 
 
@@ -414,8 +414,8 @@ def keep_last_n(merge_dir: Path, keep: int, keep_new: Path | None = None, merge_
     for old in merges[:-keep]:
         try:
             old.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Warning: Failed to delete {old}: {e}", file=sys.stderr)
 
 # ===== Merge ================================================================
 
