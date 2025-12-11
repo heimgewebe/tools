@@ -39,7 +39,8 @@ TEXT_EXTENSIONS = {
     ".zsh",
     ".fish",
     ".dockerfile",
-    "dockerfile",  # Files named "Dockerfile" without extension
+    "dockerfile",  # Files named "Dockerfile" without extension (case-insensitive check)
+    "Dockerfile",  # Explicitly include capitalized version
     ".svelte",
     ".css",
     ".scss",
@@ -98,9 +99,11 @@ def is_text(path: Path) -> bool:
     except OSError:
         return False
         
-    name = path.name.lower()
-    base, ext = os.path.splitext(name)
-    if ext in TEXT_EXTENSIONS or name in TEXT_EXTENSIONS:
+    # Check extension (case-insensitive)
+    ext = os.path.splitext(path.name)[1].lower()
+    # Check full filename (case-insensitive) for files like 'Dockerfile'
+    name_lower = path.name.lower()
+    if ext in TEXT_EXTENSIONS or name_lower in TEXT_EXTENSIONS:
         return True
     
     # Sehr große unbekannte Dateien eher als binär behandeln
