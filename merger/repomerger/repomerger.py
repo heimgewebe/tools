@@ -224,7 +224,12 @@ def compute_md5(path, limit_bytes=None):
     - Wenn limit_bytes gesetzt ist, lesen wir höchstens so viele Bytes.
     - Bei Fehlern: 'ERROR'.
     """
-    h = hashlib.md5()
+    # MD5 is used for file integrity checking, not cryptographic security
+    try:
+        h = hashlib.md5(usedforsecurity=False)
+    except TypeError:
+        # Fallback for Python < 3.9
+        h = hashlib.md5()  # nosec B303
     try:
         with path.open("rb") as f:
             remaining = limit_bytes

@@ -12,7 +12,7 @@ import hashlib
 import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 try:
     import yaml
@@ -1116,7 +1116,12 @@ def is_probably_text(path: Path, size: int) -> bool:
 
 
 def compute_md5(path: Path, limit_bytes: Optional[int] = None) -> str:
-    h = hashlib.md5()
+    # MD5 is used for file integrity checking, not cryptographic security
+    try:
+        h = hashlib.md5(usedforsecurity=False)
+    except TypeError:
+        # Fallback for Python < 3.9
+        h = hashlib.md5()  # nosec B303
     try:
         with path.open("rb") as f:
             remaining = limit_bytes
@@ -2379,7 +2384,7 @@ def iter_report_blocks(
         if fi.tags:
             block.append(f"- Tags: {', '.join(fi.tags)}")
         else:
-            block.append(f"- Tags: -")
+            block.append("- Tags: -")
         block.append(f"- Size: {human_size(fi.size)}")
         block.append(f"- Included: {status}")
         block.append(f"- MD5: {fi.md5}")

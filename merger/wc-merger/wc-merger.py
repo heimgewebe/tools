@@ -11,8 +11,7 @@ import os
 import json
 import traceback
 from pathlib import Path
-from typing import List, Optional, Tuple, Any, Dict
-from importlib.machinery import SourceFileLoader
+from typing import List, Any, Dict
 
 try:
     import appex  # type: ignore
@@ -107,7 +106,6 @@ LAST_STATE_FILENAME = ".wc-merger-state.json"
 try:
     from merge_core import (
         MERGES_DIR_NAME,
-        DEFAULT_MAX_BYTES,
         SKIP_ROOTS,
         detect_hub_dir,
         get_merges_dir,
@@ -120,7 +118,6 @@ except ImportError:
     sys.path.append(str(SCRIPT_DIR))
     from merge_core import (
         MERGES_DIR_NAME,
-        DEFAULT_MAX_BYTES,
         SKIP_ROOTS,
         detect_hub_dir,
         get_merges_dir,
@@ -226,7 +223,6 @@ def _load_wc_extractor_module():
     """
     from importlib.machinery import SourceFileLoader
     import types
-    import sys
 
     extractor_path = SCRIPT_PATH.with_name("wc-extractor.py")
     if not extractor_path.exists():
