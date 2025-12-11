@@ -66,8 +66,8 @@ def safe_script_path() -> Path:
         if argv0:
             try:
                 return Path(argv0).resolve()
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to resolve argv0 path: {e}\n")
 
         # Fallback: aktuelle Arbeitsdirectory
         return Path.cwd().resolve()
@@ -322,8 +322,8 @@ class MergerUI(object):
             if hasattr(tf, "border_style"):
                 try:
                     tf.border_style = TF_BORDER_NONE
-                except Exception:
-                    pass
+                except Exception as e:
+                    sys.stderr.write(f"Warning: Failed to set text field border style: {e}\n")
 
             # Kein extra Hintergrund-View mehr – direkt hinzufügen
             parent_view.add_subview(tf)
@@ -839,9 +839,9 @@ class MergerUI(object):
         """Schließt den Merger-Screen in Pythonista."""
         try:
             self.view.close()
-        except Exception:
-            # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven
-            pass
+        except Exception as e:
+            # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven, aber loggen
+            sys.stderr.write(f"Warning: Failed to close view: {e}\n")
 
     def show_extras_sheet(self, sender):
         """Zeigt ein Sheet zur Konfiguration der Extras."""
@@ -1007,8 +1007,8 @@ class MergerUI(object):
             # Fallback: nur die erste gefundene Zeile selektieren
             try:
                 tv.selected_row = rows[0]
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to select row in fallback: {e}\n")
 
     def _load_ignored_repos_from_state(self) -> None:
         """Lädt beim Start nur die persistierte Ignore-Liste."""
@@ -1154,8 +1154,8 @@ class MergerUI(object):
             # Kurzes Feedback, aber niemals hart failen
             try:
                 console.hud_alert("Config loaded")
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to show HUD alert: {e}\n")
 
         # Info-Zeile nach dem Wiederherstellen aktualisieren
         self._update_repo_info()
@@ -1477,7 +1477,8 @@ class MergerUI(object):
         if console:
             try:
                 console.hud_alert(msg)
-            except Exception:
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to show HUD alert (falling back to alert): {e}\n")
                 console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
         else:
             print(f"wc-merger: OK ({msg})")
