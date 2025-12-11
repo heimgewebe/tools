@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2.3 Standard).
+merge_core – Core functions for wc-merger (v2.4 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
 import os
 import sys
+import json
 import hashlib
 import datetime
 from pathlib import Path
