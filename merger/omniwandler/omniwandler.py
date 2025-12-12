@@ -291,7 +291,7 @@ class OmniWandlerCore:
         manifest_files = []
 
         with md_path.open("w", encoding=ENCODING, errors="replace") as out:
-            # Header matching wc-merger style roughly
+            # Header matching repoLens style roughly
             out.write(f"# OmniWandler Report: {source.name}\n\n")
             out.write("<!-- @meta:start -->\n")
             out.write("tool: omniwandler\n")
