@@ -92,6 +92,9 @@ DEFAULT_MAX_BYTES = 0
 ALLOWED_CATEGORIES = {"source", "test", "doc", "config", "contract", "other"}
 # Kategorien, die im Code-only-Modus sichtbar bleiben sollen
 CODE_ONLY_CATEGORIES: Set[str] = {"source", "test", "config", "contract"}
+
+AGENT_CONTRACT_NAME = "wc-merge-agent"
+AGENT_CONTRACT_VERSION = "v1"
 ALLOWED_TAGS = {
     "ai-context",
     "runbook",
@@ -151,6 +154,57 @@ TEXT_EXTENSIONS = {
     ".tf", ".hcl", ".gitignore", ".gitattributes", ".editorconfig", ".cs",
     ".swift", ".adoc", ".ai-context"
 }
+
+
+def _stable_file_id(fi: "FileInfo") -> str:
+    """
+    Stable across runs as long as repo + rel-path stay the same.
+    Avoids relying on Markdown heading anchors or renderer-specific IDs.
+    """
+
+    repo = (
+        getattr(fi, "root_label", None)
+        or getattr(fi, "repo", None)
+        or getattr(fi, "repo_name", None)
+        or ""
+    )
+    path = str(
+        getattr(fi, "rel_path", None)
+        or getattr(fi, "path", None)
+        or getattr(fi, "abs_path", None)
+        or ""
+    )
+    raw = f"{repo}:{path}".encode("utf-8", errors="ignore")
+    return "f_" + hashlib.sha1(raw).hexdigest()[:12]
+
+
+def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = False) -> None:
+    """
+    Minimal, dependency-free validation. Purpose: prevent "success but nothing usable".
+    (Full JSON-Schema validation can be added later; this is the hard safety belt.)
+    """
+
+    if not isinstance(d, dict):
+        raise ValueError("agent-json: top-level is not an object")
+    meta = d.get("meta")
+    if not isinstance(meta, dict):
+        raise ValueError("agent-json: missing/invalid meta")
+    if meta.get("contract") != AGENT_CONTRACT_NAME:
+        raise ValueError(f"agent-json: meta.contract must be {AGENT_CONTRACT_NAME}")
+    if meta.get("contract_version") != AGENT_CONTRACT_VERSION:
+        raise ValueError(
+            f"agent-json: meta.contract_version must be {AGENT_CONTRACT_VERSION}"
+        )
+    artifacts = d.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("agent-json: missing/invalid artifacts")
+    if "primary_json" not in artifacts:
+        raise ValueError("agent-json: artifacts.primary_json missing")
+    if not allow_empty_primary and not artifacts.get("primary_json"):
+        raise ValueError("agent-json: artifacts.primary_json missing")
+    files = d.get("files")
+    if not isinstance(files, list):
+        raise ValueError("agent-json: missing/invalid files[]")
 
 
 # --- Debug-Kollektor -------------------------------------------------------
@@ -2475,6 +2529,8 @@ def iter_report_blocks(
         block.append(f"- MD5: {fi.md5}")
 
         content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
+        # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
+        block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
 
         lang = lang_for(fi.ext)
         block.append("")
@@ -2515,7 +2571,7 @@ def generate_report_content(
         )
     )
     if plan_only:
-        return report
+        return "<!-- MODE:PLAN_ONLY -->\n" + report
     try:
         validate_report_structure(report)
     except ValueError as e:
@@ -2541,7 +2597,7 @@ def generate_json_sidecar(
 ) -> Dict[str, Any]:
     """
     Generate a JSON sidecar structure for machine consumption.
-    Contains meta, files array, and index object.
+    Contains meta, files array, and minimal verification guards.
     """
     now = datetime.datetime.utcnow()
     if code_only:
@@ -2563,95 +2619,69 @@ def generate_json_sidecar(
 
     coverage_pct = round((included_count / len(text_files)) * 100, 1) if text_files else 0.0
 
-    # Build meta block
+    # Build meta block (agent-first contract)
     meta = {
+        "contract": AGENT_CONTRACT_NAME,
+        "contract_version": AGENT_CONTRACT_VERSION,
+        # keep existing useful fields for compatibility/traceability
         "spec_version": SPEC_VERSION,
         "profile": level,
-        "contract": MERGE_CONTRACT_NAME,
-        "contract_version": MERGE_CONTRACT_VERSION,
+        "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
         "plan_only": plan_only,
         "code_only": code_only,
         "max_file_bytes": max_file_bytes,
-        "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
         "total_files": len(files),
         "total_size_bytes": total_size,
         "source_repos": sorted([s.name for s in sources]) if sources else [],
-        "path_filter": path_filter,
-        "ext_filter": sorted(ext_filter) if ext_filter else None,
-        "scope": scope_desc,
-        "coverage": {
-            "included_files": included_count,
-            "text_files": len(text_files),
-            "coverage_pct": coverage_pct,
+        # explicit include/exclude semantics (negation available even if None)
+        "filters": {
+            "path_filter": path_filter or None,
+            "ext_filter": sorted(ext_filter) if ext_filter else None,
+            "included_categories": sorted(list(CODE_ONLY_CATEGORIES)) if code_only else None,
+            "excluded_categories": None,
+            "content_policy": "plan-only" if plan_only else ("code-only" if code_only else "full"),
         },
     }
-    
-    if delta_meta:
-        meta["delta"] = delta_meta
-    
-    # Build files array
-    files_data = []
-    manifest_entries = []
+
+    files_out = []
     for fi, status in processed:
-        roles = compute_file_roles(fi)
+        fid = _stable_file_id(fi)
         file_obj = {
+            "id": fid,
             "path": fi.rel_path.as_posix(),
             "repo": fi.root_label,
-            "category": fi.category,
-            "tags": fi.tags or [],
-            "roles": roles,
             "size_bytes": fi.size,
-            "md5": fi.md5,
             "is_text": fi.is_text,
-            "ext": fi.ext,
-            "included": status,
-        }
-        files_data.append(file_obj)
-
-        included_label = status
-        if is_noise_file(fi):
-            included_label = f"{status} (noise)"
-
-        manifest_entries.append({
-            "root": fi.root_label,
-            "path": fi.rel_path.as_posix(),
             "category": fi.category,
             "tags": fi.tags or [],
-            "roles": roles,
-            "size": fi.size,
-            "included": included_label,
-            "md5": fi.md5,
-        })
-    
-    # Build index
-    index = {
-        "categories": {},
-        "tags": {},
-    }
-    
-    # Group by category
-    for cat in ["source", "doc", "config", "contract", "test", "other"]:
-        cat_files = [f.rel_path.as_posix() for f in files if f.category == cat]
-        if cat_files:
-            index["categories"][cat] = cat_files
-    
-    # Group by tags
-    all_tags = set()
-    for fi in files:
-        if fi.tags:
-            all_tags.update(fi.tags)
-    
-    for tag in sorted(all_tags):
-        tag_files = [f.rel_path.as_posix() for f in files if tag in (f.tags or [])]
-        if tag_files:
-            index["tags"][tag] = tag_files
-    
-    return {
+            "included": status in ("full", "truncated"),
+            "inclusion_status": status,
+            "content_ref": {
+                # Markdown marker search is more robust than anchors/links.
+                "marker": f"FILE:{fid}",
+            },
+        }
+        files_out.append(file_obj)
+
+    out = {
         "meta": meta,
-        "files": files_data,
-        "manifest": manifest_entries,
-        "index": index,
+        "artifacts": {
+            # filled by writer (paths)
+            "primary_json": None,
+            "human_md": None,
+            "md_parts": [],
+        },
+        "coverage": {
+            "included_text_files": included_count,
+            "total_text_files": len(text_files),
+            "coverage_pct": coverage_pct,
+        },
+        "scope": scope_desc,
+        "files": files_out,
+        "delta": delta_meta or None,
     }
+    _validate_agent_json_dict(out, allow_empty_primary=True)
+    return out
 
 def write_reports_v2(
     merges_dir: Path,
@@ -2811,8 +2841,8 @@ def write_reports_v2(
             lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str),
         )
         
-        # Write JSON sidecar if enabled
-        if extras and extras.json_sidecar and not plan_only:
+        # Write JSON sidecar if enabled (agent-first: also for plan_only)
+        if extras and extras.json_sidecar:
             total_size = sum(
                 f.size for f in all_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
             )
@@ -2831,6 +2861,11 @@ def write_reports_v2(
             # Generate JSON filename based on the first markdown file
             if out_paths:
                 json_path = out_paths[0].with_suffix('.json')
+                json_data["artifacts"]["primary_json"] = str(json_path)
+                md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
+                json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+                json_data["artifacts"]["human_md"] = str(md_parts[0]) if md_parts else None
+                _validate_agent_json_dict(json_data)
                 json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
                 out_paths.append(json_path)
 
@@ -2842,8 +2877,8 @@ def write_reports_v2(
 
             process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str))
             
-            # Write JSON sidecar if enabled
-            if extras and extras.json_sidecar and not plan_only:
+            # Write JSON sidecar if enabled (agent-first: also for plan_only)
+            if extras and extras.json_sidecar:
                 total_size = sum(
                     f.size for f in s_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
                 )
@@ -2862,12 +2897,21 @@ def write_reports_v2(
                 # Generate JSON filename based on the last markdown file
                 if out_paths:
                     json_path = out_paths[-1].with_suffix('.json')
+                    json_data["artifacts"]["primary_json"] = str(json_path)
+                    md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
+                    # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
+                    json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+                    json_data["artifacts"]["human_md"] = (
+                        str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
+                    )
+                    _validate_agent_json_dict(json_data)
                     json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
                     out_paths.append(json_path)
 
     # --- Post-check & deterministic ordering (primary artifact first) ---
     md_paths = [p for p in out_paths if p.suffix.lower() == ".md"]
-    other_paths = [p for p in out_paths if p.suffix.lower() != ".md"]
+    json_paths = [p for p in out_paths if p.suffix.lower() == ".json"]
+    other_paths = [p for p in out_paths if p.suffix.lower() not in (".md", ".json")]
 
     # Verify that reported .md outputs really exist and are non-empty.
     # This prevents "generated" messages when the file did not land where expected.
@@ -2888,5 +2932,24 @@ def write_reports_v2(
             "Check merges_dir / permissions / rename logic."
         )
 
-    # Return primary markdown outputs first, then any sidecars/extras.
+    # If json_sidecar is enabled, JSON is the primary artifact: verify it exists & is non-empty.
+    verified_json: List[Path] = []
+    if extras and extras.json_sidecar:
+        for p in json_paths:
+            try:
+                if p.exists() and p.is_file() and p.stat().st_size > 0:
+                    # sanity: load + minimal validate
+                    d = json.loads(p.read_text(encoding="utf-8"))
+                    _validate_agent_json_dict(d)
+                    verified_json.append(p)
+            except Exception:
+                pass
+        if json_paths and not verified_json:
+            raise RuntimeError(
+                "wc-merger: JSON primary artifact was announced as written, but no valid non-empty .json exists on disk."
+            )
+
+    # Primary ordering: JSON (if enabled) first, then Markdown, then other artifacts.
+    if extras and extras.json_sidecar:
+        return verified_json + verified_md + other_paths
     return verified_md + other_paths

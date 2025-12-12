@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heimgewebe.local/contracts/wc-merge-agent.v1.schema.json",
+  "title": "wc-merge-agent.v1",
+  "type": "object",
+  "required": ["meta", "artifacts", "files"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["contract", "contract_version", "generated_at", "profile"],
+      "properties": {
+        "contract": { "const": "wc-merge-agent" },
+        "contract_version": { "const": "v1" },
+        "generated_at": { "type": "string" },
+        "profile": { "type": "string" },
+        "plan_only": { "type": "boolean" },
+        "code_only": { "type": "boolean" },
+        "max_file_bytes": { "type": "integer" },
+        "total_files": { "type": "integer" },
+        "total_size_bytes": { "type": "integer" },
+        "source_repos": { "type": "array", "items": { "type": "string" } },
+        "filters": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["primary_json"],
+      "properties": {
+        "primary_json": { "type": ["string", "null"] },
+        "human_md": { "type": ["string", "null"] },
+        "md_parts": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "coverage": { "type": "object" },
+    "scope": { "type": ["string", "object", "null"] },
+    "delta": { "type": ["object", "null"] },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "included", "inclusion_status"],
+        "properties": {
+          "id": { "type": "string" },
+          "path": { "type": "string" },
+          "repo": { "type": "string" },
+          "size_bytes": { "type": "integer" },
+          "is_text": { "type": "boolean" },
+          "category": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "included": { "type": "boolean" },
+          "inclusion_status": { "type": "string" },
+          "content_ref": { "type": "object" }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
