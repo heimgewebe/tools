@@ -15,7 +15,7 @@ Hauptziel: **KIs einen möglichst vollständigen Blick auf ein oder mehrere Repo
 Ab Version 2.1 folgt dieses Tool einer strikten, unverhandelbaren Spezifikation.
 Jede Änderung am Code muss diese Regeln einhalten.
 
-👉 [**wc-merger-spec.md**](./wc-merger-spec.md) (Die Single Source of Truth für `repoLens`)
+👉 [**repolens-spec.md**](./repolens-spec.md) (Die Single Source of Truth für `repoLens`)
 
 ---
 
@@ -53,7 +53,7 @@ Ein idealer repoLens-Report erfüllt:
 - macht die **Struktur** des Repos sichtbar,
 - zeigt **Zusammenhänge** (Workflows, Contracts, Tools, Tests),
 - ermöglicht KIs, auf Basis des Merges so zu arbeiten, als hätten sie das Repo lokal ausgecheckt – nur ohne Binärmüll und ohne sensible Daten.
-- hält strikt die in `wc-merger-spec.md` definierte Struktur ein,
+- hält strikt die in `repolens-spec.md` definierte Struktur ein,
 - deklariert seine `Spec-Version` und den verwendeten Merge-Contract,
 - gibt KIs eine klare Aussage über Profil/Use-Case (Index, Doku, Dev, Vollsnapshot),
 - und ist maschinenlesbar validierbar.
@@ -131,7 +131,7 @@ Jeder Report muss:
 
 Das JSON Schema für diesen Block liegt hier:
 
-- `merger/wc-merger/repolens-report.schema.json`
+- `merger/repolens/repolens-report.schema.json`
 
 ---
 
@@ -140,7 +140,7 @@ Das JSON Schema für diesen Block liegt hier:
 Optionales Helfer-Script, um den `@meta`-Block gegen das Schema zu prüfen:
 
 ```bash
-cd merger/wc-merger
+cd merger/repolens
 python validate_merge_meta.py ../../merges/tools_max_part1.md
 ```
 
@@ -190,13 +190,13 @@ Der repoLens v2 kennt vier optimierte Profile:
 
 ```bash
 # Overview-Profil (Scannt aktuelles Verzeichnis oder nutzt --hub)
-python3 wc-merger.py repo1 repo2 --level overview
+python3 repolens.py repo1 repo2 --level overview
 
 # Dev-Profil, einzelner Merge pro Repo
-python3 wc-merger.py myrepo --level dev --mode pro-repo
+python3 repolens.py myrepo --level dev --mode pro-repo
 
 # Max-Profil mit Split (z. B. 20MB)
-python3 wc-merger.py myrepo --level max --split-size 20MB
+python3 repolens.py myrepo --level max --split-size 20MB
 ```
 
 Hinweis: `--split-size` **und** `--max-bytes` akzeptieren menschenlesbare Werte
@@ -211,17 +211,17 @@ Das Tool repoLens unterstützt deshalb einen **Headless-Modus**:
 
 ```bash
 # Variante 1: per Flag
-python3 wc-merger.py --headless --level dev --mode gesamt
+python3 repolens.py --headless --level dev --mode gesamt
 
 # Variante 2: per Umgebungsvariable
-WC_HEADLESS=1 python3 wc-merger.py --level dev --mode gesamt
+WC_HEADLESS=1 python3 repolens.py --level dev --mode gesamt
 ```
 
 **Tipp:** Soll ein Shortcut Pythonista *voll* starten (mit UI/editor),
 nutze das URL-Scheme:
 
 ```
-pythonista3://merger/wc-merger/wc-merger.py?action=run
+pythonista3://merger/repolens/repolens.py?action=run
 ```
 
 ### Power-User (Variante B: URL-Scheme mit Parametern)
@@ -232,18 +232,18 @@ Es unterstützt nun auch Parameter, um die UI vorzubelegen oder Modi direkt zu w
 **Beispiel: Max-Profil, Gesamt-Merge**
 
 ```
-pythonista3://wc-merger/wc-merger.py?action=run&root=icloud&argv=--level&argv=max&argv=--mode&argv=gesamt
+pythonista3://wc-merger/repolens.py?action=run&root=icloud&argv=--level&argv=max&argv=--mode&argv=gesamt
 ```
 
 **Beispiel: Extractor (ZIPs entpacken)**
 
 ```
-pythonista3://wc-merger/wc-extractor.py?action=run&root=icloud
+pythonista3://wc-merger/repolens-extractor.py?action=run&root=icloud
 ```
 
 Diese Methode garantiert vollen Zugriff auf UI, Alerts und das Dateisystem.
 
-Weitere Details siehe [wc-merger-spec.md](./wc-merger-spec.md).
+Weitere Details siehe [repolens-spec.md](./repolens-spec.md).
 
 ### KI-Lesepfad (kurz)
 

@@ -8,7 +8,7 @@
 
 - eigener Delta-Contract `wc-merge-delta.schema.json`
 - Delta-Metadaten im `@meta`-Block des Haupt-Merges
-- UI-Button „Delta from Last Import“ nutzt weiterhin `wc-extractor.py` für die eigentliche Delta-Berechnung
+- UI-Button „Delta from Last Import“ nutzt weiterhin `repolens-extractor.py` für die eigentliche Delta-Berechnung
 
 ### Schema-Struktur (Meta-Ausschnitt)
 
@@ -47,7 +47,7 @@ augment:
   version: 1
 
   hotspots:
-    - path: merger/wc-merger/merge_core.py
+    - path: merger/repolens/merge_core.py
       reason: "Complex branching logic"
       severity: "medium"
 
@@ -147,7 +147,7 @@ merge:
   - Augment-Sidecar-Support
   - Delta-Metadaten im `@meta`-Block
 
-- `wc-merger.py`
+- `repolens.py`
   - UI-Toggles für Extras (bereits vorhanden)
 
 - `wc-merge-report.schema.json`

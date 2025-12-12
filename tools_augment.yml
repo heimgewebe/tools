@@ -7,12 +7,12 @@ augment:
   
   # Hotspots: Areas requiring special attention
   hotspots:
-    - path: merger/wc-merger/merge_core.py
+    - path: merger/repolens/merge_core.py
       reason: "Complex branching logic with multiple profile modes"
       severity: "medium"
       lines: [1000, 1100]
     
-    - path: merger/wc-merger/wc-merger.py
+    - path: merger/repolens/repolens.py
       reason: "UI state management and Pythonista-specific code"
       severity: "low"
       lines: [200, 400]
@@ -21,14 +21,14 @@ augment:
   suggestions:
     - "Consider extracting profile logic into strategy pattern classes"
     - "Add comprehensive unit tests for health and organism layers"
-    - "Document the relationship between merge_core and wc-extractor"
+    - "Document the relationship between merge_core and repolens-extractor"
     - "Consider splitting merge_core.py into smaller modules"
   
   # Risks: Known issues or concerns
   risks:
     - "Large merges may exhaust Pythonista memory on iOS"
     - "Multi-part merges need proper header normalization"
-    - "Delta reports depend on wc-extractor being available"
+    - "Delta reports depend on repolens-extractor being available"
   
   # Dependencies: Key external dependencies
   dependencies:
@@ -36,7 +36,7 @@ augment:
       required: false
       purpose: "iOS UI support"
     
-    - name: "wc-extractor"
+    - name: "repolens-extractor"
       required: false
       purpose: "ZIP import and delta generation"
   

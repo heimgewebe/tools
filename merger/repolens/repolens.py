@@ -100,7 +100,7 @@ def force_close_files(paths: List[Path]) -> None:
 
 
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
-LAST_STATE_FILENAME = ".wc-merger-state.json"
+LAST_STATE_FILENAME = ".repolens-state.json"
 
 # Import core logic
 try:
@@ -214,7 +214,7 @@ def parse_human_size(text: str) -> int:
 
 
 def _load_wc_extractor_module():
-    """Dynamically load wc-extractor.py from the same directory.
+    """Dynamically load repolens-extractor.py from the same directory.
 
     In Pythonista ist ``__file__`` nicht immer gesetzt (z. B. bei Ausführung
     aus bestimmten UI-/Shortcut-Kontexten). In dem Fall fallen wir auf
@@ -224,16 +224,16 @@ def _load_wc_extractor_module():
     from importlib.machinery import SourceFileLoader
     import types
 
-    extractor_path = SCRIPT_PATH.with_name("wc-extractor.py")
+    extractor_path = SCRIPT_PATH.with_name("repolens-extractor.py")
     if not extractor_path.exists():
         return None
     try:
-        loader = SourceFileLoader("wc_extractor", str(extractor_path))
+        loader = SourceFileLoader("repolens_extractor", str(extractor_path))
         mod = types.ModuleType(loader.name)
         loader.exec_module(mod)
         return mod
     except Exception as exc:
-        print(f"[repoLens] could not load wc-extractor: {exc}")
+        print(f"[repoLens] could not load repolens-extractor: {exc}")
         return None
 
 
@@ -262,7 +262,7 @@ class MergerUI(object):
         self._load_ignored_repos_from_state()
 
         # Basic argv parsing for UI defaults
-        # Expected format: wc-merger.py --level max --mode gesamt ...
+        # Expected format: repolens.py --level max --mode gesamt ...
         import argparse
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--level", default="max")
@@ -1214,7 +1214,7 @@ class MergerUI(object):
     def run_delta_from_last_import(self, sender) -> None:
         """
         Erzeugt einen Delta-Merge aus dem neuesten Import-Diff im merges-Ordner.
-        Nutzt die Delta-Helfer aus wc-extractor.py (falls verfügbar).
+        Nutzt die Delta-Helfer aus repolens-extractor.py (falls verfügbar).
         """
         merges_dir = get_merges_dir(self.hub)
         try:
@@ -1268,7 +1268,7 @@ class MergerUI(object):
 
         mod = _load_wc_extractor_module()
         if mod is None or not hasattr(mod, "create_delta_merge_from_diff"):
-            msg = "Delta helper (wc-extractor) not available."
+            msg = "Delta helper (repolens-extractor) not available."
             if console:
                 console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
@@ -1276,16 +1276,16 @@ class MergerUI(object):
             return
 
         # Execute delta creation
-        # Note: In Spec 2.3 logic, wc-extractor creates delta.json alongside the report
+        # Note: In Spec 2.3 logic, repolens-extractor creates delta.json alongside the report
         try:
             # We assume create_delta_merge_from_diff does the diff calculation and side-effects (like delta.json)
             # but we will perform report generation via write_reports_v2 to ensure consistency.
-            # However, create_delta_merge_from_diff in current wc-extractor MIGHT generate a report.
+            # However, create_delta_merge_from_diff in current repolens-extractor MIGHT generate a report.
             # We will ignore its return value if we are re-generating, OR rely on it if it's correct.
-            # The User Patch says "Parse delta.json from wc-extractor and build delta_meta"
-            # So we assume wc-extractor writes delta.json.
+            # The User Patch says "Parse delta.json from repolens-extractor and build delta_meta"
+            # So we assume repolens-extractor writes delta.json.
 
-            # Since we cannot modify wc-extractor, we call it.
+            # Since we cannot modify repolens-extractor, we call it.
             # It returns the path to the report it generated.
             # BUT we want to use write_reports_v2 to get all the bells and whistles (health, etc).
 
@@ -1346,7 +1346,7 @@ class MergerUI(object):
 
             # Need to scan repo for write_reports_v2
             # delta-full implies max bytes? existing logic uses profile="delta-full".
-            # wc-merger.py presets for profiles:
+            # repolens.py presets for profiles:
             # dev/max use max_bytes=0.
             # Let's use max_bytes=0 (unlimited) as standard for full delta.
             summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=0)
