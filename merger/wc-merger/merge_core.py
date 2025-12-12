@@ -19,6 +19,12 @@ try:
 except ImportError:
     pass
 
+
+def _anchor(anchor_id: str) -> str:
+    """Return a stable HTML anchor for cross-renderer navigation."""
+
+    return f'<a id="{anchor_id}"></a>'
+
 # --- Configuration & Heuristics ---
 
 SPEC_VERSION = "2.4"
@@ -2291,6 +2297,7 @@ def iter_report_blocks(
 
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
+    manifest.append(_anchor("manifest"))
     manifest_heading = "## 🧾 Manifest {#manifest}"
     if code_only:
         manifest_heading = "## 🧾 Manifest (Code-Only) {#manifest}"
