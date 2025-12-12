@@ -33,7 +33,17 @@ def _slug_token(s: str) -> str:
     return s
 
 
-def _heading_block(level: int, token: str, title: Optional[str] = None) -> List[str]:
+@dataclass(frozen=True)
+class NavStyle:
+    """
+    Controls how much navigation noise is emitted into the report.
+    - emit_search_markers: show '§§ token' lines for fallback search
+    """
+
+    emit_search_markers: bool = False
+
+
+def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Optional[NavStyle] = None) -> List[str]:
     """
     Return heading lines with stable token-based ids and optional title.
 
@@ -51,28 +61,14 @@ def _heading_block(level: int, token: str, title: Optional[str] = None) -> List[
     #   (1) visible search marker: "§§ <token>" (works even if links are dead)
     #   (2) HTML anchor: <a id="token"></a> (works if HTML allowed)
     #   (3) tokenized heading: "## token" (works if heading IDs generated)
-    lines = [f"§§ {token}", f'<a id="{token}"></a>', "#" * level + " " + token, ""]
+    nav = nav or NavStyle()
+    lines: List[str] = []
+    if nav.emit_search_markers:
+        lines.append(f"§§ {token}")
+    lines.extend([f'<a id="{token}"></a>', "#" * level + " " + token, ""])
     if title:
         lines.append(f"**{title}**")
         lines.append("")
-    return lines
-
-
-def _link_test_block(sample_file_anchor: Optional[str] = None) -> List[str]:
-    """
-    Emit a tiny link test section so users can immediately tell if their renderer
-    supports intra-document links. If all these fail, use search for '§§ <token>'.
-    """
-    lines: List[str] = []
-    lines.extend(_heading_block(2, "link-test", "🔗 Link-Test (Renderer-Check)"))
-    lines.append("Wenn diese Links hier nicht springen, liegt es am Viewer. Dann: **Suche nach `§§ <token>`**.")
-    lines.append("")
-    lines.append("- [Test → Index](#index)")
-    lines.append("- [Test → Manifest](#manifest)")
-    lines.append("- [Test → Link-Test](#link-test)")
-    if sample_file_anchor:
-        lines.append(f"- [Test → Beispiel-Datei]({sample_file_anchor})")
-    lines.append("")
     return lines
 
 # --- Configuration & Heuristics ---
@@ -1759,6 +1755,10 @@ def iter_report_blocks(
     if extras is None:
         extras = ExtrasConfig.none()
 
+    # Navigation style: default should be quiet.
+    # You can later expose this as a UI toggle if desired.
+    nav = NavStyle(emit_search_markers=False)
+
     # UTC Timestamp
     now = datetime.datetime.utcnow()
 
@@ -1900,9 +1900,6 @@ def iter_report_blocks(
         header.append("**Nutze ihn als Token-sparenden Vorab-Scan, um zu entscheiden, ob ein Voll- oder Code-Only-Merge nötig ist.**")
         header.append("")
 
-    # Link / Renderer diagnostics (very small, but huge debugging value)
-    # Pick a sample file anchor if available later; we'll inject after we know files.
-
     # --- 2. Source & Profile ---
     header.append("## Source & Profile")
     source_names = sorted([s.name for s in sources])
@@ -1921,6 +1918,12 @@ def iter_report_blocks(
     header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
     render_mode = "plan-only" if plan_only else ("code-only" if code_only else "full")
     header.append(f"- **Render Mode:** `{render_mode}`")
+
+    # One-time navigation note (no per-file chatter).
+    header.append("### Navigation")
+    header.append("- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)")
+    header.append("- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.")
+    header.append("")
 
     # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
     profile_usecase = PROFILE_USECASE.get(level)
@@ -2308,7 +2311,7 @@ def iter_report_blocks(
     # --- Index (Patch B) ---
     # Generated Categories Index - Only show non-empty categories/tags
     index_blocks = []
-    index_blocks.extend(_heading_block(2, "index", "🧭 Index"))
+    index_blocks.extend(_heading_block(2, "index", "🧭 Index", nav=nav))
 
     # Pre-check which categories/tags have files
     cats_to_idx = ["source", "doc", "config", "contract", "test"]
@@ -2337,35 +2340,29 @@ def iter_report_blocks(
     # Category Lists - only non-empty
     for c in non_empty_cats:
         cat_files = [f for f in files if f.category == c]
-        index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}"))
+        index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}", nav=nav))
         for f in cat_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     # Tag Lists – only non-empty
     if ci_files:
-        index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci"))
+        index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci", nav=nav))
         for f in ci_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     if wgx_files:
-        index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile"))
+        index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile", nav=nav))
         for f in wgx_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     yield "\n".join(index_blocks) + "\n"
 
-    # Link test block (renderer diagnostics)
-    sample_anchor = None
-    if processed_files:
-        sample_anchor = f"#{processed_files[0][0].anchor}"
-    yield "\n".join(_link_test_block(sample_anchor)) + "\n"
-
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
-    manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)"))
+    manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
 
     roots_sorted = sorted(files_by_root.keys())
     if roots_sorted:
@@ -2392,7 +2389,7 @@ def iter_report_blocks(
             stats = repo_stats.get(root, {})
             repo_role = infer_repo_role(root, root_files)
 
-            manifest.extend(_heading_block(3, f"manifest-{_slug_token(root)}", f"Repo `{root}`"))
+            manifest.extend(_heading_block(3, f"manifest-{_slug_token(root)}", f"Repo `{root}`", nav=nav))
             manifest.append(
                 f"- Rolle: {repo_role}"
             )
@@ -2457,17 +2454,16 @@ def iter_report_blocks(
 
         if fi.root_label != current_root:
             repo_slug = _slug_token(fi.root_label)
-            yield "\n".join(_heading_block(2, f"repo-{repo_slug}", fi.root_label)) + "\n"
+            yield "\n".join(_heading_block(2, f"repo-{repo_slug}", fi.root_label, nav=nav)) + "\n"
             current_root = fi.root_label
 
         block = ["---"]
         # Backwards-compatible alias anchor (old style without suffix)
         if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
-            # Provide search marker + HTML id for alias too
-            block.append(f"§§ {fi.anchor_alias}")
+            # Provide HTML id for alias too (quiet mode: no visible marker spam)
             block.append(f'<a id="{fi.anchor_alias}"></a>')
             block.append("")
-        block.extend(_heading_block(3, fi.anchor))
+        block.extend(_heading_block(3, fi.anchor, nav=nav))
         block.append(f"**Path:** `{fi.rel_path}`")
         block.append(f"- Category: {fi.category}")
         if fi.tags:
@@ -2486,9 +2482,8 @@ def iter_report_blocks(
         block.append(content)
         block.append("```")
         block.append("")
-        # Backlinks: keep them simple + add search fallback
-        block.append("[↑ Zurück zum Manifest](#manifest) · [↑ Zum Index](#index) · [↑ Link-Test](#link-test)")
-        block.append("Wenn Links nicht springen: Suche nach `§§ manifest` oder `§§ index`.")
+        # Backlinks: keep them simple
+        block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
         yield "\n".join(block) + "\n\n"
 
 def generate_report_content(
