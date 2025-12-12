@@ -138,6 +138,22 @@ Optional:
 
 - Spec-Checksum: <sha256>
 
+## 3c. Profil- und Modus-Flags
+
+- `level` (string)
+  - `overview`, `summary`, `dev`, `max`
+  - steuert Umfang und Detailgrad des Inhalts
+
+- `plan_only` (bool)
+  - `false` (Default): Voll-Merge entsprechend Profil (inkl. Structure / Manifest / Content)
+  - `true`: PLAN-ONLY-Modus
+    - Ausgabe enthält:
+      - Header („Source & Profile“)
+      - Profilbeschreibung
+      - **Reading Plan** (mit explizitem Hinweis auf Plan-Only)
+      - `@meta`-Block
+    - keine `Structure`-, `Manifest`- oder `Content`-Sektionen
+
 ### KI-Lesepfad-Minimum (nur Output, keine Configs)
 
 Dieser Abschnitt definiert den minimalen Lesepfad für KIs, die
