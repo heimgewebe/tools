@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2.4 Standard).
+merge_core – Core functions for repoLens (v2.4 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
@@ -24,10 +24,10 @@ except ImportError:
 SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
 
-# Formale Contract-Deklaration für alle wc-merger-Reports.
+# Formale Contract-Deklaration für alle repoLens-Reports.
 # Name/Version können von nachgelagerten Tools verwendet werden,
 # um das Format eindeutig zu erkennen.
-MERGE_CONTRACT_NAME = "wc-merge-report"
+MERGE_CONTRACT_NAME = "repolens-report"
 MERGE_CONTRACT_VERSION = SPEC_VERSION
 
 # Ab v2.3+: 0 = "kein Limit pro Datei".

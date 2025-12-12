@@ -1,6 +1,6 @@
-# wc-merger (Working Copy Merger)
+# repoLens (Working Copy Repo Lens)
 
-Der `wc-merger` erzeugt aus lokalen Working-Copy-Checkouts strukturierte „Merge-Berichte“ im Markdown-Format.
+Das Tool `repoLens` (vormals `wc-merger`) erzeugt aus lokalen Working-Copy-Checkouts strukturierte „Merge-Berichte" im Markdown-Format.
 
 Hauptziel: **KIs einen möglichst vollständigen Blick auf ein oder mehrere Repositories geben**, damit sie
 
@@ -15,7 +15,7 @@ Hauptziel: **KIs einen möglichst vollständigen Blick auf ein oder mehrere Repo
 Ab Version 2.1 folgt dieses Tool einer strikten, unverhandelbaren Spezifikation.
 Jede Änderung am Code muss diese Regeln einhalten.
 
-👉 [**wc-merger-spec.md**](./wc-merger-spec.md) (Die Single Source of Truth)
+👉 [**wc-merger-spec.md**](./wc-merger-spec.md) (Die Single Source of Truth für `repoLens`)
 
 ---
 

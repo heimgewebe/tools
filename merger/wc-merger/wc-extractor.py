@@ -93,7 +93,7 @@ def build_delta_meta_from_diff(
     base_timestamp: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Builds a delta metadata dict conforming to wc-merge-delta.schema.json.
+    Builds a delta metadata dict conforming to repolens-delta.schema.json.
     
     Args:
         only_old: List of files removed
@@ -107,7 +107,7 @@ def build_delta_meta_from_diff(
     now = datetime.datetime.now(datetime.timezone.utc)
     
     delta_meta = {
-        "type": "wc-merge-delta",
+        "type": "repolens-delta",
         "base_import": base_timestamp or now.isoformat(),
         "current_timestamp": now.isoformat(),
         "summary": {
@@ -138,7 +138,7 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
         diff_path: Path to the import-diff markdown file
     
     Returns:
-        Delta metadata dict conforming to wc-merge-delta.schema.json,
+        Delta metadata dict conforming to repolens-delta.schema.json,
         or None if extraction fails
     """
     try:

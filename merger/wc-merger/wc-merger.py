@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-wc-merger – Working-Copy Merger.
+repoLens – Working Copy Repo Lens (ehemals `wc-merger`).
 Enhanced AI-optimized reports with strict Pflichtenheft structure.
 """
 
@@ -233,7 +233,7 @@ def _load_wc_extractor_module():
         loader.exec_module(mod)
         return mod
     except Exception as exc:
-        print(f"[wc-merger] could not load wc-extractor: {exc}")
+        print(f"[repoLens] could not load wc-extractor: {exc}")
         return None
 
 
@@ -1014,13 +1014,13 @@ class MergerUI(object):
         except FileNotFoundError:
             return
         except Exception as exc:
-            print(f"[wc-merger] could not read ignore state: {exc!r}")
+            print(f"[repoLens] could not read ignore state: {exc!r}")
             return
 
         try:
             data = json.loads(raw)
         except Exception as exc:
-            print(f"[wc-merger] invalid ignore state JSON: {exc!r}")
+            print(f"[repoLens] invalid ignore state JSON: {exc!r}")
             return
 
         if isinstance(data, dict):
@@ -1045,7 +1045,7 @@ class MergerUI(object):
                 if isinstance(existing, dict):
                     data.update(existing)
             except Exception as exc:
-                print(f"[wc-merger] could not read existing state: {exc!r}")
+                print(f"[repoLens] could not read existing state: {exc!r}")
 
         # Ignore-Liste wird *immer* aktualisiert
         data["ignored_repos"] = sorted(self.ignored_repos)
@@ -1088,7 +1088,7 @@ class MergerUI(object):
         try:
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:
-            print(f"[wc-merger] could not persist state: {exc}")
+            print(f"[repoLens] could not persist state: {exc}")
 
     def restore_last_state(self, sender=None) -> None:
         try:
@@ -1096,16 +1096,16 @@ class MergerUI(object):
         except FileNotFoundError:
             if sender: # Nur bei Klick Feedback geben
                 if console:
-                    console.alert("wc-merger", "No saved state found.", "OK", hide_cancel_button=True)
+                    console.alert("repoLens", "No saved state found.", "OK", hide_cancel_button=True)
             return
         except Exception as exc:
-            print(f"[wc-merger] could not read state: {exc!r}")
+            print(f"[repoLens] could not read state: {exc!r}")
             return
 
         try:
             data = json.loads(raw)
         except Exception as exc:
-            print(f"[wc-merger] invalid state JSON: {exc!r}")
+            print(f"[repoLens] invalid state JSON: {exc!r}")
             return
 
         # Felder setzen
@@ -1220,19 +1220,19 @@ class MergerUI(object):
         try:
             candidates = list(merges_dir.glob("*-import-diff-*.md"))
         except Exception as exc:
-            print(f"[wc-merger] could not scan merges dir: {exc}")
+            print(f"[repoLens] could not scan merges dir: {exc}")
             candidates = []
 
         if not candidates:
             if console:
                 console.alert(
-                    "wc-merger",
+                    "repoLens",
                     "No import diff found.",
                     "OK",
                     hide_cancel_button=True,
                 )
             else:
-                print("[wc-merger] No import diff found.")
+                print("[repoLens] No import diff found.")
             return
 
         # jüngstes Diff wählen
@@ -1241,13 +1241,13 @@ class MergerUI(object):
         except Exception as exc:
             if console:
                 console.alert(
-                    "wc-merger",
+                    "repoLens",
                     f"Failed to select latest diff: {exc}",
                     "OK",
                     hide_cancel_button=True,
                 )
             else:
-                print(f"[wc-merger] Failed to select latest diff: {exc}")
+                print(f"[repoLens] Failed to select latest diff: {exc}")
             return
 
         name = diff_path.name
@@ -1261,18 +1261,18 @@ class MergerUI(object):
         if not repo_root.exists():
             msg = f"Repo root not found for diff {diff_path.name}"
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
             return
 
         mod = _load_wc_extractor_module()
         if mod is None or not hasattr(mod, "create_delta_merge_from_diff"):
             msg = "Delta helper (wc-extractor) not available."
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
             return
 
         # Execute delta creation
@@ -1304,7 +1304,7 @@ class MergerUI(object):
 
                     # Expected structure:
                     # {
-                    #   "type": "wc-merge-delta",
+                    #   "type": "repolens-delta",
                     #   "base_import": "...",
                     #   "current_timestamp": "...",
                     #   "summary": { ... }
@@ -1313,7 +1313,7 @@ class MergerUI(object):
                     # Validate minimal required keys
                     if (
                         isinstance(raw, dict)
-                        and raw.get("type") == "wc-merge-delta"
+                        and raw.get("type") == "repolens-delta"
                         and "summary" in raw
                         and ("base_import" in raw or "base_timestamp" in raw)
                         and "current_timestamp" in raw
@@ -1376,16 +1376,16 @@ class MergerUI(object):
                 try:
                     console.hud_alert(msg)
                 except Exception:
-                    console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                    console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
 
         except Exception as exc:
             msg = f"Delta merge failed: {exc}"
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
             return
 
     def run_merge(self, sender) -> None:
@@ -1397,7 +1397,7 @@ class MergerUI(object):
             traceback.print_exc()
             msg = f"Error: {e}"
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
                 print(msg, file=sys.stderr)
 
@@ -1405,7 +1405,7 @@ class MergerUI(object):
         selected = self._get_selected_repos()
         if not selected:
             if console:
-                console.alert("wc-merger", "No repos selected.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No repos selected.", "OK", hide_cancel_button=True)
             return
 
         ext_text = (self.ext_field.text or "").strip()
@@ -1439,7 +1439,7 @@ class MergerUI(object):
 
         if not summaries:
             if console:
-                console.alert("wc-merger", "No valid repos found.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No valid repos found.", "OK", hide_cancel_button=True)
             return
 
         merges_dir = get_merges_dir(self.hub)
@@ -1461,7 +1461,7 @@ class MergerUI(object):
 
         if not out_paths:
             if console:
-                console.alert("wc-merger", "No report generated.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No report generated.", "OK", hide_cancel_button=True)
             else:
                 print("No report generated.")
             return
@@ -1475,9 +1475,9 @@ class MergerUI(object):
                 console.hud_alert(msg)
             except Exception as e:
                 sys.stderr.write(f"Warning: Failed to show HUD alert (falling back to alert): {e}\n")
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
         else:
-            print(f"wc-merger: OK ({msg})")
+            print(f"repoLens: OK ({msg})")
             for p in out_paths:
                 print(f"  - {p.name}")
 
@@ -1493,7 +1493,7 @@ def _is_headless_requested() -> bool:
 
 def main_cli():
     import argparse
-    parser = argparse.ArgumentParser(description="wc-merger CLI")
+    parser = argparse.ArgumentParser(description="repoLens CLI")
     parser.add_argument("paths", nargs="*", help="Repositories to merge")
     parser.add_argument("--hub", help="Base directory (wc-hub)")
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default="dev")
@@ -1633,7 +1633,7 @@ def main():
             if console:
                 try:
                     console.alert(
-                        "wc-merger",
+                        "repoLens",
                         f"UI not available, falling back to CLI. ({e})",
                         "OK",
                         hide_cancel_button=True,

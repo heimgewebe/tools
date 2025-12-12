@@ -1,10 +1,10 @@
-# WC-MERGER SPEC v2.4
+# repoLens SPEC v2.4
 
 (Normative Spezifikation)
 
 ## 1. Zweck
 
-Der wc-merger erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.
+Das Tool `repoLens` (vormals `wc-merger`) erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.
 Diese dienen KIs als Navigations- und Arbeitsfläche, ähnlich einer Mini-IDE.
 
 ---

@@ -1,4 +1,4 @@
-# WC-Merger Super-Merger – Implementation Notes (Spec v2.3)
+# repoLens Super-Merger – Implementation Notes (Spec v2.3)
 
 ## Stage 3: Delta Layer
 
