@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-repoLens – Working-Copy Merger.
+repoLens – Repository Merge and Analysis Tool.
 Enhanced AI-optimized reports with strict Pflichtenheft structure.
 """
 

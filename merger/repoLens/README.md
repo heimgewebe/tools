@@ -1,6 +1,6 @@
-# repoLens (Working Copy Merger)
+# repoLens
 
-Der `repoLens` erzeugt aus lokalen Working-Copy-Checkouts strukturierte „Merge-Berichte“ im Markdown-Format.
+Der `repoLens` erzeugt aus lokalen Repository-Checkouts strukturierte „Merge-Berichte“ im Markdown-Format.
 
 Hauptziel: **KIs einen möglichst vollständigen Blick auf ein oder mehrere Repositories geben**, damit sie
 

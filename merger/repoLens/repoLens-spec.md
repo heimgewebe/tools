@@ -4,7 +4,7 @@
 
 ## 1. Zweck
 
-Der repoLens erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.
+Der repoLens erzeugt aus Repository-Checkouts KI-optimierte, strukturierte Hyper-Merges.
 Diese dienen KIs als Navigations- und Arbeitsfläche, ähnlich einer Mini-IDE.
 
 ---
