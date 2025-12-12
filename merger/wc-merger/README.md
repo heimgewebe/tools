@@ -47,7 +47,7 @@ Für die Weiterentwicklung (und speziell für Agenten wie Jules) gelten folgende
 
 ## Zielbild
 
-Ein idealer wc-merge erfüllt:
+Ein idealer repoLens-Report erfüllt:
 
 - bildet **den gesamten relevanten Textinhalt** eines Repos ab (Code, Skripte, Configs, Tests, Docs),
 - macht die **Struktur** des Repos sichtbar,
@@ -87,11 +87,11 @@ Das Manifest listet alle Dateien des Merges mit ihren Metadaten auf. Neben Kateg
 
 ---
 
-## Meta-Contract & Schema (`wc-merge-report`)
+## Meta-Contract & Schema (`repolens-report`)
 
 Ab Spec-Version `2.4` existiert ein formaler Merge-Contract:
 
-- **Contract-Name:** `wc-merge-report`
+- **Contract-Name:** `repolens-report`
 - **Contract-Version:** `2.4`
 
 Jeder Report muss:
@@ -100,7 +100,7 @@ Jeder Report muss:
 
    ```markdown
    - **Spec-Version:** 2.4
-   - **Contract:** wc-merge-report
+   - **Contract:** repolens-report
    - **Contract-Version:** 2.4
    ```
 
@@ -113,7 +113,7 @@ Jeder Report muss:
    merge:
      spec_version: "2.4"
      profile: "max"
-     contract: "wc-merge-report"
+     contract: "repolens-report"
      contract_version: "2.4"
      plan_only: false
      max_file_bytes: 0
@@ -131,7 +131,7 @@ Jeder Report muss:
 
 Das JSON Schema für diesen Block liegt hier:
 
-- `merger/wc-merger/wc-merge-report.schema.json`
+- `merger/wc-merger/repolens-report.schema.json`
 
 ---
 
@@ -160,7 +160,7 @@ Auf iPad/Pythonista können diese Pakete ebenfalls installiert werden (z. B. per
 
 ## Detailgrade (Profile)
 
-Der wc-merger v2 kennt vier optimierte Profile:
+Der repoLens v2 kennt vier optimierte Profile:
 
 ### 1. Overview (`overview`)
 - Kopf, Plan, Strukturbaum, Manifest.
@@ -207,7 +207,7 @@ wie `5MB`, `500K` oder `1GB`. `0` bedeutet „kein Limit pro Datei“.
 Shortcuts startet Pythonista oft als **App-Extension** mit stark eingeschränkten Rechten.
 In dieser Umgebung sind die Pythonista-Module `editor`, `ui`, `console` u. a. nicht verfügbar.
 
-Der wc-merger unterstützt deshalb einen **Headless-Modus**:
+Das Tool repoLens unterstützt deshalb einen **Headless-Modus**:
 
 ```bash
 # Variante 1: per Flag

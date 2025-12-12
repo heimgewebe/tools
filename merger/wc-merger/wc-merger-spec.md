@@ -59,15 +59,15 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
      - `Coverage: 17/35 Dateien mit vollem Inhalt`
    - Im `@meta`-Block:
      - `merge.extras.*`-Flags für alle aktivierten Extras ergänzen.
-     - Schema `wc-merge-report.schema.json` entsprechend erweitern.
+     - Schema `repolens-report.schema.json` entsprechend erweitern.
 
 3. **Multi-Part-Merges klar kennzeichnen**
    - Dateinamen bleiben im bisherigen Schema (`…_part1_merge.md`, `…_part2_merge.md`, …).
    - Im Header jeder Datei:
-     - `# WC-Merge Report (Part N/M)` setzen (bei Single-Part-Merges `1/1`).
+     - `# repoLens Report (Part N/M)` setzen (bei Single-Part-Merges `1/1`).
 
 4. **Validierung**
-   - Alle Änderungen strikt gegen `wc-merge-report.schema.json` und die oben definierte Abschnittsreihenfolge prüfen.
+   - Alle Änderungen strikt gegen `repolens-report.schema.json` und die oben definierte Abschnittsreihenfolge prüfen.
    - Keine neuen Kategorien/Tags einführen, solange die Spec nicht explizit erweitert wird.
 
 ---
@@ -97,7 +97,7 @@ Optional:
 
 ## 3b. Merge-Contract
 
-Jeder wc-merger-Report implementiert einen formalen „Merge-Contract“.
+Jeder repoLens-Report implementiert einen formalen „Merge-Contract“.
 Ziel:
 
 - eindeutige Identifikation des Formats,
@@ -108,14 +108,14 @@ Pflichtfelder:
 
 Im Abschnitt **Source & Profile**:
 
-- `Contract: wc-merge-report`
+- `Contract: repolens-report`
 - `Contract-Version: 2.4`
 
 Im `@meta`-Block (eingebettet in HTML-Kommentare `<!-- @meta:start -->` ... `<!-- @meta:end -->`):
 
 ```yaml
 merge:
-  contract: "wc-merge-report"
+  contract: "repolens-report"
   contract_version: "2.4"
 ```
 
