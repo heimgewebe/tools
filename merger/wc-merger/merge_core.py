@@ -10,6 +10,7 @@ import sys
 import json
 import hashlib
 import datetime
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
@@ -20,10 +21,26 @@ except ImportError:
     pass
 
 
-def _anchor(anchor_id: str) -> str:
-    """Return a stable HTML anchor for cross-renderer navigation."""
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
-    return f'<a id="{anchor_id}"></a>'
+
+def _slug_token(s: str) -> str:
+    """Deterministic ASCII token suitable for heading ids across renderers."""
+
+    s = s.lower()
+    s = s.replace("/", "-").replace(".", "-")
+    s = _NON_ALNUM.sub("-", s).strip("-")
+    return s
+
+
+def _heading_block(level: int, token: str, title: Optional[str] = None) -> List[str]:
+    """Return heading lines with stable token-based ids and optional title."""
+
+    lines = ["#" * level + " " + token, ""]
+    if title:
+        lines.append(f"**{title}**")
+        lines.append("")
+    return lines
 
 # --- Configuration & Heuristics ---
 
@@ -1676,7 +1693,7 @@ def validate_report_structure(report: str):
         "## Reading Plan",
         "## Plan",
         "## 📁 Structure",
-        "## 🧾 Manifest",
+        "## manifest",
         "## 📄 Content",
     ]
 
@@ -1691,9 +1708,6 @@ def validate_report_structure(report: str):
     if positions != sorted(positions):
         raise ValueError("Section ordering does not match Spec v2.3")
 
-    # ensure Manifest has anchor
-    if "{#manifest}" not in report:
-        raise ValueError("Manifest missing required anchor {#manifest}")
 
 def iter_report_blocks(
     files: List[FileInfo],
@@ -1730,9 +1744,10 @@ def iter_report_blocks(
     roots = set(f.root_label for f in files)
 
     for fi in files:
-        # Generate deterministic anchor
-        rel_id = fi.rel_path.as_posix().replace("/", "-").replace(".", "-")
-        anchor = f"file-{fi.root_label}-{rel_id}"
+        # Generate deterministic anchor based on slugified repo + path
+        rel_id = _slug_token(fi.rel_path.as_posix())
+        repo_slug = _slug_token(fi.root_label)
+        anchor = f"file-{repo_slug}-{rel_id}"
         fi.anchor = anchor
         
         # Compute file roles
@@ -2245,8 +2260,7 @@ def iter_report_blocks(
     # --- Index (Patch B) ---
     # Generated Categories Index - Only show non-empty categories/tags
     index_blocks = []
-    index_blocks.append("## Index")
-    index_blocks.append("")
+    index_blocks.extend(_heading_block(2, "index", "🧭 Index"))
 
     # Pre-check which categories/tags have files
     cats_to_idx = ["source", "doc", "config", "contract", "test"]
@@ -2262,7 +2276,7 @@ def iter_report_blocks(
     
     # Build TOC - only for non-empty sections
     for c in non_empty_cats:
-        index_blocks.append(f"- [{c.capitalize()}](#cat-{c})")
+        index_blocks.append(f"- [{c.capitalize()}](#cat-{_slug_token(c)})")
     
     # Add tag TOC entries only if they have files
     if ci_files:
@@ -2275,20 +2289,20 @@ def iter_report_blocks(
     # Category Lists - only non-empty
     for c in non_empty_cats:
         cat_files = [f for f in files if f.category == c]
-        index_blocks.append(f"## Category: {c} {{#cat-{c}}}")
+        index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}"))
         for f in cat_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     # Tag Lists – only non-empty
     if ci_files:
-        index_blocks.append("## Tag: ci {#tag-ci}")
+        index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci"))
         for f in ci_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
     if wgx_files:
-        index_blocks.append("## Tag: wgx-profile {#tag-wgx-profile}")
+        index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile"))
         for f in wgx_files:
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
@@ -2297,16 +2311,13 @@ def iter_report_blocks(
 
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
-    manifest.append(_anchor("manifest"))
-    manifest_heading = "## 🧾 Manifest {#manifest}"
-    if code_only:
-        manifest_heading = "## 🧾 Manifest (Code-Only) {#manifest}"
-    manifest.append(manifest_heading)
-    manifest.append("")
+    manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)"))
 
     roots_sorted = sorted(files_by_root.keys())
     if roots_sorted:
-        manifest_nav = " · ".join(f"[{r}](#manifest-{r})" for r in roots_sorted)
+        manifest_nav = " · ".join(
+            f"[{r}](#manifest-{_slug_token(r)})" for r in roots_sorted
+        )
         manifest.append(f"**Repos im Merge:** {manifest_nav}")
         manifest.append("")
 
@@ -2327,8 +2338,7 @@ def iter_report_blocks(
             stats = repo_stats.get(root, {})
             repo_role = infer_repo_role(root, root_files)
 
-            manifest.append(f"### Repo `{root}` {{#manifest-{root}}}")
-            manifest.append("")
+            manifest.extend(_heading_block(3, f"manifest-{_slug_token(root)}", f"Repo `{root}`"))
             manifest.append(
                 f"- Rolle: {repo_role}"
             )
@@ -2378,7 +2388,7 @@ def iter_report_blocks(
     content_roots = [fi.root_label for fi, status in processed_files if status in ("full", "truncated", "meta-only", "omitted")]
     if content_roots:
         nav_links = " · ".join(
-            f"[{root}](#repo-{root})" for root in sorted(set(content_roots))
+            f"[{root}](#repo-{_slug_token(root)})" for root in sorted(set(content_roots))
         )
         content_header.append(f"**Repos im Merge:** {nav_links}")
         content_header.append("")
@@ -2392,12 +2402,13 @@ def iter_report_blocks(
             continue
 
         if fi.root_label != current_root:
-            yield f"## {fi.root_label} {{#repo-{fi.root_label}}}\n\n"
+            repo_slug = _slug_token(fi.root_label)
+            yield "\n".join(_heading_block(2, f"repo-{repo_slug}", fi.root_label)) + "\n"
             current_root = fi.root_label
 
         block = ["---"]
-        block.append(f'<a id="{fi.anchor}"></a>')
-        block.append(f"### `{fi.rel_path}`")  # File headers now level 3
+        block.extend(_heading_block(3, fi.anchor))
+        block.append(f"**Path:** `{fi.rel_path}`")
         block.append(f"- Category: {fi.category}")
         if fi.tags:
             block.append(f"- Tags: {', '.join(fi.tags)}")
