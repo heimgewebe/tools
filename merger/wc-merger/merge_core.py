@@ -34,9 +34,17 @@ def _slug_token(s: str) -> str:
 
 
 def _heading_block(level: int, token: str, title: Optional[str] = None) -> List[str]:
-    """Return heading lines with stable token-based ids and optional title."""
+    """
+    Return heading lines with stable token-based ids and optional title.
 
-    lines = ["#" * level + " " + token, ""]
+    Many Markdown renderers (especially on iOS) fail to emit heading IDs, and
+    some ignore the `{#id}` syntax. To maximize compatibility for links like
+    `#manifest` or `#file-tools-...`, we emit an explicit HTML anchor before the
+    tokenized heading. This keeps links working when either heading IDs *or*
+    HTML anchors are supported by the renderer.
+    """
+
+    lines = [f'<a id="{token}"></a>', "#" * level + " " + token, ""]
     if title:
         lines.append(f"**{title}**")
         lines.append("")
