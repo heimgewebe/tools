@@ -1,4 +1,4 @@
-# WC-Merge Report (Part 1/3)
+# repoLens Merge Report (Part 1/3)
 
 ## Source & Profile
 - **Source:**
@@ -6,7 +6,7 @@
 - **Generated At:** 2025-12-07 10:17:36 (UTC)
 - **Max File Bytes:** unlimited
 - **Spec-Version:** 2.3
-- **Contract:** wc-merge-report
+- **Contract:** repoLens-report
 - **Contract-Version:** 2.3
 - **Profile Use-Case:** Tools – Code/Review Snapshot
 - **Declared Purpose:** Tools – Index
@@ -19,7 +19,7 @@
 merge:
   spec_version: "2.3"
   profile: "dev"
-  contract: "wc-merge-report"
+  contract: "repoLens-report"
   contract_version: "2.3"
   plan_only: false
   max_file_bytes: 0
@@ -108,7 +108,7 @@ merge:
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2.3 Standard).
+merge_core – Core functions for repoLens (v2.3 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
@@ -125,10 +125,10 @@ from dataclasses import dataclass, asdict
 SPEC_VERSION = "2.3"
 MERGES_DIR_NAME = "merges"
 
-# Formale Contract-Deklaration für alle wc-merger-Reports.
+# Formale Contract-Deklaration für alle repoLens-Reports.
 # Name/Version können von nachgelagerten Tools verwendet werden,
 # um das Format eindeutig zu erkennen.
-MERGE_CONTRACT_NAME = "wc-merge-report"
+MERGE_CONTRACT_NAME = "repoLens-report"
 MERGE_CONTRACT_VERSION = SPEC_VERSION
 
 # Ab v2.3+: 0 = "kein Limit pro Datei".
@@ -1068,7 +1068,7 @@ def iter_report_blocks(
 
     # --- 1. Header ---
     header = []
-    header.append(f"# WC-Merger Report (v{SPEC_VERSION.split('.')[0]}.x)")
+    header.append(f"# repoLens Merger Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
     # --- 2. Source & Profile ---
@@ -1441,7 +1441,7 @@ def write_reports_v2(
                 current_lines = []
                 # Add continuation header for next part
                 if not is_last:
-                    header = f"# WC-Merge Report (Part {part_num})\n\n"
+                    header = f"# repoLens Merge Report (Part {part_num})\n\n"
                     current_lines.append(header)
                     current_size = len(header.encode('utf-8'))
                 else:
@@ -1478,12 +1478,12 @@ def write_reports_v2(
                         continue
 
                     # Anpassung: Auch den Standard-Header (Part 1) erkennen
-                    prefix_part = "# WC-Merge Report (Part "
-                    prefix_main = "# WC-Merger Report"
+                    prefix_part = "# repoLens Merge Report (Part "
+                    prefix_main = "# repoLens Merger Report"
 
                     if lines[0].startswith(prefix_part) or lines[0].startswith(prefix_main):
                         # Nur die erste Zeile ersetzen, Rest unverändert lassen.
-                        lines[0] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
+                        lines[0] = f"# repoLens Merge Report (Part {idx}/{total_parts})\n"
                         try:
                             path.write_text("".join(lines), encoding="utf-8")
                         except Exception:

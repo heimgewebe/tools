@@ -2,7 +2,7 @@ augment:
   version: 1
 
   hotspots:
-    - path: merger/wc-merger/merge_core.py
+    - path: merger/repoLens/merge_core.py
       reason: "Complex branching logic"
       severity: "medium"
 

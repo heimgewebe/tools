@@ -1,6 +1,6 @@
-# wc-merger (Working Copy Merger)
+# repoLens (Working Copy Merger)
 
-Der `wc-merger` erzeugt aus lokalen Working-Copy-Checkouts strukturierte „Merge-Berichte“ im Markdown-Format.
+Der `repoLens` erzeugt aus lokalen Working-Copy-Checkouts strukturierte „Merge-Berichte“ im Markdown-Format.
 
 Hauptziel: **KIs einen möglichst vollständigen Blick auf ein oder mehrere Repositories geben**, damit sie
 
@@ -15,7 +15,7 @@ Hauptziel: **KIs einen möglichst vollständigen Blick auf ein oder mehrere Repo
 Ab Version 2.1 folgt dieses Tool einer strikten, unverhandelbaren Spezifikation.
 Jede Änderung am Code muss diese Regeln einhalten.
 
-👉 [**wc-merger-spec.md**](./wc-merger-spec.md) (Die Single Source of Truth)
+👉 [**repoLens-spec.md**](./repoLens-spec.md) (Die Single Source of Truth)
 
 ---
 
@@ -47,13 +47,13 @@ Für die Weiterentwicklung (und speziell für Agenten wie Jules) gelten folgende
 
 ## Zielbild
 
-Ein idealer wc-merge erfüllt:
+Ein idealer repoLens-merge erfüllt:
 
 - bildet **den gesamten relevanten Textinhalt** eines Repos ab (Code, Skripte, Configs, Tests, Docs),
 - macht die **Struktur** des Repos sichtbar,
 - zeigt **Zusammenhänge** (Workflows, Contracts, Tools, Tests),
 - ermöglicht KIs, auf Basis des Merges so zu arbeiten, als hätten sie das Repo lokal ausgecheckt – nur ohne Binärmüll und ohne sensible Daten.
-- hält strikt die in `wc-merger-spec.md` definierte Struktur ein,
+- hält strikt die in `repoLens-spec.md` definierte Struktur ein,
 - deklariert seine `Spec-Version` und den verwendeten Merge-Contract,
 - gibt KIs eine klare Aussage über Profil/Use-Case (Index, Doku, Dev, Vollsnapshot),
 - und ist maschinenlesbar validierbar.
@@ -87,11 +87,11 @@ Das Manifest listet alle Dateien des Merges mit ihren Metadaten auf. Neben Kateg
 
 ---
 
-## Meta-Contract & Schema (`wc-merge-report`)
+## Meta-Contract & Schema (`repoLens-report`)
 
 Ab Spec-Version `2.4` existiert ein formaler Merge-Contract:
 
-- **Contract-Name:** `wc-merge-report`
+- **Contract-Name:** `repoLens-report`
 - **Contract-Version:** `2.4`
 
 Jeder Report muss:
@@ -100,7 +100,7 @@ Jeder Report muss:
 
    ```markdown
    - **Spec-Version:** 2.4
-   - **Contract:** wc-merge-report
+   - **Contract:** repoLens-report
    - **Contract-Version:** 2.4
    ```
 
@@ -113,7 +113,7 @@ Jeder Report muss:
    merge:
      spec_version: "2.4"
      profile: "max"
-     contract: "wc-merge-report"
+     contract: "repoLens-report"
      contract_version: "2.4"
      plan_only: false
      max_file_bytes: 0
@@ -131,7 +131,7 @@ Jeder Report muss:
 
 Das JSON Schema für diesen Block liegt hier:
 
-- `merger/wc-merger/wc-merge-report.schema.json`
+- `merger/repoLens/repoLens-report.schema.json`
 
 ---
 
@@ -140,7 +140,7 @@ Das JSON Schema für diesen Block liegt hier:
 Optionales Helfer-Script, um den `@meta`-Block gegen das Schema zu prüfen:
 
 ```bash
-cd merger/wc-merger
+cd merger/repoLens
 python validate_merge_meta.py ../../merges/tools_max_part1.md
 ```
 
@@ -160,7 +160,7 @@ Auf iPad/Pythonista können diese Pakete ebenfalls installiert werden (z. B. per
 
 ## Detailgrade (Profile)
 
-Der wc-merger v2 kennt vier optimierte Profile:
+Der repoLens v2 kennt vier optimierte Profile:
 
 ### 1. Overview (`overview`)
 - Kopf, Plan, Strukturbaum, Manifest.
@@ -190,13 +190,13 @@ Der wc-merger v2 kennt vier optimierte Profile:
 
 ```bash
 # Overview-Profil (Scannt aktuelles Verzeichnis oder nutzt --hub)
-python3 wc-merger.py repo1 repo2 --level overview
+python3 repoLens.py repo1 repo2 --level overview
 
 # Dev-Profil, einzelner Merge pro Repo
-python3 wc-merger.py myrepo --level dev --mode pro-repo
+python3 repoLens.py myrepo --level dev --mode pro-repo
 
 # Max-Profil mit Split (z. B. 20MB)
-python3 wc-merger.py myrepo --level max --split-size 20MB
+python3 repoLens.py myrepo --level max --split-size 20MB
 ```
 
 Hinweis: `--split-size` **und** `--max-bytes` akzeptieren menschenlesbare Werte
@@ -207,21 +207,21 @@ wie `5MB`, `500K` oder `1GB`. `0` bedeutet „kein Limit pro Datei“.
 Shortcuts startet Pythonista oft als **App-Extension** mit stark eingeschränkten Rechten.
 In dieser Umgebung sind die Pythonista-Module `editor`, `ui`, `console` u. a. nicht verfügbar.
 
-Der wc-merger unterstützt deshalb einen **Headless-Modus**:
+Der repoLens unterstützt deshalb einen **Headless-Modus**:
 
 ```bash
 # Variante 1: per Flag
-python3 wc-merger.py --headless --level dev --mode gesamt
+python3 repoLens.py --headless --level dev --mode gesamt
 
 # Variante 2: per Umgebungsvariable
-WC_HEADLESS=1 python3 wc-merger.py --level dev --mode gesamt
+REPOLENS_HEADLESS=1 python3 repoLens.py --level dev --mode gesamt
 ```
 
 **Tipp:** Soll ein Shortcut Pythonista *voll* starten (mit UI/editor),
 nutze das URL-Scheme:
 
 ```
-pythonista3://merger/wc-merger/wc-merger.py?action=run
+pythonista3://merger/repoLens/repoLens.py?action=run
 ```
 
 ### Power-User (Variante B: URL-Scheme mit Parametern)
@@ -232,18 +232,18 @@ Es unterstützt nun auch Parameter, um die UI vorzubelegen oder Modi direkt zu w
 **Beispiel: Max-Profil, Gesamt-Merge**
 
 ```
-pythonista3://wc-merger/wc-merger.py?action=run&root=icloud&argv=--level&argv=max&argv=--mode&argv=gesamt
+pythonista3://repoLens/repoLens.py?action=run&root=icloud&argv=--level&argv=max&argv=--mode&argv=gesamt
 ```
 
 **Beispiel: Extractor (ZIPs entpacken)**
 
 ```
-pythonista3://wc-merger/wc-extractor.py?action=run&root=icloud
+pythonista3://repoLens/repoLens-extractor.py?action=run&root=icloud
 ```
 
 Diese Methode garantiert vollen Zugriff auf UI, Alerts und das Dateisystem.
 
-Weitere Details siehe [wc-merger-spec.md](./wc-merger-spec.md).
+Weitere Details siehe [repoLens-spec.md](./repoLens-spec.md).
 
 ### KI-Lesepfad (kurz)
 

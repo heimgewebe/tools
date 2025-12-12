@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-wc_extractor – ZIPs im wc-hub entpacken und Repos aktualisieren.
+repoLens_extractor – ZIPs im repoLens-hub entpacken und Repos aktualisieren.
 Verwendet merge_core.
 
 Funktion:
-- Suche alle *.zip im Hub (wc-hub).
+- Suche alle *.zip im Hub (repoLens-hub).
 - Für jede ZIP:
   - Entpacke in temporären Ordner.
   - Wenn es bereits einen Zielordner mit gleichem Namen gibt:
@@ -93,7 +93,7 @@ def build_delta_meta_from_diff(
     base_timestamp: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Builds a delta metadata dict conforming to wc-merge-delta.schema.json.
+    Builds a delta metadata dict conforming to repoLens-delta.schema.json.
     
     Args:
         only_old: List of files removed
@@ -107,7 +107,7 @@ def build_delta_meta_from_diff(
     now = datetime.datetime.now(datetime.timezone.utc)
     
     delta_meta = {
-        "type": "wc-merge-delta",
+        "type": "repoLens-delta",
         "base_import": base_timestamp or now.isoformat(),
         "current_timestamp": now.isoformat(),
         "summary": {
@@ -138,7 +138,7 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
         diff_path: Path to the import-diff markdown file
     
     Returns:
-        Delta metadata dict conforming to wc-merge-delta.schema.json,
+        Delta metadata dict conforming to repoLens-delta.schema.json,
         or None if extraction fails
     """
     try:
@@ -388,7 +388,7 @@ def import_zip_wrapper(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[
 
 def main() -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="wc-extractor-v2: Import ZIPs to hub.")
+    parser = argparse.ArgumentParser(description="repoLens-extractor-v2: Import ZIPs to hub.")
     parser.add_argument("--hub", help="Hub directory override.")
     args = parser.parse_args()
 
@@ -400,14 +400,14 @@ def main() -> int:
 
     merges_dir = get_merges_dir(hub)
 
-    print("wc_extractor-v2 – Hub:", hub)
+    print("repoLens_extractor-v2 – Hub:", hub)
     zips = sorted(hub.glob("*.zip"))
 
     if not zips:
         msg = "Keine ZIP-Dateien im Hub gefunden."
         print(msg)
         if console:
-            console.alert("wc_extractor-v2", msg, "OK", hide_cancel_button=True)
+            console.alert("repoLens_extractor-v2", msg, "OK", hide_cancel_button=True)
         return 0
 
     diff_paths = []
@@ -436,7 +436,7 @@ def main() -> int:
     print(summary)
 
     if console:
-        console.alert("wc_extractor-v2", summary, "OK", hide_cancel_button=True)
+        console.alert("repoLens_extractor-v2", summary, "OK", hide_cancel_button=True)
 
     return 0
 
@@ -547,7 +547,7 @@ def build_delta_merge_report(
     profile: str = "delta-full",
 ) -> Path:
     """
-    Erzeugt einen WC-Merger-kompatiblen Delta-Report auf Basis eines
+    Erzeugt einen repoLens-kompatiblen Delta-Report auf Basis eines
     Import-Diffs (parse_import_diff_table).
 
     Standardverhalten:
@@ -565,7 +565,7 @@ def build_delta_merge_report(
     removed = [r for r in rows if r.get("status") == "removed"]
 
     lines = []
-    lines.append("# WC-Merger Delta Report (v2.x)")
+    lines.append("# repoLens Delta Report (v2.x)")
     lines.append("")
     lines.append("## Source & Profile")
     lines.append(f"- **Source:** {repo_name}")

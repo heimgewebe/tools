@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://heimgewebe.tools/contracts/wc-merge-delta.schema.json",
-  "title": "WC Merge Delta",
-  "description": "Delta-Contract für WC-Merger: beschreibt Änderungen zwischen zwei Import-Snapshots.",
+  "$id": "https://heimgewebe.tools/contracts/repoLens-delta.schema.json",
+  "title": "repoLens Merge Delta",
+  "description": "Delta-Contract für repoLens: beschreibt Änderungen zwischen zwei Import-Snapshots.",
   "type": "object",
   "properties": {
     "type": {
       "type": "string",
-      "const": "wc-merge-delta"
+      "const": "repoLens-delta"
     },
     "base_import": {
       "type": "string",

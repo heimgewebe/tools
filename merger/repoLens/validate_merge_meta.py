@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validiert den @meta-Block eines WC-Merger-Reports gegen die JSON-Schemas.
+Validiert den @meta-Block eines repoLens-Reports gegen die JSON-Schemas.
 
 Nutzung:
 
@@ -84,7 +84,7 @@ def validate_report_meta(report_path: Path) -> None:
         raise ValueError("Im @meta-Block fehlt der Schlüssel 'merge' oder er ist kein Objekt.")
 
     # Hauptschema laden
-    report_schema_path = (SCRIPT_DIR / "wc-merge-report.schema.json").resolve()
+    report_schema_path = (SCRIPT_DIR / "repoLens-report.schema.json").resolve()
     if not report_schema_path.exists():
         raise FileNotFoundError(f"Schema nicht gefunden: {report_schema_path}")
 
@@ -104,8 +104,8 @@ def validate_report_meta(report_path: Path) -> None:
 
     # Optional: Delta-Contract validieren, falls vorhanden
     delta = merge_meta.get("delta")
-    if isinstance(delta, dict) and delta.get("type") == "wc-merge-delta":
-        delta_schema_path = (SCRIPT_DIR / "wc-merge-delta.schema.json").resolve()
+    if isinstance(delta, dict) and delta.get("type") == "repoLens-delta":
+        delta_schema_path = (SCRIPT_DIR / "repoLens-delta.schema.json").resolve()
         if not delta_schema_path.exists():
             print("⚠️  Delta-Schema nicht gefunden, überspringe Delta-Validierung.")
             return

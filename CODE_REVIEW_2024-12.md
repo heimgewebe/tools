@@ -71,7 +71,7 @@ usage: ordnermerger.py [-h] [--selected SELECTED] [--here] ...
 Python 3.9+ verlangt den `usedforsecurity` Parameter bei `hashlib.md5()` für nicht-kryptographische Verwendung.
 
 **Locations**:
-1. `merger/wc-merger/merge_core.py:1119`
+1. `merger/repoLens/merge_core.py:1119`
 2. `merger/repomerger/repomerger.py:227`  
 3. `merger/omniwandler/omniwandler.py:146`
 4. `merger/ordnermerger/merger_lib.py:142` (neu)
@@ -105,10 +105,10 @@ MD5 wird hier **nicht für Security** verwendet, sondern nur für File-Integrity
 | File | Import | Zeile |
 |------|--------|-------|
 | `merge_core.py` | `from dataclasses import asdict` | 15 |
-| `wc-merger.py` | `from typing import Optional, Tuple` | 14 |
-| `wc-merger.py` | `from importlib.machinery import SourceFileLoader` | 15 |
-| `wc-merger.py` | `DEFAULT_MAX_BYTES` (2x) | 109, 121 |
-| `wc-merger.py` | `import sys` (in function) | 226 |
+| `repoLens.py` | `from typing import Optional, Tuple` | 14 |
+| `repoLens.py` | `from importlib.machinery import SourceFileLoader` | 15 |
+| `repoLens.py` | `DEFAULT_MAX_BYTES` (2x) | 109, 121 |
+| `repoLens.py` | `import sys` (in function) | 226 |
 | `omniwandler.py` | `import time` | 24 |
 | `omniwandler.py` | `from typing import Any, Dict` | 28 |
 
@@ -192,7 +192,7 @@ Diese wurden bereits in `INCONSISTENCIES.md` dokumentiert. Die meisten sind in U
 - `omniwandler.py`: 7 (UI-Close, Cleanup, Config-Parse - alles unkritisch)
 - `merge_core.py`: 1 (extract_purpose Fallback)
 - `validate_merge_meta.py`: 1 (Path resolution Fallback)
-- `wc-extractor.py`: 1 (Path resolution Fallback)
+- `repoLens-extractor.py`: 1 (Path resolution Fallback)
 
 **Empfehlung**: 
 Status Quo ist akzeptabel, aber für besseres Debugging könnten Fehler zu stderr geloggt werden.

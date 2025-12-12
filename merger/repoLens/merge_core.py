@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2.4 Standard).
+merge_core – Core functions for repoLens (v2.4 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
@@ -24,10 +24,10 @@ except ImportError:
 SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
 
-# Formale Contract-Deklaration für alle wc-merger-Reports.
+# Formale Contract-Deklaration für alle repoLens-Reports.
 # Name/Version können von nachgelagerten Tools verwendet werden,
 # um das Format eindeutig zu erkennen.
-MERGE_CONTRACT_NAME = "wc-merge-report"
+MERGE_CONTRACT_NAME = "repoLens-report"
 MERGE_CONTRACT_VERSION = SPEC_VERSION
 
 # Ab v2.3+: 0 = "kein Limit pro Datei".
@@ -782,7 +782,7 @@ LANG_MAP = {
 
 HARDCODED_HUB_PATH = (
     "/private/var/mobile/Containers/Data/Application/"
-    "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/wc-hub"
+    "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/repoLens-hub"
 )
 
 # Semantische Use-Case-Beschreibung pro Profil.
@@ -1063,7 +1063,7 @@ def is_noise_file(fi: "FileInfo") -> bool:
     return False
 
 def detect_hub_dir(script_path: Path, arg_base_dir: Optional[str] = None) -> Path:
-    env_base = os.environ.get("WC_MERGER_BASEDIR")
+    env_base = os.environ.get("REPOLENS_BASEDIR")
     if env_base:
         p = Path(env_base).expanduser()
         if p.is_dir(): return p
@@ -1482,7 +1482,7 @@ def make_output_filename(
     detail_block = detail
 
     # 4. Pfad-Block: aus path_filter, aber OHNE 'path-' Präfix
-    #    Beispiel: path_filter="wc-merger" → "wc-merger"
+    #    Beispiel: path_filter="repoLens" → "repoLens"
     path_block = None
     if path_filter:
         slug = path_filter.strip().strip("/")
@@ -1831,7 +1831,7 @@ def iter_report_blocks(
 
     # --- 1. Header ---
     header = []
-    header.append(f"# WC-Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
+    header.append(f"# repoLens Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
     if code_only:
@@ -2622,7 +2622,7 @@ def write_reports_v2(
                 current_lines = []
                 # Add continuation header for next part
                 if not is_last:
-                    header = f"# WC-Merge Report (Part {part_num})\n\n"
+                    header = f"# repoLens Merge Report (Part {part_num})\n\n"
                     current_lines.append(header)
                     current_size = len(header.encode('utf-8'))
                 else:
@@ -2663,12 +2663,12 @@ def write_reports_v2(
                     text = path.read_text(encoding="utf-8")
                     lines = text.splitlines(True)
                     if lines:
-                        prefix_part = "# WC-Merge Report (Part "
-                        prefix_main = "# WC-Merge Report"
+                        prefix_part = "# repoLens Merge Report (Part "
+                        prefix_main = "# repoLens Merge Report"
                         for i, line in enumerate(lines):
                             stripped = line.lstrip("\ufeff")
                             if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
-                                lines[i] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
+                                lines[i] = f"# repoLens Merge Report (Part {idx}/{total_parts})\n"
                                 break
                     text = "".join(lines)
                 except Exception:
