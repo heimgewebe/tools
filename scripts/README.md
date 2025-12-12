@@ -19,16 +19,3 @@ scripts/jsonl-tail.sh [-n <lines>] data.jsonl
 ```
 
 The default is to display the last 10 entries. Increase or decrease the number of lines with `-n`. Each line is parsed and rendered through `jq` for readability.
-
-## `parse_icf_who.py`
-
-Backfill WHO ICF descriptions from a plain-text source (`data/ifc-who.txt`) into the JSON databases `data/icf-complete-full.json` and `data/icf_codes_complete.json`.
-
-```bash
-python scripts/parse_icf_who.py \
-  --who-file data/ifc-who.txt \
-  --full-json data/icf-complete-full.json \
-  --codes-json data/icf_codes_complete.json
-```
-
-Use `--overwrite` to replace existing `who_description` fields; by default only missing descriptions are filled. The script is tolerant to either dict- or list-based JSON layouts and writes the updated datasets back to disk.
