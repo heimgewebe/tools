@@ -2,6 +2,22 @@
 
 (Normative Spezifikation)
 
+## Navigation & Anchors (Renderer Robustness)
+
+Viele iOS/Preview-Renderer erzeugen keine stabilen Heading-IDs und/oder strippen HTML.
+Der Report emittiert daher **mehrschichtige Navigation**:
+
+- sichtbare Suchmarker: `§§ <token>` (immer auffindbar, auch wenn Links tot sind)
+- HTML Anchor: `<a id="<token>"></a>` (wenn HTML zugelassen ist)
+- tokenisierte Headings: `## <token>` (wenn Heading-IDs erzeugt werden)
+
+Alle internen Links verwenden nur Tokens (`#manifest`, `#index`, `#file-...`).
+
+## Render Mode
+
+Der Report weist den Modus explizit aus:
+`Render Mode: full | code-only | plan-only`
+
 ## 1. Zweck
 
 Der wc-merger erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.

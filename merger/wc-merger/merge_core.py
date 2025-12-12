@@ -44,10 +44,35 @@ def _heading_block(level: int, token: str, title: Optional[str] = None) -> List[
     HTML anchors are supported by the renderer.
     """
 
-    lines = [f'<a id="{token}"></a>', "#" * level + " " + token, ""]
+    # NOTE:
+    # - Some renderers do not generate heading IDs.
+    # - Some renderers strip HTML anchors.
+    # We therefore provide three layers:
+    #   (1) visible search marker: "§§ <token>" (works even if links are dead)
+    #   (2) HTML anchor: <a id="token"></a> (works if HTML allowed)
+    #   (3) tokenized heading: "## token" (works if heading IDs generated)
+    lines = [f"§§ {token}", f'<a id="{token}"></a>', "#" * level + " " + token, ""]
     if title:
         lines.append(f"**{title}**")
         lines.append("")
+    return lines
+
+
+def _link_test_block(sample_file_anchor: Optional[str] = None) -> List[str]:
+    """
+    Emit a tiny link test section so users can immediately tell if their renderer
+    supports intra-document links. If all these fail, use search for '§§ <token>'.
+    """
+    lines: List[str] = []
+    lines.extend(_heading_block(2, "link-test", "🔗 Link-Test (Renderer-Check)"))
+    lines.append("Wenn diese Links hier nicht springen, liegt es am Viewer. Dann: **Suche nach `§§ <token>`**.")
+    lines.append("")
+    lines.append("- [Test → Index](#index)")
+    lines.append("- [Test → Manifest](#manifest)")
+    lines.append("- [Test → Link-Test](#link-test)")
+    if sample_file_anchor:
+        lines.append(f"- [Test → Beispiel-Datei]({sample_file_anchor})")
+    lines.append("")
     return lines
 
 # --- Configuration & Heuristics ---
@@ -860,6 +885,7 @@ class FileInfo(object):
         self.reason = reason
         self.content = content
         self.anchor = "" # Will be set during report generation
+        self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
         self.roles = [] # Will be computed during report generation
 
 
@@ -1752,11 +1778,13 @@ def iter_report_blocks(
     roots = set(f.root_label for f in files)
 
     for fi in files:
-        # Generate deterministic anchor based on slugified repo + path
+        # Generate deterministic anchor based on slugified repo + path, with collision-safe suffix
         rel_id = _slug_token(fi.rel_path.as_posix())
         repo_slug = _slug_token(fi.root_label)
-        anchor = f"file-{repo_slug}-{rel_id}"
-        fi.anchor = anchor
+        base_anchor = f"file-{repo_slug}-{rel_id}"
+        suffix = (fi.md5 or "")[:6] if getattr(fi, "md5", None) else ""
+        fi.anchor_alias = base_anchor
+        fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
         
         # Compute file roles
         fi.roles = compute_file_roles(fi)
@@ -1867,6 +1895,13 @@ def iter_report_blocks(
         header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
         header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
         header.append("")
+    if plan_only:
+        header.append("**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**")
+        header.append("**Nutze ihn als Token-sparenden Vorab-Scan, um zu entscheiden, ob ein Voll- oder Code-Only-Merge nötig ist.**")
+        header.append("")
+
+    # Link / Renderer diagnostics (very small, but huge debugging value)
+    # Pick a sample file anchor if available later; we'll inject after we know files.
 
     # --- 2. Source & Profile ---
     header.append("## Source & Profile")
@@ -1882,6 +1917,10 @@ def iter_report_blocks(
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
     header.append(f"- **Contract:** {MERGE_CONTRACT_NAME}")
     header.append(f"- **Contract-Version:** {MERGE_CONTRACT_VERSION}")
+    header.append(f"- **Plan Only:** {str(bool(plan_only)).lower()}")
+    header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
+    render_mode = "plan-only" if plan_only else ("code-only" if code_only else "full")
+    header.append(f"- **Render Mode:** `{render_mode}`")
 
     # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
     profile_usecase = PROFILE_USECASE.get(level)
@@ -1943,6 +1982,7 @@ def iter_report_blocks(
                 "contract_version": MERGE_CONTRACT_VERSION,
                 "plan_only": plan_only,
                 "code_only": code_only,
+                "render_mode": "plan-only" if plan_only else ("code-only" if code_only else "full"),
                 "max_file_bytes": max_file_bytes,
                 "scope": scope_desc,
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
@@ -2317,6 +2357,12 @@ def iter_report_blocks(
 
     yield "\n".join(index_blocks) + "\n"
 
+    # Link test block (renderer diagnostics)
+    sample_anchor = None
+    if processed_files:
+        sample_anchor = f"#{processed_files[0][0].anchor}"
+    yield "\n".join(_link_test_block(sample_anchor)) + "\n"
+
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
     manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)"))
@@ -2415,6 +2461,12 @@ def iter_report_blocks(
             current_root = fi.root_label
 
         block = ["---"]
+        # Backwards-compatible alias anchor (old style without suffix)
+        if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
+            # Provide search marker + HTML id for alias too
+            block.append(f"§§ {fi.anchor_alias}")
+            block.append(f'<a id="{fi.anchor_alias}"></a>')
+            block.append("")
         block.extend(_heading_block(3, fi.anchor))
         block.append(f"**Path:** `{fi.rel_path}`")
         block.append(f"- Category: {fi.category}")
@@ -2434,7 +2486,9 @@ def iter_report_blocks(
         block.append(content)
         block.append("```")
         block.append("")
-        block.append("[↑ Zurück zum Manifest](#manifest)")
+        # Backlinks: keep them simple + add search fallback
+        block.append("[↑ Zurück zum Manifest](#manifest) · [↑ Zum Index](#index) · [↑ Link-Test](#link-test)")
+        block.append("Wenn Links nicht springen: Suche nach `§§ manifest` oder `§§ index`.")
         yield "\n".join(block) + "\n\n"
 
 def generate_report_content(
