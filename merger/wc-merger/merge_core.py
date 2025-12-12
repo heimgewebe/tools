@@ -2865,4 +2865,28 @@ def write_reports_v2(
                     json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
                     out_paths.append(json_path)
 
-    return out_paths
+    # --- Post-check & deterministic ordering (primary artifact first) ---
+    md_paths = [p for p in out_paths if p.suffix.lower() == ".md"]
+    other_paths = [p for p in out_paths if p.suffix.lower() != ".md"]
+
+    # Verify that reported .md outputs really exist and are non-empty.
+    # This prevents "generated" messages when the file did not land where expected.
+    verified_md: List[Path] = []
+    for p in md_paths:
+        try:
+            if p.exists() and p.is_file() and p.stat().st_size > 0:
+                verified_md.append(p)
+        except Exception:
+            # treat as missing
+            pass
+
+    if md_paths and not verified_md:
+        # We *expected* at least one markdown output, but none is actually usable.
+        # Make this a hard error so callers don't display a success message.
+        raise RuntimeError(
+            "wc-merger: Report was announced as written, but no non-empty .md output exists on disk. "
+            "Check merges_dir / permissions / rename logic."
+        )
+
+    # Return primary markdown outputs first, then any sidecars/extras.
+    return verified_md + other_paths

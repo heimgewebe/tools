@@ -1371,7 +1371,12 @@ class MergerUI(object):
             # Close files
             force_close_files(out_paths)
 
-            msg = f"Delta report generated: {out_paths[0].name}"
+            primary_path = next((p for p in out_paths if p.suffix.lower() == ".md"), out_paths[0] if out_paths else None)
+            msg = (
+                f"Delta report generated: {primary_path.name}"
+                if primary_path is not None
+                else "Delta report generated"
+            )
             if console:
                 try:
                     console.hud_alert(msg)
