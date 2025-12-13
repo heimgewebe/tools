@@ -1591,13 +1591,26 @@ def summarize_categories(file_infos: List[FileInfo]) -> Dict[str, List[int]]:
 def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
     """Return the effective render mode based on plan/code switches."""
 
-    if plan_only and code_only:
-        return "meta-only"
+    plan_only = bool(plan_only)
+    code_only = bool(code_only)
+
+    # plan_only wins – avoid conflicting content policies.
     if plan_only:
         return "plan-only"
     if code_only:
         return "code-only"
     return "full"
+
+
+def _normalize_mode_flags(plan_only: bool, code_only: bool) -> Tuple[bool, bool, Dict[str, bool]]:
+    """Normalize plan/code flags and retain the original user request."""
+
+    requested_flags = {"plan_only": bool(plan_only), "code_only": bool(code_only)}
+
+    plan_only = requested_flags["plan_only"]
+    code_only = False if plan_only else requested_flags["code_only"]
+
+    return plan_only, code_only, requested_flags
 
 
 def _generate_run_id(
@@ -1626,6 +1639,8 @@ def _generate_run_id(
         timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M")
 
     components: List[str] = []
+
+    plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
 
     # Path block first (stable anchor). Default to "root" when absent.
     if path_filter:
@@ -1735,6 +1750,7 @@ def make_output_filename(
     - Danach der bisherige Rest (Repo-Block, Detail, Timestamp, evtl. Filter/Part)
     """
     
+    plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
     render_mode = _effective_render_mode(plan_only, code_only)
 
     if run_id:
@@ -2784,13 +2800,24 @@ def generate_json_sidecar(
     ext_filter: Optional[List[str]] = None,
     total_size: int = 0,
     delta_meta: Optional[Dict[str, Any]] = None,
+    requested_flags: Optional[Dict[str, bool]] = None,
 ) -> Dict[str, Any]:
     """
     Generate a JSON sidecar structure for machine consumption.
     Contains meta, files array, and minimal verification guards.
     """
     now = datetime.datetime.utcnow()
+    requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only}
+    plan_only, code_only, normalized_requested = _normalize_mode_flags(
+        requested_flags.get("plan_only", False),
+        requested_flags.get("code_only", False),
+    )
     render_mode = _effective_render_mode(plan_only, code_only)
+
+    requested_flags = {
+        "plan_only": bool(normalized_requested["plan_only"]),
+        "code_only": bool(normalized_requested["code_only"]),
+    }
 
     if code_only:
         files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
@@ -2821,13 +2848,17 @@ def generate_json_sidecar(
         "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
         "plan_only": plan_only,
         "code_only": code_only,
+        "requested_flags": {
+            "plan_only": bool(requested_flags["plan_only"]),
+            "code_only": bool(requested_flags["code_only"]),
+        },
         "max_file_bytes": max_file_bytes,
         "total_files": len(files),
         "total_size_bytes": total_size,
         "source_repos": sorted([s.name for s in sources]) if sources else [],
         # explicit include/exclude semantics (negation available even if None)
         "filters": {
-            "path_filter": path_filter or "",
+            "path_filter": (path_filter or "").strip(),
             "ext_filter": ",".join(sorted(ext_filter)) if ext_filter else "",
             # explicit negation sets (agent-safe): empty list means "no restriction" / "none excluded"
             "included_categories": sorted(list(DEBUG_CONFIG.code_only_categories)) if code_only else [],
@@ -2896,6 +2927,8 @@ def write_reports_v2(
     delta_meta: Optional[Dict[str, Any]] = None,
 ) -> MergeArtifacts:
     out_paths = []
+
+    plan_only, code_only, requested_flags = _normalize_mode_flags(plan_only, code_only)
 
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
     
@@ -3068,6 +3101,7 @@ def write_reports_v2(
                 ext_filter,
                 total_size,
                 delta_meta,
+                requested_flags=requested_flags,
             )
             # Generate JSON filename: use first MD file for name, or fallback to deterministic name
             if out_paths:
@@ -3136,6 +3170,7 @@ def write_reports_v2(
                     ext_filter,
                     total_size,
                     delta_meta,
+                    requested_flags=requested_flags,
                 )
                 # Generate JSON filename: use last MD file for name, or fallback to deterministic name
                 if out_paths:

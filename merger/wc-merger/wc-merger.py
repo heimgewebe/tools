@@ -1464,6 +1464,10 @@ class MergerUI(object):
         code_switch = getattr(self, "code_only_switch", None)
         code_only = bool(code_switch and code_switch.value)
 
+        # Mutual exclusion: plan_only wins to avoid ambiguous semantics.
+        if plan_only and code_only:
+            code_only = False
+
         summaries = []
         for name in selected:
             root = self.hub / name
