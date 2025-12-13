@@ -88,6 +88,27 @@ MERGE_CONTRACT_VERSION = SPEC_VERSION
 # vollständig gelesen und nur über die Split-Logik in Parts verteilt.
 DEFAULT_MAX_BYTES = 0
 
+def _debug_log_func(debug: "DebugCollector", level: str):
+    """
+    Map configured severity levels to DebugCollector methods.
+    If misconfigured, warn once (per call) and fall back to warn.
+    """
+    lvl = (level or "warn").strip().lower()
+    if lvl in ("warn", "warning"):
+        return debug.warn
+    if lvl in ("error", "err"):
+        return getattr(debug, "error", debug.warn)
+    if lvl in ("info",):
+        return getattr(debug, "info", debug.warn)
+
+    # Misconfiguration: make it visible, then fall back.
+    debug.warn(
+        "debug-config-invalid",
+        "merge_core",
+        f"Unbekannter severity-level '{level}'. Erlaubt: info|warn|error. Fallback: warn.",
+    )
+    return debug.warn
+
 # Debug-Config (erweitert für v2.4)
 @dataclass
 class DebugConfig:
@@ -379,6 +400,7 @@ class HealthCollector:
         unknown_categories = []
         unknown_tags = []
         unknown_cat_count = 0
+        other_count = 0
 
         for fi in files:
             cat = fi.category or "other"
@@ -386,6 +408,9 @@ class HealthCollector:
                 if cat not in unknown_categories:
                     unknown_categories.append(cat)
                 unknown_cat_count += 1
+            if cat == "other":
+                other_count += 1
+
             for tag in fi.tags or []:
                 if tag not in DEBUG_CONFIG.allowed_tags:
                     if tag not in unknown_tags:
@@ -449,6 +474,12 @@ class HealthCollector:
             warnings=warnings,
             recommendations=recommendations,
         )
+
+        # Optional enrichment (keeps compatibility if RepoHealth doesn't define it)
+        try:
+            health.other_count = other_count
+        except AttributeError:
+            pass
 
         self._repo_health[root_label] = health
         return health
@@ -853,7 +884,7 @@ def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> Non
 
         if cat not in DEBUG_CONFIG.allowed_categories:
             # Use configured severity
-            log_func = getattr(debug, DEBUG_CONFIG.unknown_category_level, debug.warn)
+            log_func = _debug_log_func(debug, DEBUG_CONFIG.unknown_category_level)
             log_func(
                 "category-unknown",
                 ctx,
@@ -862,11 +893,11 @@ def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> Non
 
         for tag in getattr(fi, "tags", []) or []:
             if tag not in DEBUG_CONFIG.allowed_tags:
-                log_func = getattr(debug, DEBUG_CONFIG.unknown_tag_level, debug.warn)
+                log_func = _debug_log_func(debug, DEBUG_CONFIG.unknown_tag_level)
                 log_func(
                     "tag-unknown",
                     ctx,
-                    f"Tag '{tag}' ist nicht im v2.3-Schema registriert.",
+                    f"Tag '{tag}' ist nicht im v2.4-Schema registriert.",
                 )
 
     # 2. Fleet-/Heimgewebe-Checks pro Repo
@@ -1968,9 +1999,11 @@ def iter_report_blocks(
         fi.roles = compute_file_roles(fi)
 
         # Debug checks
-        # Kategorien strikt gemäß Spec v2.4 (via DebugConfig):
-        if fi.category == "other" or fi.category not in DEBUG_CONFIG.allowed_categories:
+        # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
+        # "other" ist gültig, aber signalisiert: nicht eindeutig klassifizierbar.
+        if fi.category not in DEBUG_CONFIG.allowed_categories:
             unknown_categories.add(fi.category)
+        # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
 
         status = determine_inclusion_status(fi, level, max_file_bytes)
 
