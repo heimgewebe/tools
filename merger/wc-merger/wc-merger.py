@@ -302,6 +302,26 @@ def _load_wc_extractor_module():
 
 # --- UI Class (Pythonista) ---
 
+def _run_extractor_on_start(hub: Path) -> None:
+    """Run wc-extractor automatically at app start (best-effort, quiet)."""
+    try:
+        extractor = _load_wc_extractor_module()
+        if extractor is None:
+            return
+        # Preferred API (added for startup auto-run)
+        if hasattr(extractor, "run_extractor"):
+            try:
+                # Use incremental=True to avoid unnecessary work
+                extractor.run_extractor(hub_override=hub, show_alert=False, incremental=True)
+            except TypeError:
+                # Fallback if incremental arg is not yet available in loaded module (race condition or old version)
+                extractor.run_extractor(hub)
+            return
+        # Fallback: do nothing rather than popping alerts or blocking startup.
+    except Exception:
+        return
+
+
 def run_ui(hub: Path) -> int:
     """Starte den Merger im Vollbild-UI-Modus ohne Pythonista-Titlebar."""
     global _ACTIVE_MERGER_VIEW
@@ -319,6 +339,8 @@ def run_ui(hub: Path) -> int:
     except Exception:
         # Never block opening a new UI because cleanup failed.
         pass
+
+    _run_extractor_on_start(hub)
 
     ui_obj = MergerUI(hub)
     v = ui_obj.view
