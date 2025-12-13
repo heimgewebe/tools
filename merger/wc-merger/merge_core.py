@@ -12,7 +12,7 @@ import hashlib
 import datetime
 import re
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
+from typing import Iterable, List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
 
 try:
@@ -2051,13 +2051,20 @@ def iter_report_blocks(
     header.append(f"# WC-Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
+    # --- Contract roles (agent-first clarity) ---
+    # Human-readable report contract (this Markdown)
+    header.append("**Human Contract:** `wc-merge-report` (v2.4)")
+    # Machine-readable primary contract (the JSON primary artifact)
+    header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.primary_json`")
+    header.append("")
+
     if code_only:
         header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
         header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
         header.append("")
     if plan_only:
         header.append("**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**")
-        header.append("**Nutze ihn als Token-sparenden Vorab-Scan, um zu entscheiden, ob ein Voll- oder Code-Only-Merge nötig ist.**")
+        header.append("**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**")
         header.append("")
 
     # --- 2. Source & Profile ---
@@ -2741,10 +2748,14 @@ def generate_json_sidecar(
         "source_repos": sorted([s.name for s in sources]) if sources else [],
         # explicit include/exclude semantics (negation available even if None)
         "filters": {
-            "path_filter": path_filter or None,
-            "ext_filter": sorted(ext_filter) if ext_filter else None,
-            "included_categories": sorted(list(CODE_ONLY_CATEGORIES)) if code_only else None,
-            "excluded_categories": None,
+            "path_filter": path_filter or "",
+            "ext_filter": ",".join(sorted(ext_filter)) if ext_filter else "",
+            # explicit negation sets (agent-safe): empty list means "no restriction" / "none excluded"
+            "included_categories": sorted(list(CODE_ONLY_CATEGORIES)) if code_only else [],
+            "excluded_categories": [],
+            "included_globs": [],
+            "excluded_globs": [],
+            "binary_policy": "ignore",
             "content_policy": "plan-only" if plan_only else ("code-only" if code_only else "full"),
         },
     }
