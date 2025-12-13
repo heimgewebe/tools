@@ -1955,6 +1955,11 @@ def iter_report_blocks(
         if fi.category == "other" or fi.category not in ["source", "doc", "config", "test", "contract", "other"]:
             unknown_categories.add(fi.category)
 
+        # Check tags against ALLOWED_TAGS
+        for tag in (fi.tags or []):
+            if tag not in ALLOWED_TAGS:
+                unknown_tags.add(tag)
+
         status = determine_inclusion_status(fi, level, max_file_bytes)
 
         # Explicitly removed: automatic downgrade from "full" to "truncated"
@@ -1966,7 +1971,7 @@ def iter_report_blocks(
     if debug:
         print("DEBUG: total files:", len(files))
         print("DEBUG: unknown categories:", unknown_categories)
-        # print("DEBUG: unknown tags:", unknown_tags) # Tags logic is simple, skipping for now
+        print("DEBUG: unknown tags:", unknown_tags)
         print("DEBUG: files without anchors:", [fi.rel_path for fi in files if not hasattr(fi, "anchor")])
 
     total_size = sum(fi.size for fi in files)
