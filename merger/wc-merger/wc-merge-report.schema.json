@@ -133,6 +133,7 @@
             "fleet_panorama": { "type": "boolean" },
             "augment_sidecar": { "type": "boolean" },
             "delta_reports": { "type": "boolean" },
+            "json_sidecar": { "type": "boolean" },
             "heatmap": { "type": "boolean" }
           },
           "additionalProperties": false
