@@ -187,29 +187,132 @@ class OmniWandlerConfig:
         self.ocr_backend = "none"
         self.ocr_shortcut = "OmniWandler OCR"
         self.keep_last_n = 5
-        self.auto_delete_source = True # Im Hub-Modus Standard
+        self.auto_delete_source = True  # Im Hub-Modus Standard
 
         self.load()
+
+    def _parse_toml_fallback(self, content: str) -> dict:
+        """
+        Minimalistic TOML parser for environments where tomllib/tomli is missing.
+        Supports: [sections], key="value", key=123, key=true/false, # comments
+        """
+        data = {}
+        current_section = data
+
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            # Section
+            if line.startswith("[") and line.endswith("]"):
+                section_name = line[1:-1].strip()
+                if section_name not in data:
+                    data[section_name] = {}
+                current_section = data[section_name]
+                continue
+
+            # Key-Value
+            if "=" in line:
+                key, value_part = line.split("=", 1)
+                key = key.strip()
+                value_part = value_part.strip()
+
+                value = None
+
+                # String
+                if value_part.startswith('"') or value_part.startswith("'"):
+                    quote = value_part[0]
+                    # Find closing quote
+                    end_quote = value_part.find(quote, 1)
+                    if end_quote != -1:
+                        value = value_part[1:end_quote]
+                    else:
+                        # Broken string, take until end
+                        value = value_part[1:]
+                else:
+                    # Strip inline comments
+                    if "#" in value_part:
+                        value_part = value_part.split("#", 1)[0].strip()
+
+                    # Integer
+                    if value_part.isdigit():
+                        value = int(value_part)
+                    # Boolean
+                    elif value_part.lower() == "true":
+                        value = True
+                    elif value_part.lower() == "false":
+                        value = False
+                    else:
+                        # Fallback
+                        value = value_part
+
+                if value is not None:
+                    current_section[key] = value
+
+        return data
 
     def load(self):
         # 1. ~/.config
         cfg_path = Path.home() / ".config" / "omniwandler" / "config.toml"
-        if cfg_path.exists():
+        if not cfg_path.exists():
+            return
+
+        try:
+            data = {}
+            # Try robust parsers first
             try:
-                # Basic parsing without toml lib dependency to avoid crashes
-                # This is a hacky fallback if tomli is missing
-                content = cfg_path.read_text(encoding="utf-8")
-                for line in content.splitlines():
-                    if "max_file_bytes" in line and "=" in line:
-                        self.max_file_bytes = int(line.split("=")[1].strip())
-                    if "backend" in line and "=" in line:
-                        val = line.split("=")[1].strip().strip('"').strip("'")
-                        self.ocr_backend = val
-                    if "shortcut_name" in line and "=" in line:
-                        val = line.split("=")[1].strip().strip('"').strip("'")
-                        self.ocr_shortcut = val
-            except Exception:
-                pass
+                import tomllib
+                with cfg_path.open("rb") as f:
+                    data = tomllib.load(f)
+            except ImportError:
+                try:
+                    import tomli
+                    with cfg_path.open("rb") as f:
+                        data = tomli.load(f)
+                except ImportError:
+                    # Fallback to internal parser
+                    content = cfg_path.read_text(encoding="utf-8")
+                    data = self._parse_toml_fallback(content)
+
+            # --- Apply Config ---
+
+            # [general]
+            # Check 'general' section first, then root (fallback)
+            general = data.get("general", {})
+
+            if "max_file_bytes" in general:
+                self.max_file_bytes = general["max_file_bytes"]
+            elif "max_file_bytes" in data:
+                self.max_file_bytes = data["max_file_bytes"]
+
+            if "keep_last_n" in general:
+                self.keep_last_n = general["keep_last_n"]
+            elif "keep_last_n" in data:
+                self.keep_last_n = data["keep_last_n"]
+
+            if "auto_delete_source" in general:
+                self.auto_delete_source = general["auto_delete_source"]
+            elif "auto_delete_source" in data:
+                self.auto_delete_source = data["auto_delete_source"]
+
+            # [ocr]
+            ocr = data.get("ocr", {})
+
+            if "backend" in ocr:
+                self.ocr_backend = ocr["backend"]
+            elif "backend" in data:
+                self.ocr_backend = data["backend"]
+
+            if "shortcut_name" in ocr:
+                self.ocr_shortcut = ocr["shortcut_name"]
+            elif "shortcut_name" in data:
+                self.ocr_shortcut = data["shortcut_name"]
+
+        except Exception as e:
+            # We log to stdout as there is no sophisticated logger,
+            # and we don't want to crash on config errors.
+            print(f"[OmniWandler] Error loading config: {e}")
 
 # --- Core Logic ---
 
