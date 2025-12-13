@@ -53,7 +53,7 @@
         },
         "max_file_bytes": {
           "type": "integer",
-          "description": "Per-File-Limit in Bytes (0 = kein Limit / „unlimited").",
+          "description": "Per-File-Limit in Bytes (0 = kein Limit / 'unlimited').",
           "minimum": 0
         },
         "scope": {
