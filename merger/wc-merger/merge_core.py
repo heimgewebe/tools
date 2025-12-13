@@ -1644,12 +1644,11 @@ def _generate_run_id(
 
     plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
 
-    # Path block first (stable anchor). Default to "root" when absent.
+    # Path block first (stable anchor).
     if path_filter:
-        path_slug = path_filter.strip().strip("/").replace("/", "-") or "root"
-    else:
-        path_slug = "root"
-    components.append(path_slug)
+        path_slug = path_filter.strip().strip("/").replace("/", "-")
+        if path_slug:
+            components.append(path_slug)
 
     # Repo block
     if not repo_names:
@@ -1780,12 +1779,11 @@ def make_output_filename(
     detail_block = detail
 
     # 4. Pfad-Block: aus path_filter, aber OHNE 'path-' Präfix
+    path_block = None
     if path_filter:
-        slug = path_filter.strip().strip("/") or "root"
-    else:
-        slug = "root"
-    slug = slug.replace("/", "-")
-    path_block = slug
+        slug = path_filter.strip().strip("/")
+        if slug:
+            path_block = slug.replace("/", "-")
 
     # 5. Mode-Block (Kollisionen vermeiden)
     mode_block = render_mode
@@ -1810,7 +1808,9 @@ def make_output_filename(
     #    7. ts (am Ende)
     parts: List[str] = []
 
-    parts.append(path_block)
+    if path_block:
+        parts.append(path_block)
+
     parts.append(repo_block)
     parts.append(mode_block)
     parts.append(detail_block)
