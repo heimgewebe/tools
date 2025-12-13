@@ -4,6 +4,19 @@
 """
 wc-merger – Working-Copy Merger.
 Enhanced AI-optimized reports with strict Pflichtenheft structure.
+
+Default-Config (Dec 2025)
+------------------------
+- level: dev
+- mode: gesamt (UI: combined)
+- split: ON via split-size default (25MB)
+- max-bytes: 0 (keine Kürzung einzelner Dateien)
+- extras default ON:
+  health, augment_sidecar, organism_index, fleet_panorama, json_sidecar, heatmap
+
+Rationale:
+- max-bytes auf Dateiebene ist semantisch riskant (halbe Datei = halbe Wahrheit).
+- Split ist logistisch: alles bleibt drin, nur auf mehrere Parts verteilt.
 """
 
 import sys
@@ -152,7 +165,7 @@ PROFILE_DESCRIPTIONS = {
 }
 
 # Voreinstellungen pro Profil:
-# - Split-Größe (Part-Größe): standardmäßig 10 MB, d. h. große Merges
+# - Split-Größe (Part-Größe): standardmäßig 25 MB, d. h. große Merges
 #   werden in mehrere Dateien aufgeteilt – es gibt aber kein Gesamtlimit.
 # - Max Bytes/File: 0 = unbegrenzt (volle Dateien), Limit nur,
 #   wenn explizit gesetzt.
@@ -160,23 +173,23 @@ PROFILE_PRESETS = {
     "overview": {
         # 0 → „kein per-File-Limit“
         "max_bytes": 0,
-        "split_mb": 10,
+        "split_mb": 25,
     },
     "summary": {
         "max_bytes": 0,
-        "split_mb": 10,
+        "split_mb": 25,
     },
     "dev": {
         "max_bytes": 0,
-        "split_mb": 10,
+        "split_mb": 25,
     },
     "machine-lean": {
         "max_bytes": 0,
-        "split_mb": 10,
+        "split_mb": 25,
     },
     "max": {
         "max_bytes": 0,
-        "split_mb": 10,
+        "split_mb": 25,
     },
 }
 
@@ -294,13 +307,16 @@ class MergerUI(object):
         # Expected format: wc-merger.py --level max --mode gesamt ...
         import argparse
         parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument("--level", default="max")
+        parser.add_argument("--level", default="dev")
         parser.add_argument("--mode", default="gesamt")
         # 0 = unbegrenzt
         parser.add_argument("--max-bytes", type=int, default=0)
-        # Default: ab 10 MB wird gesplittet
-        parser.add_argument("--split-size", default="10")
-        parser.add_argument("--extras", default="none")
+        # Default: ab 25 MB wird gesplittet
+        parser.add_argument("--split-size", default="25")
+        parser.add_argument(
+            "--extras",
+            default="health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap",
+        )
         # Ignore unknown args
         args, _ = parser.parse_known_args()
 
@@ -511,7 +527,7 @@ class MergerUI(object):
         try:
             seg_detail.selected_index = seg_detail.segments.index(args.level)
         except ValueError:
-            seg_detail.selected_index = 3  # Default max
+            seg_detail.selected_index = 2  # Default dev für arbeitsfähiges Profil
         seg_detail.frame = (70, cy - 2, cw - 80, 28)
         seg_detail.flex = "W"
         # Use standard iOS blue instead of white for better contrast
@@ -1556,12 +1572,18 @@ def main_cli():
         default="0",
         help="Max bytes per file (e.g. 5MB, 500K, or 0 for unlimited)",
     )
-    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="10MB")
+    # Default: ab 25 MB wird gesplittet, aber kein Gesamtlimit – es werden
+    # beliebig viele Parts erzeugt.
+    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="25MB")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--code-only", action="store_true", help="Include only code/test/config/contract categories")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
-    parser.add_argument("--extras", help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap) or 'none'", default="none")
+    parser.add_argument(
+        "--extras",
+        help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap) or 'none'",
+        default="health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap",
+    )
     parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
     parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
@@ -1606,7 +1628,7 @@ def main_cli():
         summary = scan_repo(src, ext_list, path_filter, max_bytes)
         summaries.append(summary)
 
-    # Default: ab 10 MB wird gesplittet, aber kein Gesamtlimit – es werden
+    # Default: ab 25 MB wird gesplittet, aber kein Gesamtlimit – es werden
     # beliebig viele Parts erzeugt.
     split_size = 0
     if args.split_size:
