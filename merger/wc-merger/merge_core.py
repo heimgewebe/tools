@@ -2021,9 +2021,9 @@ def iter_report_blocks(
             unknown_categories.add(fi.category)
         # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
 
-        # Check tags against ALLOWED_TAGS
+        # Check tags against the configured allow-list
         for tag in (fi.tags or []):
-            if tag not in ALLOWED_TAGS:
+            if tag not in DEBUG_CONFIG.allowed_tags:
                 unknown_tags.add(tag)
 
         status = determine_inclusion_status(fi, level, max_file_bytes)
