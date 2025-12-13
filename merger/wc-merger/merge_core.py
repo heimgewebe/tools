@@ -274,6 +274,43 @@ class DebugCollector:
 
 
 @dataclass
+class MergeArtifacts:
+    """
+    Result object for write_reports_v2() containing all generated artifacts.
+    Makes it explicit which artifact is the primary (JSON or Markdown).
+    """
+    primary_json: Optional[Path] = None
+    human_md: Optional[Path] = None
+    md_parts: List[Path] = None
+    other: List[Path] = None
+
+    def __post_init__(self):
+        if self.md_parts is None:
+            self.md_parts = []
+        if self.other is None:
+            self.other = []
+
+    def get_all_paths(self) -> List[Path]:
+        """Return all paths in deterministic order: primary first, then others."""
+        paths = []
+        if self.primary_json:
+            paths.append(self.primary_json)
+        if self.human_md and self.human_md not in paths:
+            paths.append(self.human_md)
+        for p in self.md_parts:
+            if p not in paths:
+                paths.append(p)
+        for p in self.other:
+            if p not in paths:
+                paths.append(p)
+        return paths
+
+    def get_primary_path(self) -> Optional[Path]:
+        """Return the primary artifact path (JSON if exists, otherwise Markdown)."""
+        return self.primary_json or self.human_md
+
+
+@dataclass
 class RepoHealth:
     """Health status for a single repository."""
     repo_name: str
@@ -1501,6 +1538,62 @@ def summarize_categories(file_infos: List[FileInfo]) -> Dict[str, List[int]]:
         stats[cat][1] += fi.size
     return stats
 
+
+def _generate_run_id(
+    repo_names: List[str],
+    detail: str,
+    path_filter: Optional[str],
+    ext_filter: Optional[str],
+    timestamp: Optional[str] = None
+) -> str:
+    """
+    Generate a deterministic run_id for consistent primary artifact naming.
+    
+    Args:
+        repo_names: List of repository names
+        detail: Profile level (dev, max, summary, etc.)
+        path_filter: Optional path filter
+        ext_filter: Optional extension filter
+        timestamp: Optional timestamp string (if None, uses current time)
+    
+    Returns:
+        A deterministic run_id string
+    """
+    if timestamp is None:
+        timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M")
+    
+    # Build deterministic components
+    components = []
+    components.append(timestamp)
+    
+    # Repo block
+    if not repo_names:
+        components.append("no-repo")
+    elif len(repo_names) == 1:
+        components.append(repo_names[0].replace("/", "-"))
+    else:
+        # For multi-repo, create a short deterministic hash
+        repo_str = "-".join(sorted(repo_names))
+        repo_hash = hashlib.md5(repo_str.encode('utf-8')).hexdigest()[:6]
+        components.append(f"multi-{repo_hash}")
+    
+    # Detail/profile
+    components.append(detail)
+    
+    # Optional filters (makes run_id unique per filter combination)
+    if path_filter:
+        path_slug = path_filter.strip().strip("/").replace("/", "-")
+        if path_slug:
+            components.append(f"p{path_slug}")
+    
+    if ext_filter:
+        ext_clean = ext_filter.replace(".", "").replace(",", "+").replace(" ", "")
+        if ext_clean:
+            components.append(f"e{ext_clean}")
+    
+    return "_".join(components)
+
+
 def build_tree(file_infos: List[FileInfo]) -> str:
     by_root: Dict[str, List[Path]] = {}
 
@@ -1561,15 +1654,28 @@ def make_output_filename(
     part_suffix: str,
     path_filter: Optional[str],
     ext_filter: Optional[str],
+    run_id: Optional[str] = None,
 ) -> Path:
     """
     Erzeugt den endgültigen Dateinamen für den Merge-Report.
-
+    
+    If run_id is provided, uses it as the base stem (deterministic).
+    Otherwise, generates filename from components (legacy behavior).
+    
     Neuer Wunsch:
     - Zuerst der Block aus dem Pfad-Filter (ohne 'path-'-Präfix)
     - Danach der bisherige Rest (Repo-Block, Detail, Timestamp, evtl. Filter/Part)
     """
+    
+    if run_id:
+        # Phase 1.3: Use deterministic run_id as base stem
+        if part_suffix:
+            filename = f"{run_id}{part_suffix}_merge.md"
+        else:
+            filename = f"{run_id}_merge.md"
+        return merges_dir / filename
 
+    # Legacy behavior: build filename from components
     # 1. Timestamp (wie bisher)
     ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
 
@@ -2698,10 +2804,14 @@ def write_reports_v2(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
-) -> List[Path]:
+) -> MergeArtifacts:
     out_paths = []
 
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
+    
+    # Phase 1.3: Generate deterministic run_id once for this merge
+    repo_names = [s["name"] for s in repo_summaries]
+    run_id = _generate_run_id(repo_names, detail, path_filter, ext_filter_str)
 
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
@@ -2838,10 +2948,11 @@ def write_reports_v2(
         process_and_write(
             all_files,
             sources,
-            lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str),
+            lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str, run_id),
         )
         
         # Write JSON sidecar if enabled (agent-first: also for plan_only)
+        # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
         if extras and extras.json_sidecar:
             total_size = sum(
                 f.size for f in all_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
@@ -2858,26 +2969,34 @@ def write_reports_v2(
                 total_size,
                 delta_meta,
             )
-            # Generate JSON filename based on the first markdown file
+            # Generate JSON filename: use first MD file for name, or fallback to deterministic name
             if out_paths:
                 json_path = out_paths[0].with_suffix('.json')
-                json_data["artifacts"]["primary_json"] = str(json_path)
-                md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
-                json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
-                json_data["artifacts"]["human_md"] = str(md_parts[0]) if md_parts else None
-                _validate_agent_json_dict(json_data)
-                json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                out_paths.append(json_path)
+            else:
+                # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
+                json_path = make_output_filename(merges_dir, repo_names, detail, "", path_filter, ext_filter_str, run_id).with_suffix('.json')
+            
+            json_data["artifacts"]["primary_json"] = str(json_path)
+            md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
+            json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+            json_data["artifacts"]["human_md"] = str(md_parts[0]) if md_parts else None
+            _validate_agent_json_dict(json_data)
+            json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+            out_paths.append(json_path)
 
     else:
         for s in repo_summaries:
             s_name = s["name"]
             s_files = s["files"]
             s_root = s["root"]
+            
+            # Generate per-repo run_id for deterministic naming
+            repo_run_id = _generate_run_id([s_name], detail, path_filter, ext_filter_str)
 
-            process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str))
+            process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str, repo_run_id))
             
             # Write JSON sidecar if enabled (agent-first: also for plan_only)
+            # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
             if extras and extras.json_sidecar:
                 total_size = sum(
                     f.size for f in s_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
@@ -2894,19 +3013,23 @@ def write_reports_v2(
                     total_size,
                     delta_meta,
                 )
-                # Generate JSON filename based on the last markdown file
+                # Generate JSON filename: use last MD file for name, or fallback to deterministic name
                 if out_paths:
                     json_path = out_paths[-1].with_suffix('.json')
-                    json_data["artifacts"]["primary_json"] = str(json_path)
-                    md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
-                    # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
-                    json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
-                    json_data["artifacts"]["human_md"] = (
-                        str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
-                    )
-                    _validate_agent_json_dict(json_data)
-                    json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                    out_paths.append(json_path)
+                else:
+                    # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
+                    json_path = make_output_filename(merges_dir, [s_name], detail, "", path_filter, ext_filter_str, repo_run_id).with_suffix('.json')
+                
+                json_data["artifacts"]["primary_json"] = str(json_path)
+                md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
+                # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
+                json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+                json_data["artifacts"]["human_md"] = (
+                    str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
+                )
+                _validate_agent_json_dict(json_data)
+                json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                out_paths.append(json_path)
 
     # --- Post-check & deterministic ordering (primary artifact first) ---
     md_paths = [p for p in out_paths if p.suffix.lower() == ".md"]
@@ -2950,6 +3073,20 @@ def write_reports_v2(
             )
 
     # Primary ordering: JSON (if enabled) first, then Markdown, then other artifacts.
+    # Return structured MergeArtifacts object instead of flat list
     if extras and extras.json_sidecar:
-        return verified_json + verified_md + other_paths
-    return verified_md + other_paths
+        # JSON is primary when json_sidecar is enabled
+        return MergeArtifacts(
+            primary_json=verified_json[0] if verified_json else None,
+            human_md=verified_md[0] if verified_md else None,
+            md_parts=verified_md,
+            other=other_paths
+        )
+    else:
+        # Markdown is primary when json_sidecar is disabled
+        return MergeArtifacts(
+            primary_json=None,
+            human_md=verified_md[0] if verified_md else None,
+            md_parts=verified_md,
+            other=other_paths
+        )
