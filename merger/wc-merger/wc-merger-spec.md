@@ -61,8 +61,22 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
      - Fleet Panorama (Multi-Repo)
      - Delta Reports (wenn Diff vorhanden)
      - Augment Sidecar (Playground-Block)
+     - JSON Sidecar (maschinenlesbarer Zwilling)
+     - Heatmap (Alias im CLI akzeptiert: `ai_heatmap` → `heatmap`)
    - Alle Extras müssen rein additive Textblöcke sein.
      Nichts an der Kernstruktur (Source & Profile → … → Content) entfernen oder umsortieren.
+
+   ```python
+   @dataclass
+   class ExtrasConfig:
+       health: bool = False
+       organism_index: bool = False
+       fleet_panorama: bool = False  # Nur für Multi-Repo-Merges
+       augment_sidecar: bool = False
+       delta_reports: bool = False
+       json_sidecar: bool = False
+       heatmap: bool = False  # CLI alias: ai_heatmap
+   ```
 
 2. **Header / Meta konsistent machen**
    - `Declared Purpose` je Profil korrekt setzen:
@@ -76,6 +90,19 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
    - Im `@meta`-Block:
      - `merge.extras.*`-Flags für alle aktivierten Extras ergänzen.
      - Schema `wc-merge-report.schema.json` entsprechend erweitern.
+     - Beispiel:
+
+       ```yaml
+       merge:
+         extras:
+           health: true
+           organism_index: true
+           fleet_panorama: true
+           augment_sidecar: true
+           delta_reports: true
+           json_sidecar: true
+           heatmap: true
+       ```
 
 3. **Multi-Part-Merges klar kennzeichnen**
    - Dateinamen bleiben im bisherigen Schema (`…_part1_merge.md`, `…_part2_merge.md`, …).

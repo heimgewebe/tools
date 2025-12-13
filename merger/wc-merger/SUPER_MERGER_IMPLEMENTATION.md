@@ -89,6 +89,8 @@ class ExtrasConfig:
     fleet_panorama: bool = False  # Nur für Multi-Repo-Merges
     augment_sidecar: bool = False
     delta_reports: bool = False
+    json_sidecar: bool = False
+    heatmap: bool = False  # CLI alias: ai_heatmap
 ```
 
 **Wichtig:** `fleet_panorama` wird nur bei Multi-Repo-Merges (2+ Repos) aktiviert, auch wenn das Flag in `ExtrasConfig` gesetzt ist. Bei Single-Repo-Merges erscheint weder das Flag im Meta noch der Fleet Panorama-Block im Report.
@@ -121,6 +123,8 @@ merge:
     fleet_panorama: true
     augment_sidecar: true
     delta_reports: true
+    json_sidecar: true
+    heatmap: true
   health:
     status: "ok"
     missing: ["contracts"]

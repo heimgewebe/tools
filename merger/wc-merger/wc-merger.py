@@ -26,6 +26,13 @@ import traceback
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
+
+DEFAULT_LEVEL = "dev"
+DEFAULT_MODE = "gesamt"  # combined
+DEFAULT_SPLIT_SIZE = "25MB"
+DEFAULT_MAX_FILE_BYTES = 0
+DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
+
 try:
     import appex  # type: ignore
 except Exception:
@@ -255,6 +262,16 @@ def parse_human_size(text: str) -> int:
     return 0
 
 
+def _parse_extras_csv(extras_csv: str) -> List[str]:
+    items = [x.strip().lower() for x in (extras_csv or "").split(",") if x.strip()]
+    normalized = []
+    for item in items:
+        if item == "ai_heatmap":
+            item = "heatmap"
+        normalized.append(item)
+    return normalized
+
+
 def _load_wc_extractor_module():
     """Dynamically load wc-extractor.py from the same directory.
 
@@ -307,24 +324,20 @@ class MergerUI(object):
         # Expected format: wc-merger.py --level max --mode gesamt ...
         import argparse
         parser = argparse.ArgumentParser(add_help=False)
-        parser.add_argument("--level", default="dev")
-        parser.add_argument("--mode", default="gesamt")
+        parser.add_argument("--level", default=DEFAULT_LEVEL)
+        parser.add_argument("--mode", default=DEFAULT_MODE)
         # 0 = unbegrenzt
-        parser.add_argument("--max-bytes", type=int, default=0)
+        parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_FILE_BYTES)
         # Default: ab 25 MB wird gesplittet
-        parser.add_argument("--split-size", default="25")
-        parser.add_argument(
-            "--extras",
-            default="health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap",
-        )
+        parser.add_argument("--split-size", default=DEFAULT_SPLIT_SIZE)
+        parser.add_argument("--extras", default=DEFAULT_EXTRAS)
         # Ignore unknown args
         args, _ = parser.parse_known_args()
 
         # Initiale Extras aus CLI args
         self.extras_config = ExtrasConfig()
         if args.extras and args.extras.lower() != "none":
-            for part in args.extras.split(","):
-                part = part.strip().lower()
+            for part in _parse_extras_csv(args.extras):
                 if hasattr(self.extras_config, part):
                     setattr(self.extras_config, part, True)
 
@@ -1563,26 +1576,26 @@ def main_cli():
     parser = argparse.ArgumentParser(description="wc-merger CLI")
     parser.add_argument("paths", nargs="*", help="Repositories to merge")
     parser.add_argument("--hub", help="Base directory (wc-hub)")
-    parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default="dev")
-    parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default="gesamt")
+    parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default=DEFAULT_LEVEL)
+    parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default=DEFAULT_MODE)
     # 0 = unbegrenzt pro Datei
     parser.add_argument(
         "--max-bytes",
         type=str,
-        default="0",
+        default=str(DEFAULT_MAX_FILE_BYTES),
         help="Max bytes per file (e.g. 5MB, 500K, or 0 for unlimited)",
     )
     # Default: ab 25 MB wird gesplittet, aber kein Gesamtlimit – es werden
     # beliebig viele Parts erzeugt.
-    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default="25MB")
+    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default=DEFAULT_SPLIT_SIZE)
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--code-only", action="store_true", help="Include only code/test/config/contract categories")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
     parser.add_argument(
         "--extras",
-        help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap) or 'none'",
-        default="health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap",
+        help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap; alias: ai_heatmap) or 'none'",
+        default=DEFAULT_EXTRAS,
     )
     parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
@@ -1637,8 +1650,7 @@ def main_cli():
 
     extras_config = ExtrasConfig()
     if args.extras and args.extras.lower() != "none":
-        for part in args.extras.split(","):
-            part = part.strip().lower()
+        for part in _parse_extras_csv(args.extras):
             if hasattr(extras_config, part):
                 setattr(extras_config, part, True)
             else:
