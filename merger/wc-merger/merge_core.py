@@ -1588,12 +1588,26 @@ def summarize_categories(file_infos: List[FileInfo]) -> Dict[str, List[int]]:
     return stats
 
 
+def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
+    """Return the effective render mode based on plan/code switches."""
+
+    if plan_only and code_only:
+        return "meta-only"
+    if plan_only:
+        return "plan-only"
+    if code_only:
+        return "code-only"
+    return "full"
+
+
 def _generate_run_id(
     repo_names: List[str],
     detail: str,
     path_filter: Optional[str],
     ext_filter: Optional[str],
-    timestamp: Optional[str] = None
+    plan_only: bool = False,
+    code_only: bool = False,
+    timestamp: Optional[str] = None,
 ) -> str:
     """
     Generate a deterministic run_id for consistent primary artifact naming.
@@ -1610,37 +1624,40 @@ def _generate_run_id(
     """
     if timestamp is None:
         timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M")
-    
-    # Build deterministic components
-    components = []
-    components.append(timestamp)
-    
+
+    components: List[str] = []
+
+    # Path block first (stable anchor). Default to "root" when absent.
+    if path_filter:
+        path_slug = path_filter.strip().strip("/").replace("/", "-") or "root"
+    else:
+        path_slug = "root"
+    components.append(path_slug)
+
     # Repo block
     if not repo_names:
         components.append("no-repo")
     elif len(repo_names) == 1:
         components.append(repo_names[0].replace("/", "-"))
     else:
-        # For multi-repo, create a short deterministic hash
         repo_str = "-".join(sorted(repo_names))
-        repo_hash = hashlib.md5(repo_str.encode('utf-8')).hexdigest()[:6]
+        repo_hash = hashlib.md5(repo_str.encode("utf-8")).hexdigest()[:6]
         components.append(f"multi-{repo_hash}")
-    
-    # Detail/profile
+
+    # Mode + profile blocks
+    components.append(_effective_render_mode(plan_only, code_only))
     components.append(detail)
-    
+
     # Optional filters (makes run_id unique per filter combination)
-    if path_filter:
-        path_slug = path_filter.strip().strip("/").replace("/", "-")
-        if path_slug:
-            components.append(f"p{path_slug}")
-    
     if ext_filter:
         ext_clean = ext_filter.replace(".", "").replace(",", "+").replace(" ", "")
         if ext_clean:
-            components.append(f"e{ext_clean}")
-    
-    return "_".join(components)
+            components.append(f"ext-{ext_clean}")
+
+    # Timestamp always last
+    components.append(timestamp)
+
+    return "-".join(components)
 
 
 def build_tree(file_infos: List[FileInfo]) -> str:
@@ -1704,6 +1721,8 @@ def make_output_filename(
     path_filter: Optional[str],
     ext_filter: Optional[str],
     run_id: Optional[str] = None,
+    plan_only: bool = False,
+    code_only: bool = False,
 ) -> Path:
     """
     Erzeugt den endgültigen Dateinamen für den Merge-Report.
@@ -1716,8 +1735,10 @@ def make_output_filename(
     - Danach der bisherige Rest (Repo-Block, Detail, Timestamp, evtl. Filter/Part)
     """
     
+    render_mode = _effective_render_mode(plan_only, code_only)
+
     if run_id:
-        # Phase 1.3: Use deterministic run_id as base stem
+        # Phase 1.3: Use deterministic run_id as base stem (already includes mode + timestamp)
         if part_suffix:
             filename = f"{run_id}{part_suffix}_merge.md"
         else:
@@ -1725,63 +1746,56 @@ def make_output_filename(
         return merges_dir / filename
 
     # Legacy behavior: build filename from components
-    # 1. Timestamp (wie bisher)
+    # 1. Timestamp (jetzt immer am Ende)
     ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
 
-    # 2. Repo-Block (wie bisher grob: z. B. 'tools', 'multi', etc.)
+    # 2. Repo-Block
     if not repo_names:
         repo_block = "no-repo"
     elif len(repo_names) == 1:
         repo_block = repo_names[0]
     else:
-        # Kurzform für mehrere Repos; Detail steckt im Report selbst.
         repo_block = "multi"
-
-    # etwas säubern
     repo_block = repo_block.replace("/", "-")
 
     # 3. Detail-Block (overview/summary/dev/max)
     detail_block = detail
 
     # 4. Pfad-Block: aus path_filter, aber OHNE 'path-' Präfix
-    #    Beispiel: path_filter="wc-merger" → "wc-merger"
-    path_block = None
     if path_filter:
-        slug = path_filter.strip().strip("/")
-        if not slug:
-            slug = "root"
-        # Slug minimal säubern
-        slug = slug.replace("/", "-")
-        path_block = slug
+        slug = path_filter.strip().strip("/") or "root"
+    else:
+        slug = "root"
+    slug = slug.replace("/", "-")
+    path_block = slug
 
-    # 5. Optional: Extension-Filter-Block (nur, wenn bewusst gesetzt)
+    # 5. Mode-Block (Kollisionen vermeiden)
+    mode_block = render_mode
+
+    # 6. Optional: Extension-Filter-Block (nur, wenn bewusst gesetzt)
     ext_block = None
     if ext_filter:
-        # z. B. ".py,.rs,.md" → "ext-py+rs+md"
-        cleaned = ext_filter.replace(" ", "")
-        cleaned = cleaned.replace(".", "")
-        cleaned = cleaned.replace(",", "+")
+        cleaned = ext_filter.replace(" ", "").replace(".", "").replace(",", "+")
         if cleaned:
             ext_block = f"ext-{cleaned}"
 
-    # 6. Optional: Part-Suffix (_partXofY o. ä.) – kommt schon fertig rein
+    # 7. Optional: Part-Suffix (_partXofY o. ä.) – kommt schon fertig rein
     part_block = part_suffix.lstrip("_") if part_suffix else ""
 
-    # 7. Reihenfolge bauen:
-    #    1. path_block (falls vorhanden)
+    # 8. Reihenfolge bauen:
+    #    1. path_block
     #    2. repo_block
-    #    3. detail_block
-    #    4. ts
+    #    3. mode_block
+    #    4. detail_block
     #    5. ext_block (falls vorhanden)
     #    6. part_block (falls vorhanden)
+    #    7. ts (am Ende)
     parts: List[str] = []
 
-    if path_block:
-        parts.append(path_block)
-
+    parts.append(path_block)
     parts.append(repo_block)
+    parts.append(mode_block)
     parts.append(detail_block)
-    parts.append(ts)
 
     if ext_block:
         parts.append(ext_block)
@@ -1789,7 +1803,9 @@ def make_output_filename(
     if part_block:
         parts.append(part_block)
 
-    filename = "_".join(parts) + "_merge.md"
+    parts.append(ts)
+
+    filename = "-".join(parts) + "_merge.md"
     return merges_dir / filename
 
 def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[str, bool, str]:
@@ -2113,14 +2129,21 @@ def iter_report_blocks(
     header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.primary_json`")
     header.append("")
 
-    if code_only:
-        header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
-        header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
+    render_mode = _effective_render_mode(plan_only, code_only)
+
+    if render_mode == "meta-only":
+        header.append("**META-ONLY Modus:** Dieser Merge enthält ausschließlich Meta-, Struktur-, Index- und Analyse-Informationen.")
+        header.append("**Kein Code, keine Planinhalte. Gedacht als Entscheidungs- und Steuerungsartefakt für Agenten.**")
         header.append("")
-    if plan_only:
-        header.append("**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**")
-        header.append("**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**")
-        header.append("")
+    else:
+        if code_only:
+            header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
+            header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
+            header.append("")
+        if plan_only:
+            header.append("**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**")
+            header.append("**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**")
+            header.append("")
 
     # --- 2. Source & Profile ---
     header.append("## Source & Profile")
@@ -2138,7 +2161,6 @@ def iter_report_blocks(
     header.append(f"- **Contract-Version:** {MERGE_CONTRACT_VERSION}")
     header.append(f"- **Plan Only:** {str(bool(plan_only)).lower()}")
     header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
-    render_mode = "plan-only" if plan_only else ("code-only" if code_only else "full")
     header.append(f"- **Render Mode:** `{render_mode}`")
 
     # One-time navigation note (no per-file chatter).
@@ -2207,7 +2229,7 @@ def iter_report_blocks(
                 "contract_version": MERGE_CONTRACT_VERSION,
                 "plan_only": plan_only,
                 "code_only": code_only,
-                "render_mode": "plan-only" if plan_only else ("code-only" if code_only else "full"),
+                "render_mode": render_mode,
                 "max_file_bytes": max_file_bytes,
                 "scope": scope_desc,
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
@@ -2768,6 +2790,8 @@ def generate_json_sidecar(
     Contains meta, files array, and minimal verification guards.
     """
     now = datetime.datetime.utcnow()
+    render_mode = _effective_render_mode(plan_only, code_only)
+
     if code_only:
         files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
 
@@ -2811,7 +2835,7 @@ def generate_json_sidecar(
             "included_globs": [],
             "excluded_globs": [],
             "binary_policy": "ignore",
-            "content_policy": "plan-only" if plan_only else ("code-only" if code_only else "full"),
+            "content_policy": render_mode,
         },
     }
 
@@ -2877,7 +2901,7 @@ def write_reports_v2(
     
     # Phase 1.3: Generate deterministic run_id once for this merge
     repo_names = [s["name"] for s in repo_summaries]
-    run_id = _generate_run_id(repo_names, detail, path_filter, ext_filter_str)
+    run_id = _generate_run_id(repo_names, detail, path_filter, ext_filter_str, plan_only=plan_only, code_only=code_only)
 
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
@@ -3014,7 +3038,17 @@ def write_reports_v2(
         process_and_write(
             all_files,
             sources,
-            lambda part_suffix="": make_output_filename(merges_dir, repo_names, detail, part_suffix, path_filter, ext_filter_str, run_id),
+            lambda part_suffix="": make_output_filename(
+                merges_dir,
+                repo_names,
+                detail,
+                part_suffix,
+                path_filter,
+                ext_filter_str,
+                run_id,
+                plan_only=plan_only,
+                code_only=code_only,
+            ),
         )
         
         # Write JSON sidecar if enabled (agent-first: also for plan_only)
@@ -3040,7 +3074,17 @@ def write_reports_v2(
                 json_path = out_paths[0].with_suffix('.json')
             else:
                 # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
-                json_path = make_output_filename(merges_dir, repo_names, detail, "", path_filter, ext_filter_str, run_id).with_suffix('.json')
+                json_path = make_output_filename(
+                    merges_dir,
+                    repo_names,
+                    detail,
+                    "",
+                    path_filter,
+                    ext_filter_str,
+                    run_id,
+                    plan_only=plan_only,
+                    code_only=code_only,
+                ).with_suffix('.json')
             
             json_data["artifacts"]["primary_json"] = str(json_path)
             md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
@@ -3057,9 +3101,23 @@ def write_reports_v2(
             s_root = s["root"]
             
             # Generate per-repo run_id for deterministic naming
-            repo_run_id = _generate_run_id([s_name], detail, path_filter, ext_filter_str)
+            repo_run_id = _generate_run_id([s_name], detail, path_filter, ext_filter_str, plan_only=plan_only, code_only=code_only)
 
-            process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str, repo_run_id))
+            process_and_write(
+                s_files,
+                [s_root],
+                lambda part_suffix="": make_output_filename(
+                    merges_dir,
+                    [s_name],
+                    detail,
+                    part_suffix,
+                    path_filter,
+                    ext_filter_str,
+                    repo_run_id,
+                    plan_only=plan_only,
+                    code_only=code_only,
+                ),
+            )
             
             # Write JSON sidecar if enabled (agent-first: also for plan_only)
             # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
@@ -3084,7 +3142,17 @@ def write_reports_v2(
                     json_path = out_paths[-1].with_suffix('.json')
                 else:
                     # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
-                    json_path = make_output_filename(merges_dir, [s_name], detail, "", path_filter, ext_filter_str, repo_run_id).with_suffix('.json')
+                    json_path = make_output_filename(
+                        merges_dir,
+                        [s_name],
+                        detail,
+                        "",
+                        path_filter,
+                        ext_filter_str,
+                        repo_run_id,
+                        plan_only=plan_only,
+                        code_only=code_only,
+                    ).with_suffix('.json')
                 
                 json_data["artifacts"]["primary_json"] = str(json_path)
                 md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
