@@ -1779,6 +1779,7 @@ def make_output_filename(
     detail_block = detail
 
     # 4. Pfad-Block: aus path_filter, aber OHNE 'path-' Präfix
+    # Wichtig: Wenn KEIN spezifischer Pfad gewählt ist, soll hier gar nichts stehen.
     path_block = None
     if path_filter:
         slug = path_filter.strip().strip("/")
