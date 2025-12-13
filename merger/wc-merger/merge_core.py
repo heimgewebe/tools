@@ -88,23 +88,57 @@ MERGE_CONTRACT_VERSION = SPEC_VERSION
 # vollständig gelesen und nur über die Split-Logik in Parts verteilt.
 DEFAULT_MAX_BYTES = 0
 
-# Debug-Config (kann später bei Bedarf erweitert werden)
-ALLOWED_CATEGORIES = {"source", "test", "doc", "config", "contract", "other"}
-# Kategorien, die im Code-only-Modus sichtbar bleiben sollen
-CODE_ONLY_CATEGORIES: Set[str] = {"source", "test", "config", "contract"}
+def _debug_log_func(debug: "DebugCollector", level: str):
+    """
+    Map configured severity levels to DebugCollector methods.
+    If misconfigured, warn once (per call) and fall back to warn.
+    """
+    lvl = (level or "warn").strip().lower()
+    if lvl in ("warn", "warning"):
+        return debug.warn
+    if lvl in ("error", "err"):
+        return getattr(debug, "error", debug.warn)
+    if lvl in ("info",):
+        return getattr(debug, "info", debug.warn)
+
+    # Misconfiguration: make it visible, then fall back.
+    debug.warn(
+        "debug-config-invalid",
+        "merge_core",
+        f"Unbekannter severity-level '{level}'. Erlaubt: info|warn|error. Fallback: warn.",
+    )
+    return debug.warn
+
+# Debug-Config (erweitert für v2.4)
+@dataclass
+class DebugConfig:
+    """
+    Zentralisiert Debug- und Validierungs-Einstellungen.
+    Ermöglicht spätere Erweiterung (Severity-Levels, neue Tags) ohne API-Break.
+    """
+    allowed_categories: Set[str]
+    allowed_tags: Set[str]
+    code_only_categories: Set[str]
+
+    # Severity levels for checks (extensions)
+    unknown_category_level: str = "warn"
+    unknown_tag_level: str = "warn"
+
+    @classmethod
+    def defaults(cls) -> "DebugConfig":
+        return cls(
+            allowed_categories={"source", "test", "doc", "config", "contract", "other"},
+            allowed_tags={
+                "ai-context", "runbook", "lockfile", "script", "ci",
+                "adr", "feed", "wgx-profile"
+            },
+            code_only_categories={"source", "test", "config", "contract"}
+        )
+
+DEBUG_CONFIG = DebugConfig.defaults()
 
 AGENT_CONTRACT_NAME = "wc-merge-agent"
 AGENT_CONTRACT_VERSION = "v1"
-ALLOWED_TAGS = {
-    "ai-context",
-    "runbook",
-    "lockfile",
-    "script",
-    "ci",
-    "adr",
-    "feed",
-    "wgx-profile",
-}
 
 # Delta Report configuration
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
@@ -366,15 +400,19 @@ class HealthCollector:
         unknown_categories = []
         unknown_tags = []
         unknown_cat_count = 0
+        other_count = 0
 
         for fi in files:
             cat = fi.category or "other"
-            if cat not in ALLOWED_CATEGORIES:
+            if cat not in DEBUG_CONFIG.allowed_categories:
                 if cat not in unknown_categories:
                     unknown_categories.append(cat)
                 unknown_cat_count += 1
+            if cat == "other":
+                other_count += 1
+
             for tag in fi.tags or []:
-                if tag not in ALLOWED_TAGS:
+                if tag not in DEBUG_CONFIG.allowed_tags:
                     if tag not in unknown_tags:
                         unknown_tags.append(tag)
 
@@ -436,6 +474,12 @@ class HealthCollector:
             warnings=warnings,
             recommendations=recommendations,
         )
+
+        # Optional enrichment (keeps compatibility if RepoHealth doesn't define it)
+        try:
+            health.other_count = other_count
+        except AttributeError:
+            pass
 
         self._repo_health[root_label] = health
         return health
@@ -837,18 +881,23 @@ def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> Non
     for fi in file_infos:
         ctx = f"{fi.root_label}/{fi.rel_path.as_posix()}"
         cat = fi.category or "other"
-        if cat not in ALLOWED_CATEGORIES:
-            debug.warn(
+
+        if cat not in DEBUG_CONFIG.allowed_categories:
+            # Use configured severity
+            log_func = _debug_log_func(debug, DEBUG_CONFIG.unknown_category_level)
+            log_func(
                 "category-unknown",
                 ctx,
-                f"Unbekannte Kategorie '{cat}' – erwartet sind {sorted(ALLOWED_CATEGORIES)}.",
+                f"Unbekannte Kategorie '{cat}' – erwartet sind {sorted(DEBUG_CONFIG.allowed_categories)}.",
             )
+
         for tag in getattr(fi, "tags", []) or []:
-            if tag not in ALLOWED_TAGS:
-                debug.warn(
+            if tag not in DEBUG_CONFIG.allowed_tags:
+                log_func = _debug_log_func(debug, DEBUG_CONFIG.unknown_tag_level)
+                log_func(
                     "tag-unknown",
                     ctx,
-                    f"Tag '{tag}' ist nicht im v2.3-Schema registriert.",
+                    f"Tag '{tag}' ist nicht im v2.4-Schema registriert.",
                 )
 
     # 2. Fleet-/Heimgewebe-Checks pro Repo
@@ -1927,7 +1976,7 @@ def iter_report_blocks(
 
     # Optional Code-only-Filter
     if code_only:
-        files = [fi for fi in files if fi.category in CODE_ONLY_CATEGORIES]
+        files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
 
     # Pre-calculate status based on Profile Strict Logic
     processed_files = []
@@ -1950,10 +1999,11 @@ def iter_report_blocks(
         fi.roles = compute_file_roles(fi)
 
         # Debug checks
-        # Kategorien strikt gemäß Spec v2.3:
-        # {source, doc, config, test, contract, other}
-        if fi.category == "other" or fi.category not in ["source", "doc", "config", "test", "contract", "other"]:
+        # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
+        # "other" ist gültig, aber signalisiert: nicht eindeutig klassifizierbar.
+        if fi.category not in DEBUG_CONFIG.allowed_categories:
             unknown_categories.add(fi.category)
+        # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
 
         # Check tags against ALLOWED_TAGS
         for tag in (fi.tags or []):
@@ -2719,7 +2769,7 @@ def generate_json_sidecar(
     """
     now = datetime.datetime.utcnow()
     if code_only:
-        files = [fi for fi in files if fi.category in CODE_ONLY_CATEGORIES]
+        files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
 
     scope_desc = describe_scope(files)
 
@@ -2756,7 +2806,7 @@ def generate_json_sidecar(
             "path_filter": path_filter or "",
             "ext_filter": ",".join(sorted(ext_filter)) if ext_filter else "",
             # explicit negation sets (agent-safe): empty list means "no restriction" / "none excluded"
-            "included_categories": sorted(list(CODE_ONLY_CATEGORIES)) if code_only else [],
+            "included_categories": sorted(list(DEBUG_CONFIG.code_only_categories)) if code_only else [],
             "excluded_categories": [],
             "included_globs": [],
             "excluded_globs": [],
@@ -2971,7 +3021,7 @@ def write_reports_v2(
         # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
         if extras and extras.json_sidecar:
             total_size = sum(
-                f.size for f in all_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
+                f.size for f in all_files if (not code_only or f.category in DEBUG_CONFIG.code_only_categories)
             )
             json_data = generate_json_sidecar(
                 all_files,
@@ -3015,7 +3065,7 @@ def write_reports_v2(
             # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
             if extras and extras.json_sidecar:
                 total_size = sum(
-                    f.size for f in s_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
+                    f.size for f in s_files if (not code_only or f.category in DEBUG_CONFIG.code_only_categories)
                 )
                 json_data = generate_json_sidecar(
                     s_files,
