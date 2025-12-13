@@ -474,11 +474,11 @@ class HealthCollector:
             warnings=warnings,
             recommendations=recommendations,
         )
-        
+
         # Optional enrichment (keeps compatibility if RepoHealth doesn't define it)
         try:
             health.other_count = other_count
-        except Exception:
+        except AttributeError:
             pass
 
         self._repo_health[root_label] = health
