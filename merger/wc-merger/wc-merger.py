@@ -54,6 +54,10 @@ try:
 except Exception:
     editor = None    # type: ignore
 
+# Keep track of the currently presented Merger UI view (Pythonista).
+# This prevents stacking multiple fullscreen windows when the script is opened repeatedly.
+_ACTIVE_MERGER_VIEW = None
+
 
 def safe_script_path() -> Path:
     """
@@ -283,8 +287,25 @@ def _load_wc_extractor_module():
 
 def run_ui(hub: Path) -> int:
     """Starte den Merger im Vollbild-UI-Modus ohne Pythonista-Titlebar."""
+    global _ACTIVE_MERGER_VIEW
+    # If there is already a Merger view on screen, close it before presenting a new one.
+    try:
+        if _ACTIVE_MERGER_VIEW is not None and getattr(_ACTIVE_MERGER_VIEW, "on_screen", False):
+            try:
+                _ACTIVE_MERGER_VIEW.close()
+            except Exception:
+                # Fallback: some contexts prefer dismiss()
+                try:
+                    _ACTIVE_MERGER_VIEW.dismiss()
+                except Exception:
+                    pass
+    except Exception:
+        # Never block opening a new UI because cleanup failed.
+        pass
+
     ui_obj = MergerUI(hub)
     v = ui_obj.view
+    _ACTIVE_MERGER_VIEW = v
     # Volle Fläche, eigene „Titlebar“ im View, keine weiße System-Leiste
     v.present('fullscreen', hide_title_bar=True)
     return 0
@@ -878,11 +899,19 @@ class MergerUI(object):
 
     def close_view(self, sender=None) -> None:
         """Schließt den Merger-Screen in Pythonista."""
+        global _ACTIVE_MERGER_VIEW
         try:
             self.view.close()
         except Exception as e:
             # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven, aber loggen
             sys.stderr.write(f"Warning: Failed to close view: {e}\n")
+        finally:
+            # If this instance is the active one, clear the pointer.
+            try:
+                if _ACTIVE_MERGER_VIEW is self.view:
+                    _ACTIVE_MERGER_VIEW = None
+            except Exception:
+                pass
 
     def show_extras_sheet(self, sender):
         """Zeigt ein Sheet zur Konfiguration der Extras."""
