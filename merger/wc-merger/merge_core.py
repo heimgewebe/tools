@@ -2946,11 +2946,21 @@ def write_reports_v2(
             current_size = 0
             current_lines = []
 
+            # --- Metadata tracking for parts (NEW) ---
+            parts_meta = []  # List of dicts: {first, last}
+            current_part_paths = []  # Paths in current buffer
+
             # Helper to flush
             def flush_part(is_last=False):
-                nonlocal part_num, current_size, current_lines
+                nonlocal part_num, current_size, current_lines, current_part_paths
                 if not current_lines:
                     return
+
+                # Record metadata for this part
+                first = current_part_paths[0] if current_part_paths else None
+                last = current_part_paths[-1] if current_part_paths else None
+                parts_meta.append({"first": first, "last": last})
+                current_part_paths = []
 
                 # Temporärer Name während der Generierung
                 # Wir nutzen _tmp_partX, um es später sauber umzubenennen
@@ -2985,11 +2995,20 @@ def write_reports_v2(
             for block in iterator:
                 block_len = len(block.encode('utf-8'))
 
+                # --- Path detection (NEW) ---
+                # Detect path in block using regex to track range for signatures
+                m = re.search(r"\*\*Path:\*\* `(.+?)`", block)
+                block_path = m.group(1) if m else None
+
                 if current_size + block_len > split_size and len(current_lines) > 1:
                     flush_part()
+                    # After flush, block belongs to next part.
+                    # current_part_paths was cleared in flush_part.
 
                 current_lines.append(block)
                 current_size += block_len
+                if block_path:
+                    current_part_paths.append(block_path)
 
             flush_part(is_last=True)
 
@@ -3009,10 +3028,35 @@ def write_reports_v2(
                             stripped = line.lstrip("\ufeff")
                             if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
                                 lines[i] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
+
+                                # --- Inject Signature (NEW) ---
+                                if total_parts > 1:
+                                    meta = parts_meta[idx - 1]
+                                    p_start = meta["first"]
+                                    p_end = meta["last"]
+                                    range_str = f"{p_start} ... {p_end}" if p_start else "Meta/Structure/Index"
+
+                                    prev_name = "none"
+                                    if idx > 1:
+                                        # calculate name of part idx-1
+                                        prev_suffix = f"_part{idx - 1}of{total_parts}"
+                                        prev_path_obj = output_filename_base_func(part_suffix=prev_suffix)
+                                        prev_name = prev_path_obj.name
+
+                                    sig_block = (
+                                        f"<!-- part_signature:\n"
+                                        f"  part_index: {idx}\n"
+                                        f"  part_total: {total_parts}\n"
+                                        f"  continuation_of: \"{prev_name}\"\n"
+                                        f"  range: \"{range_str}\"\n"
+                                        f"-->\n"
+                                        f"**[Part {idx}/{total_parts}]** continuation_of: `{prev_name}` · range: `{range_str}`\n\n"
+                                    )
+                                    lines.insert(i + 1, sig_block)
                                 break
                     text = "".join(lines)
                 except Exception:
-                    text = None # Skip rewrite if read fails, but still rename
+                    text = None  # Skip rewrite if read fails, but still rename
 
                 # 2. Rename File
                 # If total_parts == 1, no part suffix.
@@ -3025,18 +3069,18 @@ def write_reports_v2(
                 new_path = output_filename_base_func(part_suffix=new_suffix)
 
                 if text is not None:
-                     new_path.write_text(text, encoding="utf-8")
-                     # Delete old tmp file
-                     try:
-                         path.unlink()
-                     except OSError:
-                         pass
+                    new_path.write_text(text, encoding="utf-8")
+                    # Delete old tmp file
+                    try:
+                        path.unlink()
+                    except OSError:
+                        pass
                 else:
-                     # Just rename if we couldn't read/edit content
-                     try:
-                         path.rename(new_path)
-                     except OSError as e:
-                         sys.stderr.write(f"Error renaming {path} to {new_path}: {e}\n")
+                    # Just rename if we couldn't read/edit content
+                    try:
+                        path.rename(new_path)
+                    except OSError as e:
+                        sys.stderr.write(f"Error renaming {path} to {new_path}: {e}\n")
 
                 final_paths.append(new_path)
 
