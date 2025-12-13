@@ -23,6 +23,8 @@ import sys
 import shutil
 import zipfile
 import datetime
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
 
@@ -384,6 +386,107 @@ def import_zip_wrapper(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[
                 print(f"  Cleanup: ZIP gelöscht ({zip_path.name})")
             except OSError:
                 pass
+
+
+def _console_alert(title: str, msg: str) -> None:
+    if console:
+        try:
+            console.alert(title, msg, "OK", hide_cancel_button=True)
+        except Exception:
+            pass
+    else:
+        sys.stderr.write(f"[{title}] {msg}\n")
+
+
+def _state_path(merges_dir: Path) -> Path:
+    return merges_dir / ".extractor_state.json"
+
+
+def _zip_fingerprint(zip_path: Path) -> Dict[str, Any]:
+    st = zip_path.stat()
+    return {
+        "name": zip_path.name,
+        "mtime": int(st.st_mtime),
+        "size": int(st.st_size),
+    }
+
+
+def _read_state(merges_dir: Path) -> Dict[str, Any]:
+    p = _state_path(merges_dir)
+    try:
+        if not p.exists():
+            return {}
+        return json.loads(p.read_text("utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_state(merges_dir: Path, state: Dict[str, Any]) -> None:
+    p = _state_path(merges_dir)
+    try:
+        p.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", "utf-8")
+    except Exception:
+        pass
+
+
+def run_extractor(
+    hub_override: Optional[Path] = None,
+    show_alert: bool = False,
+    incremental: bool = True,
+) -> Tuple[int, str]:
+    """Programmatic entry point for callers like wc-merger.
+
+    By default: quiet (no alerts), best-effort, returns a status+message.
+    """
+    hub = hub_override if hub_override is not None else detect_hub_dir(SCRIPT_PATH)
+    if hub is None:
+        msg = "Working Copy Hub not found"
+        if show_alert:
+            _console_alert(msg, "Please open Working Copy at least once.")
+        return 1, msg
+
+    merges_dir = get_merges_dir(hub)
+    zips = sorted(hub.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not zips:
+        msg = "No .zip imports found in hub"
+        if show_alert:
+            _console_alert("No imports found", msg)
+        return 0, msg
+
+    newest = zips[0]
+    newest_fp = _zip_fingerprint(newest)
+    prev_state = _read_state(merges_dir)
+
+    if incremental:
+        prev_fp = prev_state.get("newest_zip", {})
+        if (
+            isinstance(prev_fp, dict)
+            and prev_fp.get("name") == newest_fp.get("name")
+            and int(prev_fp.get("mtime", -1)) == int(newest_fp.get("mtime"))
+            and int(prev_fp.get("size", -1)) == int(newest_fp.get("size"))
+        ):
+            msg = "No new hub zip detected; extractor skipped (incremental)."
+            if show_alert:
+                _console_alert("Extractor skipped", msg)
+            return 0, msg
+
+    processed = 0
+    failures = 0
+    for zp in zips:
+        try:
+            diff_path = import_zip_wrapper(zp, hub, merges_dir)
+            if diff_path is not None:
+                processed += 1
+        except Exception:
+            failures += 1
+
+    # Update state after a run (even if some failures happened)
+    _write_state(merges_dir, {"newest_zip": newest_fp})
+
+    msg = f"imports processed: {processed}, failures: {failures}, hub zips: {len(zips)}, incremental: {incremental}"
+    if show_alert:
+        _console_alert("Extractor finished", msg)
+    return (0 if failures == 0 else 2), msg
 
 
 def main() -> int:
