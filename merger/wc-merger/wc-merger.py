@@ -113,6 +113,7 @@ try:
         write_reports_v2,
         _normalize_ext_list,
         ExtrasConfig,
+        MergeArtifacts,
     )
 except ImportError:
     sys.path.append(str(SCRIPT_DIR))
@@ -125,6 +126,7 @@ except ImportError:
         write_reports_v2,
         _normalize_ext_list,
         ExtrasConfig,
+        MergeArtifacts,
     )
 
 PROFILE_DESCRIPTIONS = {
@@ -1352,7 +1354,7 @@ class MergerUI(object):
             summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=0)
 
             # Generate merge reports
-            out_paths = write_reports_v2(
+            artifacts = write_reports_v2(
                 merges_dir,
                 self.hub,
                 [summary],
@@ -1369,9 +1371,10 @@ class MergerUI(object):
             )
 
             # Close files
+            out_paths = artifacts.get_all_paths()
             force_close_files(out_paths)
 
-            primary_path = next((p for p in out_paths if p.suffix.lower() == ".md"), out_paths[0] if out_paths else None)
+            primary_path = artifacts.get_primary_path()
             msg = (
                 f"Delta report generated: {primary_path.name}"
                 if primary_path is not None
@@ -1448,7 +1451,7 @@ class MergerUI(object):
             return
 
         merges_dir = get_merges_dir(self.hub)
-        out_paths = write_reports_v2(
+        artifacts = write_reports_v2(
             merges_dir,
             self.hub,
             summaries,
@@ -1464,6 +1467,7 @@ class MergerUI(object):
             extras=self.extras_config,
         )
 
+        out_paths = artifacts.get_all_paths()
         if not out_paths:
             if console:
                 console.alert("wc-merger", "No report generated.", "OK", hide_cancel_button=True)
@@ -1599,7 +1603,7 @@ def main_cli():
             if args.debug:
                 print(f"Warning: Could not extract delta metadata: {e}")
     
-    out_paths = write_reports_v2(
+    artifacts = write_reports_v2(
         merges_dir,
         hub,
         summaries,
@@ -1616,6 +1620,7 @@ def main_cli():
         delta_meta=delta_meta,
     )
 
+    out_paths = artifacts.get_all_paths()
     print(f"Generated {len(out_paths)} report(s):")
     for p in out_paths:
         print(f"  - {p}")

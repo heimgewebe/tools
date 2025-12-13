@@ -274,6 +274,43 @@ class DebugCollector:
 
 
 @dataclass
+class MergeArtifacts:
+    """
+    Result object for write_reports_v2() containing all generated artifacts.
+    Makes it explicit which artifact is the primary (JSON or Markdown).
+    """
+    primary_json: Optional[Path] = None
+    human_md: Optional[Path] = None
+    md_parts: List[Path] = None
+    other: List[Path] = None
+
+    def __post_init__(self):
+        if self.md_parts is None:
+            self.md_parts = []
+        if self.other is None:
+            self.other = []
+
+    def get_all_paths(self) -> List[Path]:
+        """Return all paths in deterministic order: primary first, then others."""
+        paths = []
+        if self.primary_json:
+            paths.append(self.primary_json)
+        if self.human_md and self.human_md not in paths:
+            paths.append(self.human_md)
+        for p in self.md_parts:
+            if p not in paths:
+                paths.append(p)
+        for p in self.other:
+            if p not in paths:
+                paths.append(p)
+        return paths
+
+    def get_primary_path(self) -> Optional[Path]:
+        """Return the primary artifact path (JSON if exists, otherwise Markdown)."""
+        return self.primary_json or self.human_md
+
+
+@dataclass
 class RepoHealth:
     """Health status for a single repository."""
     repo_name: str
@@ -2698,7 +2735,7 @@ def write_reports_v2(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
-) -> List[Path]:
+) -> MergeArtifacts:
     out_paths = []
 
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
@@ -2842,6 +2879,7 @@ def write_reports_v2(
         )
         
         # Write JSON sidecar if enabled (agent-first: also for plan_only)
+        # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
         if extras and extras.json_sidecar:
             total_size = sum(
                 f.size for f in all_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
@@ -2858,16 +2896,20 @@ def write_reports_v2(
                 total_size,
                 delta_meta,
             )
-            # Generate JSON filename based on the first markdown file
+            # Generate JSON filename: use first MD file for name, or fallback to deterministic name
             if out_paths:
                 json_path = out_paths[0].with_suffix('.json')
-                json_data["artifacts"]["primary_json"] = str(json_path)
-                md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
-                json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
-                json_data["artifacts"]["human_md"] = str(md_parts[0]) if md_parts else None
-                _validate_agent_json_dict(json_data)
-                json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                out_paths.append(json_path)
+            else:
+                # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
+                json_path = make_output_filename(merges_dir, repo_names, detail, "", path_filter, ext_filter_str).with_suffix('.json')
+            
+            json_data["artifacts"]["primary_json"] = str(json_path)
+            md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
+            json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+            json_data["artifacts"]["human_md"] = str(md_parts[0]) if md_parts else None
+            _validate_agent_json_dict(json_data)
+            json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+            out_paths.append(json_path)
 
     else:
         for s in repo_summaries:
@@ -2878,6 +2920,7 @@ def write_reports_v2(
             process_and_write(s_files, [s_root], lambda part_suffix="": make_output_filename(merges_dir, [s_name], detail, part_suffix, path_filter, ext_filter_str))
             
             # Write JSON sidecar if enabled (agent-first: also for plan_only)
+            # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
             if extras and extras.json_sidecar:
                 total_size = sum(
                     f.size for f in s_files if (not code_only or f.category in CODE_ONLY_CATEGORIES)
@@ -2894,19 +2937,23 @@ def write_reports_v2(
                     total_size,
                     delta_meta,
                 )
-                # Generate JSON filename based on the last markdown file
+                # Generate JSON filename: use last MD file for name, or fallback to deterministic name
                 if out_paths:
                     json_path = out_paths[-1].with_suffix('.json')
-                    json_data["artifacts"]["primary_json"] = str(json_path)
-                    md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
-                    # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
-                    json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
-                    json_data["artifacts"]["human_md"] = (
-                        str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
-                    )
-                    _validate_agent_json_dict(json_data)
-                    json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
-                    out_paths.append(json_path)
+                else:
+                    # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
+                    json_path = make_output_filename(merges_dir, [s_name], detail, "", path_filter, ext_filter_str).with_suffix('.json')
+                
+                json_data["artifacts"]["primary_json"] = str(json_path)
+                md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
+                # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
+                json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+                json_data["artifacts"]["human_md"] = (
+                    str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
+                )
+                _validate_agent_json_dict(json_data)
+                json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                out_paths.append(json_path)
 
     # --- Post-check & deterministic ordering (primary artifact first) ---
     md_paths = [p for p in out_paths if p.suffix.lower() == ".md"]
@@ -2950,6 +2997,20 @@ def write_reports_v2(
             )
 
     # Primary ordering: JSON (if enabled) first, then Markdown, then other artifacts.
+    # Return structured MergeArtifacts object instead of flat list
     if extras and extras.json_sidecar:
-        return verified_json + verified_md + other_paths
-    return verified_md + other_paths
+        # JSON is primary when json_sidecar is enabled
+        return MergeArtifacts(
+            primary_json=verified_json[0] if verified_json else None,
+            human_md=verified_md[0] if verified_md else None,
+            md_parts=verified_md,
+            other=other_paths
+        )
+    else:
+        # Markdown is primary when json_sidecar is disabled
+        return MergeArtifacts(
+            primary_json=None,
+            human_md=verified_md[0] if verified_md else None,
+            md_parts=verified_md,
+            other=other_paths
+        )
