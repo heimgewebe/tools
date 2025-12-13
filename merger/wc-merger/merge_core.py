@@ -662,6 +662,8 @@ def _build_extras_meta(extras: "ExtrasConfig", num_repos: int) -> Dict[str, bool
         extras_meta["augment_sidecar"] = True
     if extras.delta_reports:
         extras_meta["delta_reports"] = True
+    if extras.json_sidecar:
+        extras_meta["json_sidecar"] = True
     if extras.heatmap:
         extras_meta["heatmap"] = True
     return extras_meta

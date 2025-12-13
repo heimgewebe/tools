@@ -12,7 +12,7 @@ Default-Config (Dec 2025)
 - split: ON via split-size default (25MB)
 - max-bytes: 0 (keine Kürzung einzelner Dateien)
 - extras default ON:
-  health, augment_sidecar, organism_index, fleet_panorama, json_sidecar, heatmap
+  health, augment_sidecar, organism_index, fleet_panorama, json_sidecar, ai_heatmap
 
 Rationale:
 - max-bytes auf Dateiebene ist semantisch riskant (halbe Datei = halbe Wahrheit).
@@ -31,7 +31,7 @@ DEFAULT_LEVEL = "dev"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
-DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
+DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,ai_heatmap"
 
 try:
     import appex  # type: ignore
