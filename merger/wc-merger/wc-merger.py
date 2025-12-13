@@ -11,7 +11,7 @@ import os
 import json
 import traceback
 from pathlib import Path
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 try:
     import appex  # type: ignore
@@ -198,6 +198,33 @@ def find_repos_in_hub(hub: Path) -> List[str]:
             continue
         repos.append(child.name)
     return repos
+
+
+def _pick_primary_artifact(paths):
+    # Prefer primary JSON for agent chains, else fallback to markdown.
+    for p in paths:
+        try:
+            if str(p).lower().endswith(".json"):
+                return p
+        except Exception:
+            pass
+    for p in paths:
+        try:
+            if str(p).lower().endswith(".md"):
+                return p
+        except Exception:
+            pass
+    return paths[0] if paths else None
+
+
+def _pick_human_md(paths) -> Optional[Path]:
+    for p in paths:
+        try:
+            if str(p).lower().endswith(".md"):
+                return p
+        except Exception:
+            pass
+    return None
 
 def parse_human_size(text: str) -> int:
     text = text.upper().strip()
@@ -1478,15 +1505,26 @@ class MergerUI(object):
         # Force close any tabs that might have opened
         force_close_files(out_paths)
 
-        msg = f"Generated {len(out_paths)} report(s)."
+        primary = _pick_primary_artifact(out_paths)
+        human_md = _pick_human_md(out_paths)
+        if primary and human_md and primary != human_md:
+            msg = f"Merge generated: {primary.name} (human: {human_md.name})"
+            status = "success"
+        elif primary:
+            msg = f"Merge generated: {primary.name}"
+            status = "success"
+        else:
+            msg = "Merge failed: no artifacts returned"
+            status = "error"
+
         if console:
             try:
-                console.hud_alert(msg)
+                console.hud_alert(msg, status, 1.2 if status == "success" else 1.5)
             except Exception as e:
                 sys.stderr.write(f"Warning: Failed to show HUD alert (falling back to alert): {e}\n")
                 console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
         else:
-            print(f"wc-merger: OK ({msg})")
+            print(f"wc-merger: {msg}")
             for p in out_paths:
                 print(f"  - {p.name}")
 
