@@ -363,6 +363,21 @@ class MergerUI(object):
         # Beim Start nur die persistierte Ignore-Liste laden – nicht die gesamte UI-Config
         self._load_ignored_repos_from_state()
 
+        # Auto-run / warm the extractor on startup (best-effort).
+        # This makes delta/inspection features immediately usable and surfaces hub issues early,
+        # without breaking the main UI if anything is missing.
+        try:
+            mod = _load_wc_extractor_module()
+            # Prefer passing the detected hub explicitly so extractor and UI agree.
+            try:
+                mod.detect_hub(str(self.hub))
+            except TypeError:
+                # older extractor signature: detect_hub(explicit_hub=None)
+                mod.detect_hub(str(self.hub))
+        except Exception as e:
+            # Keep UI functional; extractor is an enhancement, not a hard dependency.
+            print(f"[extractor] warmup skipped: {e}")
+
         # Basic argv parsing for UI defaults
         # Expected format: wc-merger.py --level max --mode gesamt ...
         import argparse
