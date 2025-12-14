@@ -3,7 +3,7 @@
 
 """
 wc_extractor – ZIPs im wc-hub entpacken und Repos aktualisieren.
-Verwendet merge_core.
+Verwendet core.
 
 Funktion:
 - Suche alle *.zip im Hub (wc-hub).
@@ -70,14 +70,14 @@ SCRIPT_DIR = SCRIPT_PATH.parent
 
 # Import from core
 try:
-    from merge_core import (
+    from core import (
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
     )
 except ImportError:
     sys.path.append(str(SCRIPT_DIR))
-    from merge_core import (
+    from core import (
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
@@ -195,7 +195,7 @@ def diff_trees(
 
     Neu: „Manifest-Anklang“
       - kleine Tabelle mit Pfad, Status, Kategorie, Größen und MD5-Änderung
-      - Kategorien stammen aus merge_core.classify_file_v2 via get_repo_snapshot
+      - Kategorien stammen aus core.classify_file_v2 via get_repo_snapshot
 
     Rückgabe:
       Pfad zur Diff-Datei.
