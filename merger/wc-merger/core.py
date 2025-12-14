@@ -21,6 +21,16 @@ except ImportError:
     pass
 
 
+# Default-Config (Dec 2025)
+DEFAULT_LEVEL = "dev"
+DEFAULT_MODE = "gesamt"  # combined
+DEFAULT_SPLIT_SIZE = "25MB"
+# Ab v2.3+: 0 = "kein Limit pro Datei".
+DEFAULT_MAX_BYTES = 0
+DEFAULT_MAX_FILE_BYTES = 0 # Alias for consistency
+DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,ai_heatmap"
+
+
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 
@@ -46,21 +56,8 @@ class NavStyle:
 def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Optional[NavStyle] = None) -> List[str]:
     """
     Return heading lines with stable token-based ids and optional title.
-
-    Many Markdown renderers (especially on iOS) fail to emit heading IDs, and
-    some ignore the `{#id}` syntax. To maximize compatibility for links like
-    `#manifest` or `#file-tools-...`, we emit an explicit HTML anchor before the
-    tokenized heading. This keeps links working when either heading IDs *or*
-    HTML anchors are supported by the renderer.
     """
 
-    # NOTE:
-    # - Some renderers do not generate heading IDs.
-    # - Some renderers strip HTML anchors.
-    # We therefore provide three layers:
-    #   (1) visible search marker: "§§ <token>" (works even if links are dead)
-    #   (2) HTML anchor: <a id="token"></a> (works if HTML allowed)
-    #   (3) tokenized heading: "## token" (works if heading IDs generated)
     nav = nav or NavStyle()
     lines: List[str] = []
     if nav.emit_search_markers:
@@ -76,22 +73,12 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
 
-# Formale Contract-Deklaration für alle wc-merger-Reports.
-# Name/Version können von nachgelagerten Tools verwendet werden,
-# um das Format eindeutig zu erkennen.
 MERGE_CONTRACT_NAME = "wc-merge-report"
 MERGE_CONTRACT_VERSION = SPEC_VERSION
-
-# Ab v2.3+: 0 = "kein Limit pro Datei".
-# max_file_bytes wirkt nur noch als optionales Soft-Limit / Hint,
-# nicht mehr als harte Abschneide-Grenze. Große Dateien werden
-# vollständig gelesen und nur über die Split-Logik in Parts verteilt.
-DEFAULT_MAX_BYTES = 0
 
 def _debug_log_func(debug: "DebugCollector", level: str):
     """
     Map configured severity levels to DebugCollector methods.
-    If misconfigured, warn once (per call) and fall back to warn.
     """
     lvl = (level or "warn").strip().lower()
     if lvl in ("warn", "warning"):
@@ -101,7 +88,6 @@ def _debug_log_func(debug: "DebugCollector", level: str):
     if lvl in ("info",):
         return getattr(debug, "info", debug.warn)
 
-    # Misconfiguration: make it visible, then fall back.
     debug.warn(
         "debug-config-invalid",
         "merge_core",
@@ -114,13 +100,11 @@ def _debug_log_func(debug: "DebugCollector", level: str):
 class DebugConfig:
     """
     Zentralisiert Debug- und Validierungs-Einstellungen.
-    Ermöglicht spätere Erweiterung (Severity-Levels, neue Tags) ohne API-Break.
     """
     allowed_categories: Set[str]
     allowed_tags: Set[str]
     code_only_categories: Set[str]
 
-    # Severity levels for checks (extensions)
     unknown_category_level: str = "warn"
     unknown_tag_level: str = "warn"
 
@@ -193,7 +177,6 @@ TEXT_EXTENSIONS = {
 def _stable_file_id(fi: "FileInfo") -> str:
     """
     Stable across runs as long as repo + rel-path stay the same.
-    Avoids relying on Markdown heading anchors or renderer-specific IDs.
     """
 
     repo = (
@@ -214,8 +197,7 @@ def _stable_file_id(fi: "FileInfo") -> str:
 
 def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = False) -> None:
     """
-    Minimal, dependency-free validation. Purpose: prevent "success but nothing usable".
-    (Full JSON-Schema validation can be added later; this is the hard safety belt.)
+    Minimal, dependency-free validation.
     """
 
     if not isinstance(d, dict):
@@ -475,7 +457,6 @@ class HealthCollector:
             recommendations=recommendations,
         )
 
-        # Optional enrichment (keeps compatibility if RepoHealth doesn't define it)
         try:
             health.other_count = other_count
         except AttributeError:
@@ -564,14 +545,12 @@ class HealthCollector:
             for r in risks:
                 lines.append(f"- {r}")
 
-            # Warnings (Standard)
             if health.warnings:
                 lines.append("")
                 lines.append("**Detailed Warnings:**")
                 for warning in health.warnings:
                     lines.append(f"  - {warning}")
 
-            # Recommendations
             if health.recommendations:
                 lines.append("")
                 lines.append("**Recommendations:**")
@@ -602,9 +581,7 @@ class HeatmapCollector:
         lines.append("")
 
         # 1. Top Files (Size & Complexity proxy)
-        # Filter for relevant categories
         relevant = [f for f in self.files if f.category in ("source", "config", "contract", "test")]
-        # Sort by size desc
         top_files = sorted(relevant, key=lambda f: f.size, reverse=True)[:5]
 
         lines.append("### Top-Level Hotspots (Files by Size)")
@@ -628,7 +605,6 @@ class HeatmapCollector:
             folder_stats[path_str]["count"] += 1
             folder_stats[path_str]["size"] += f.size
 
-        # Sort by size
         sorted_folders = sorted(folder_stats.items(), key=lambda x: x[1]["size"], reverse=True)[:5]
 
         lines.append("### Top Folder Hotspots")
@@ -644,18 +620,12 @@ class HeatmapCollector:
 def _build_extras_meta(extras: "ExtrasConfig", num_repos: int) -> Dict[str, bool]:
     """
     Hilfsfunktion: baut den extras-Block für den @meta-Contract.
-    Nur aktivierte Flags werden gesetzt, damit das Schema schlank bleibt.
-    
-    Args:
-        extras: ExtrasConfig mit den gewünschten Extras
-        num_repos: Anzahl der Repos im Merge (für Fleet Panorama - muss explizit übergeben werden)
     """
     extras_meta: Dict[str, bool] = {}
     if extras.health:
         extras_meta["health"] = True
     if extras.organism_index:
         extras_meta["organism_index"] = True
-    # Fleet Panorama nur bei Multi-Repo-Merges
     if extras.fleet_panorama and num_repos > 1:
         extras_meta["fleet_panorama"] = True
     if extras.augment_sidecar:
@@ -680,14 +650,10 @@ def _build_augment_meta(sources: List[Path]) -> Optional[Dict[str, Any]]:
 def _render_fleet_panorama(sources: List[Path], files: List["FileInfo"]) -> Optional[str]:
     """
     Render the Fleet Panorama block.
-    Only shown if:
-      - extras.fleet_panorama is true
-      - more than one repo is being merged
     """
     if len(sources) < 2:
         return None
 
-    # Group files per repo
     grouped: Dict[str, List["FileInfo"]] = {}
     for fi in files:
         grouped.setdefault(fi.root_label, []).append(fi)
@@ -697,13 +663,11 @@ def _render_fleet_panorama(sources: List[Path], files: List["FileInfo"]) -> Opti
     lines.append("## 🛰 Fleet Panorama")
     lines.append("")
 
-    # Summary header
     total_files = sum(len(v) for v in grouped.values())
     total_bytes = sum(f.size for f in files)
     lines.append(f"**Summary:** {len(grouped)} repos, {total_bytes} bytes, {total_files} files")
     lines.append("")
 
-    # Per-repo details
     for repo, repo_files in grouped.items():
         repo_bytes = sum(f.size for f in repo_files)
         lines.append(f"### `{repo}`")
@@ -718,21 +682,17 @@ def _render_fleet_panorama(sources: List[Path], files: List["FileInfo"]) -> Opti
 def _find_augment_file_for_sources(sources: List[Path]) -> Optional[Path]:
     """
     Locate an augment sidecar YAML file for the given sources.
-    Convention: {repo_name}_augment.yml either in the repo root or its parent.
     """
     for source in sources:
         try:
-            # Try in the repo directory itself
             candidate = source / f"{source.name}_augment.yml"
             if candidate.exists():
                 return candidate
 
-            # Try in parent directory
             candidate_parent = source.parent / f"{source.name}_augment.yml"
             if candidate_parent.exists():
                 return candidate_parent
         except (OSError, PermissionError):
-            # If we cannot access this source, skip it
             continue
     return None
 
@@ -740,13 +700,11 @@ def _find_augment_file_for_sources(sources: List[Path]) -> Optional[Path]:
 def _render_augment_block(sources: List[Path]) -> str:
     """
     Render the Augment Intelligence block based on an augment sidecar, if present.
-    The expected structure matches tools_augment.yml (augment.hotspots, suggestions, risks, dependencies, priorities, context).
     """
     augment_path = _find_augment_file_for_sources(sources)
     if not augment_path:
         return ""
 
-    # yaml is optional; if not available, render a basic block
     try:
         yaml  # type: ignore[name-defined]
     except NameError:
@@ -770,7 +728,6 @@ def _render_augment_block(sources: List[Path]) -> str:
     try:
         data = yaml.safe_load(raw)  # type: ignore[name-defined]
     except Exception as e:
-        # If the augment file is malformed, log error and do not break the merge
         sys.stderr.write(f"Warning: Failed to parse augment sidecar {augment_path}: {e}\n")
         return ""
 
@@ -877,7 +834,6 @@ def _render_augment_block(sources: List[Path]) -> str:
 def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> None:
     """
     Leichte, rein lesende Debug-Checks auf Basis der FileInfos.
-    Verändert keine Merge-Logik, liefert nur Hinweise.
     """
     # 1. Unbekannte Kategorien / Tags
     for fi in file_infos:
@@ -927,10 +883,8 @@ def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> Non
             )
 
 
-# Directories considered "noise" (build artifacts etc.)
 NOISY_DIRECTORIES = ("node_modules/", "dist/", "build/", "target/")
 
-# Standard lockfile names
 LOCKFILE_NAMES = {
     "Cargo.lock",
     "package-lock.json",
@@ -940,7 +894,6 @@ LOCKFILE_NAMES = {
     "Pipfile.lock",
 }
 
-# Files typically considered configuration
 CONFIG_FILENAMES = {
     "pyproject.toml", "package.json", "package-lock.json", "pnpm-lock.yaml",
     "Cargo.toml", "Cargo.lock", "requirements.txt", "Pipfile", "Pipfile.lock",
@@ -952,7 +905,6 @@ CONFIG_FILENAMES = {
     "rollup.config.js", "vite.config.js", "vite.config.ts", ".ai-context.yml"
 }
 
-# Large generated files or lockfiles that should be summarized in 'dev' profile
 SUMMARIZE_FILES = {
     "package-lock.json", "pnpm-lock.yaml", "Cargo.lock", "yarn.lock", "Pipfile.lock", "poetry.lock"
 }
@@ -979,9 +931,6 @@ HARDCODED_HUB_PATH = (
     "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/wc-hub"
 )
 
-# Semantische Use-Case-Beschreibung pro Profil.
-# Wichtig: das ersetzt NICHT den Repo-Zweck (Declared Purpose),
-# sondern ergänzt ihn um die Rolle des aktuellen Merges.
 PROFILE_USECASE = {
     "overview": "Tools – Index",
     "summary": "Tools – Doku/Kontext",
@@ -990,7 +939,6 @@ PROFILE_USECASE = {
     "max": "Tools – Vollsnapshot",
 }
 
-# Mandatory Repository Order for Multi-Repo Merges (v2.1 Spec)
 REPO_ORDER = [
     "metarepo",
     "wgx",
@@ -1022,9 +970,9 @@ class FileInfo(object):
         self.skipped = skipped
         self.reason = reason
         self.content = content
-        self.anchor = "" # Will be set during report generation
-        self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
-        self.roles = [] # Will be computed during report generation
+        self.anchor = ""
+        self.anchor_alias = ""
+        self.roles = []
 
 
 # --- Utilities ---
@@ -1036,7 +984,6 @@ def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
     roles = []
     root = root_label.lower()
 
-    # Name-based heuristics
     if "tool" in root or "merger" in root: roles.append("tooling")
     if "contract" in root or "schema" in root: roles.append("contracts")
     if "meta" in root: roles.append("governance")
@@ -1047,7 +994,6 @@ def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
     if "ui" in root or "app" in root or "leitstand" in root: roles.append("ui")
     if "wgx" in root: roles.append("fleet-management")
 
-    # Content-based heuristics
     has_contracts = any(f.category == "contract" for f in files)
 
     if has_contracts and "contracts" not in roles:
@@ -1082,12 +1028,6 @@ def summarize_repo(files: List["FileInfo"], included_count: int) -> Dict[str, An
 def compute_file_roles(fi: "FileInfo") -> List[str]:
     """
     Compute semantic roles with a lean, high-signal heuristic.
-
-    Only adds roles that meaningfully refine the category:
-    - doc-essential: README-level docs
-    - config: configuration/contract-style paths or config extensions
-    - entrypoint: common entrypoint filenames
-    - ai-context: AI/context-bearing paths or tags
     """
     roles: List[str] = []
 
@@ -1106,7 +1046,6 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
     if "ai" in path_str or "context" in path_str or "ai-context" in (fi.tags or []):
         roles.append("ai-context")
 
-    # Deduplicate while preserving order
     seen = set()
     deduped = []
     for r in roles:
@@ -1120,8 +1059,6 @@ def compute_file_roles(fi: "FileInfo") -> List[str]:
 def build_hotspots(processed_files: List[Tuple["FileInfo", str]], limit: int = 8) -> List[str]:
     """
     Build a concise hotspot list for quick navigation.
-
-    Focuses on included files and boosts likely entrypoints/configs.
     """
     candidates: List[Tuple[float, FileInfo]] = []
 
@@ -1142,7 +1079,6 @@ def build_hotspots(processed_files: List[Tuple["FileInfo", str]], limit: int = 8
         if fi.category == "config":
             score += 1.0
 
-        # Light size bias to surface substantial files without overwhelming the list
         score += min(fi.size / 1024.0, 50) / 50.0
 
         candidates.append((score, fi))
@@ -1182,7 +1118,6 @@ def describe_scope(files: List["FileInfo"]) -> str:
 def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) -> str:
     """
     Determine whether a file is included with content based on profile settings.
-    Returns one of {"full", "meta-only", "omitted", "truncated"} (truncated unused today).
     """
     if not fi.is_text:
         return "omitted"
@@ -1215,10 +1150,7 @@ def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) 
 
 def is_noise_file(fi: "FileInfo") -> bool:
     """
-    Heuristik für 'Noise'-Dateien:
-    - offensichtliche Lockfiles / Paketmanager-Artefakte
-    - typische Build-/Vendor-Verzeichnisse
-    ohne das Manifest-Schema zu verändern – nur das Included-Label wird erweitert.
+    Heuristik für 'Noise'-Dateien.
     """
     try:
         path_str = str(fi.rel_path).replace("\\", "/").lower()
@@ -1290,6 +1222,29 @@ def human_size(n: float) -> str:
         size /= 1024.0
     return "{0:.2f} GB".format(size)
 
+def parse_human_size(text: str) -> int:
+    text = text.upper().strip()
+    if not text: return 0
+    if text.isdigit(): return int(text)
+
+    units = {"K": 1024, "M": 1024**2, "G": 1024**3}
+    for u, m in units.items():
+        if text.endswith(u) or text.endswith(u+"B"):
+            val = text.rstrip(u+"B").rstrip(u)
+            try:
+                return int(float(val) * m)
+            except ValueError:
+                return 0
+    return 0
+
+def _parse_extras_csv(extras_csv: str) -> List[str]:
+    items = [x.strip().lower() for x in (extras_csv or "").split(",") if x.strip()]
+    normalized = []
+    for item in items:
+        if item == "ai_heatmap":
+            item = "heatmap"
+        normalized.append(item)
+    return normalized
 
 def is_probably_text(path: Path, size: int) -> bool:
     name = path.name.lower()
@@ -1369,11 +1324,7 @@ def extract_purpose(repo_root: Path) -> str:
     return ""
 
 def get_declared_purpose(files: List[FileInfo]) -> str:
-    # Deprecated in favor of extract_purpose for consistency with Spec v2.3 patch D logic
-    # But kept as fallback or to support .ai-context which spec patch D didn't mention explicitly
-    # but patch D implemented it as:
-    # try: purpose = extract_purpose(sources[0]); ...
-    return "(none)" # Handled in iter_report_blocks via extract_purpose
+    return "(none)"
 
 
 def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
@@ -1385,58 +1336,42 @@ def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
     name = rel_path.name.lower()
     tags = []
 
-    # Tag Patterns - Strict match
-    # KI-Kontext-Dateien
     if name.endswith(".ai-context.yml"):
         tags.append("ai-context")
 
-    # CI-Workflows
     if ".github" in parts and "workflows" in parts and ext in [".yml", ".yaml"]:
         tags.append("ci")
-
-    # Contracts:
-    # Nur als Kategorie, nicht mehr als Tag – Spec sieht kein 'contract'-Tag vor.
-    # (Die Zuordnung passiert weiter unten über die Category-Logik.)
 
     if "docs" in parts and "adr" in parts and ext == ".md":
         tags.append("adr")
     if name.startswith("runbook") and ext == ".md":
         tags.append("runbook")
 
-    # Skripte: Shell und Python unter scripts/ oder bin/ als 'script' markieren
     if (("scripts" in parts) or ("bin" in parts)) and ext in (".sh", ".py"):
         tags.append("script")
 
     if "export" in parts and ext == ".jsonl":
         tags.append("feed")
 
-    # Lockfiles (package-lock, Cargo.lock, pnpm-lock, etc.)
     if "lock" in name:
         tags.append("lockfile")
 
-    # README: Spec-konform als KI-Kontext markieren, kein eigener 'readme'-Tag
     if name == "readme.md":
         tags.append("ai-context")
 
-    # WGX-Profile
     if ".wgx" in parts and name.startswith("profile"):
         tags.append("wgx-profile")
 
-
-    # Determine Category - Strict Logic
-    # Category ∈ {source, test, doc, config, contract, other}
     category = "other"
 
-    # Order matters: check more specific first
     if name in CONFIG_FILENAMES or "config" in parts or ".github" in parts or ".wgx" in parts or ext in [".toml", ".yaml", ".yml", ".json", ".lock"]:
-         # Note: .json could be contract or config, check contract path
          if "contracts" in parts:
              category = "contract"
          else:
              category = "config"
     elif ext in DOC_EXTENSIONS or "docs" in parts:
         category = "doc"
-    elif "contracts" in parts: # Fallback if not caught above
+    elif "contracts" in parts:
         category = "contract"
     elif "tests" in parts or "test" in parts or name.endswith("_test.py") or name.startswith("test_"):
         category = "test"
@@ -1459,6 +1394,62 @@ def _normalize_ext_list(ext_text: str) -> List[str]:
         cleaned.append(p.lower())
     return cleaned
 
+def find_repos_in_hub(hub: Path) -> List[str]:
+    repos: List[str] = []
+    if not hub.exists():
+        return []
+    for child in sorted(hub.iterdir(), key=lambda p: p.name.lower()):
+        if not child.is_dir():
+            continue
+        if child.name in SKIP_ROOTS:
+            continue
+        if child.name == MERGES_DIR_NAME:
+            continue
+        if child.name.startswith("."):
+            continue
+        repos.append(child.name)
+    return repos
+
+def _pick_primary_artifact(paths):
+    for p in paths:
+        try:
+            if str(p).lower().endswith(".json"):
+                return p
+        except Exception:
+            pass
+    for p in paths:
+        try:
+            if str(p).lower().endswith(".md"):
+                return p
+        except Exception:
+            pass
+    return paths[0] if paths else None
+
+def _pick_human_md(paths) -> Optional[Path]:
+    for p in paths:
+        try:
+            if str(p).lower().endswith(".md"):
+                return p
+        except Exception:
+            pass
+    return None
+
+def _load_wc_extractor_module(script_path: Path):
+    """Dynamically load wc-extractor.py from the same directory."""
+    from importlib.machinery import SourceFileLoader
+    import types
+
+    extractor_path = script_path.with_name("wc-extractor.py")
+    if not extractor_path.exists():
+        return None
+    try:
+        loader = SourceFileLoader("wc_extractor", str(extractor_path))
+        mod = types.ModuleType(loader.name)
+        loader.exec_module(mod)
+        return mod
+    except Exception as exc:
+        print(f"[wc-merger] could not load wc-extractor: {exc}")
+        return None
 
 # --- Repo Scan Logic ---
 
@@ -1475,7 +1466,6 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     ext_hist: Dict[str, int] = {}
 
     for dirpath, dirnames, filenames in os.walk(str(repo_root)):
-        # Filter directories
         keep_dirs = []
         for d in dirnames:
             if d in SKIP_DIRS:
@@ -1516,12 +1506,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             is_text = is_probably_text(abs_path, size)
             category, tags = classify_file_v2(rel_path, ext)
 
-            # MD5 calculation:
-            # - Textdateien: immer kompletter MD5
-            # - Binärdateien: nur, falls ein positives Limit gesetzt ist
-            #   und die Datei kleiner/gleich diesem Limit ist.
             md5 = ""
-            # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
             limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
             if is_text:
                 md5 = compute_md5(abs_path, limit_bytes)
@@ -1542,9 +1527,6 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             )
             files.append(fi)
 
-    # Sort files: first by repo order (if multi-repo context handled outside,
-    # but here root_label is constant per scan_repo call unless we merge lists later),
-    # then by path.
     files.sort(key=lambda fi: str(fi.rel_path).lower())
 
     return {
@@ -1559,19 +1541,11 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
 def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
     """
     Liefert einen Snapshot des Repos für Diff-Zwecke.
-
-    Rückgabe:
-      Dict[rel_path] -> (size, md5, category)
-
-    Wichtig:
-      - nutzt scan_repo, d. h. dieselben Ignore-Regeln wie der Merger
-      - Category stammt direkt aus classify_file_v2 und ist damit
-        kompatibel zum Manifest (source/doc/config/test/contract/ci/other)
     """
     snapshot: Dict[str, Tuple[int, str, str]] = {}
     summary = scan_repo(
         repo_root, extensions=None, path_contains=None, max_bytes=100_000_000
-    )  # großes Limit, damit wir verlässliche MD5s haben
+    )
     for fi in summary["files"]:
         snapshot[fi.rel_path.as_posix()] = (fi.size, fi.md5, fi.category or "other")
     return snapshot
@@ -1596,7 +1570,6 @@ def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
     plan_only = bool(plan_only)
     code_only = bool(code_only)
 
-    # plan_only wins – avoid conflicting content policies.
     if plan_only:
         return "plan-only"
     if code_only:
@@ -1626,16 +1599,6 @@ def _generate_run_id(
 ) -> str:
     """
     Generate a deterministic run_id for consistent primary artifact naming.
-    
-    Args:
-        repo_names: List of repository names
-        detail: Profile level (dev, max, summary, etc.)
-        path_filter: Optional path filter
-        ext_filter: Optional extension filter
-        timestamp: Optional timestamp string (if None, uses current time)
-    
-    Returns:
-        A deterministic run_id string
     """
     if timestamp is None:
         timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M")
@@ -1644,13 +1607,11 @@ def _generate_run_id(
 
     plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
 
-    # Path block first (stable anchor).
     if path_filter:
         path_slug = path_filter.strip().strip("/").replace("/", "-")
         if path_slug:
             components.append(path_slug)
 
-    # Repo block
     if not repo_names:
         components.append("no-repo")
     elif len(repo_names) == 1:
@@ -1660,17 +1621,14 @@ def _generate_run_id(
         repo_hash = hashlib.md5(repo_str.encode("utf-8")).hexdigest()[:6]
         components.append(f"multi-{repo_hash}")
 
-    # Mode + profile blocks
     components.append(_effective_render_mode(plan_only, code_only))
     components.append(detail)
 
-    # Optional filters (makes run_id unique per filter combination)
     if ext_filter:
         ext_clean = ext_filter.replace(".", "").replace(",", "+").replace(" ", "")
         if ext_clean:
             components.append(f"ext-{ext_clean}")
 
-    # Timestamp always last
     components.append(timestamp)
 
     return "-".join(components)
@@ -1679,15 +1637,12 @@ def _generate_run_id(
 def build_tree(file_infos: List[FileInfo]) -> str:
     by_root: Dict[str, List[Path]] = {}
 
-    # Sort roots first
     sorted_files = sorted(file_infos, key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower()))
 
     for fi in sorted_files:
         by_root.setdefault(fi.root_label, []).append(fi.rel_path)
 
     lines = ["```"]
-    # Keys are already sorted by insertion order in py3.7+, which matches our sorted_files loop,
-    # but let's be safe and sort keys based on REPO_ORDER.
     sorted_roots = sorted(by_root.keys(), key=lambda r: (get_repo_sort_index(r), r.lower()))
 
     for root in sorted_roots:
@@ -1715,14 +1670,6 @@ def build_tree(file_infos: List[FileInfo]) -> str:
                 lines.append(f"{indent}📁 {d}/")
                 walk(node[d], indent + "    ", root_lbl)
             for f in sorted(files):
-                # Optional: Hyperlinking in Tree
-                # Needs rel path reconstruction which is tricky in this recursive walk without passing it down
-                # For v2.3 Spec 6.3: 📄 [filename](#file-…)
-                # We need to construct the full relative path to generate the anchor.
-                # Since we don't pass the path down easily here, let's skip tree linking for this iteration
-                # to keep it robust, or do a simple approximation if needed.
-                # Actually, we can use a lookup if we want, but "optional" in spec allows skipping.
-                # Let's stick to plain text for now to avoid complexity in build_tree.
                 lines.append(f"{indent}📄 {f}")
 
         walk(tree, "    ", root)
@@ -1742,39 +1689,18 @@ def make_output_filename(
 ) -> Path:
     """
     Erzeugt den endgültigen Dateinamen für den Merge-Report.
-    
-    If run_id is provided, uses it as the base stem (deterministic).
-    Otherwise, generates filename from components (legacy behavior).
-    
-    Neuer Wunsch:
-    - Zuerst der Block aus dem Pfad-Filter (ohne 'path-'-Präfix)
-    - Danach der bisherige Rest (Repo-Block, Detail, Timestamp, evtl. Filter/Part)
     """
     
     plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
     render_mode = _effective_render_mode(plan_only, code_only)
 
-    # Normalize "no path filter" sentinels coming from UI/config.
-    # If the UI stores "root" (or "/") to mean "no specific subpath selected",
-    # we must *not* leak that into the filename.
     if isinstance(path_filter, str):
         pf = path_filter.strip()
         if pf in ("", "root", "/"):
             path_filter = None
 
-    # Phase 1.3: If run_id is provided and mode != single, use simple filename:
-    # <run_id>[_partxofy]_merge.md
-    #
-    # NOTE: We intentionally *disable* the run_id-as-filename shortcut.
-    # Reason: it produces opaque stems like "9f75ad" which are bad for humans,
-    # and it also hides useful context (mode/detail/timestamp).
-    # The run_id can still live in metadata; filenames stay descriptive.
-
-    # Legacy behavior: build filename from components
-    # 1. Timestamp (jetzt immer am Ende)
     ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
 
-    # 2. Repo-Block
     if not repo_names:
         repo_block = "no-repo"
     elif len(repo_names) == 1:
@@ -1783,38 +1709,24 @@ def make_output_filename(
         repo_block = "multi"
     repo_block = repo_block.replace("/", "-")
 
-    # 3. Detail-Block (overview/summary/dev/max)
     detail_block = detail
 
-    # 4. Pfad-Block: aus path_filter, aber OHNE 'path-' Präfix
-    # Wichtig: Wenn KEIN spezifischer Pfad gewählt ist, soll hier gar nichts stehen.
     path_block = None
     if path_filter:
         slug = path_filter.strip().strip("/")
         if slug:
             path_block = slug.replace("/", "-")
 
-    # 5. Mode-Block (Kollisionen vermeiden)
     mode_block = render_mode
 
-    # 6. Optional: Extension-Filter-Block (nur, wenn bewusst gesetzt)
     ext_block = None
     if ext_filter:
         cleaned = ext_filter.replace(" ", "").replace(".", "").replace(",", "+")
         if cleaned:
             ext_block = f"ext-{cleaned}"
 
-    # 7. Optional: Part-Suffix (_partXofY o. ä.) – kommt schon fertig rein
     part_block = part_suffix.lstrip("_") if part_suffix else ""
 
-    # 8. Reihenfolge bauen:
-    #    1. path_block
-    #    2. repo_block
-    #    3. mode_block
-    #    4. detail_block
-    #    5. ext_block (falls vorhanden)
-    #    6. part_block (falls vorhanden)
-    #    7. ts (am Ende)
     parts: List[str] = []
 
     if path_block:
@@ -1857,18 +1769,12 @@ def is_priority_file(fi: FileInfo) -> bool:
 def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
     """
     Render Delta Report block from delta metadata.
-    Shows what changed between base and current import.
-    
-    Supports both formats:
-    1. Schema-compliant (base_import, current_timestamp, summary.files_*)
-    2. Detailed format (base_timestamp, files_added/removed/changed as arrays)
     """
     lines = []
     lines.append("<!-- @delta:start -->")
     lines.append("## ♻ Delta Report")
     lines.append("")
     
-    # Extract timestamps - support both schema (base_import) and legacy (base_timestamp)
     base_ts = delta_meta.get("base_import") or delta_meta.get("base_timestamp", "unknown")
     current_ts = delta_meta.get("current_timestamp", "unknown")
     
@@ -1877,13 +1783,10 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
     lines.append("")
     
     def _safe_list_len(val):
-        """Helper: safely get length of value if it's a list, else 0."""
         return len(val) if isinstance(val, list) else 0
     
-    # Check for schema-compliant summary object
     summary = delta_meta.get("summary", {})
     if summary and isinstance(summary, dict):
-        # Schema-compliant format with counts
         added_count = summary.get("files_added", 0)
         removed_count = summary.get("files_removed", 0)
         changed_count = summary.get("files_changed", 0)
@@ -1894,12 +1797,10 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
         lines.append(f"- Files changed: {changed_count}")
         lines.append("")
         
-        # Check for detailed lists (optional extension to schema)
         added = delta_meta.get("files_added", [])
         removed = delta_meta.get("files_removed", [])
         changed = delta_meta.get("files_changed", [])
     else:
-        # Legacy detailed format with arrays
         added = delta_meta.get("files_added", [])
         removed = delta_meta.get("files_removed", [])
         changed = delta_meta.get("files_changed", [])
@@ -1910,7 +1811,6 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
         lines.append(f"- Files changed: {_safe_list_len(changed)}")
         lines.append("")
     
-    # Detail sections (only if we have lists)
     if isinstance(added, list) and added:
         lines.append("### Added Files")
         for f in added[:MAX_DELTA_FILES]:
@@ -1955,10 +1855,8 @@ def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
     """
     warnings = []
 
-    # Check for hausKI casing
     roots = set(f.root_label for f in files)
 
-    # Check for missing .wgx/profile.yml in repos
     for root in roots:
         has_profile = any(f.root_label == root and "wgx-profile" in f.tags for f in files)
         if not has_profile:
@@ -2007,30 +1905,22 @@ def iter_report_blocks(
     if extras is None:
         extras = ExtrasConfig.none()
 
-    # Navigation style: default should be quiet.
-    # You can later expose this as a UI toggle if desired.
     nav = NavStyle(emit_search_markers=False)
 
-    # UTC Timestamp
     now = datetime.datetime.utcnow()
 
-    # Sort files according to strict multi-repo order and then path
     files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
 
-    # Optional Code-only-Filter
     if code_only:
         files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
 
-    # Pre-calculate status based on Profile Strict Logic
     processed_files = []
 
     unknown_categories = set()
     unknown_tags = set()
-    files_missing_anchor = []
     roots = set(f.root_label for f in files)
 
     for fi in files:
-        # Generate deterministic anchor based on slugified repo + path, with collision-safe suffix
         rel_id = _slug_token(fi.rel_path.as_posix())
         repo_slug = _slug_token(fi.root_label)
         base_anchor = f"file-{repo_slug}-{rel_id}"
@@ -2038,26 +1928,16 @@ def iter_report_blocks(
         fi.anchor_alias = base_anchor
         fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
         
-        # Compute file roles
         fi.roles = compute_file_roles(fi)
 
-        # Debug checks
-        # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
-        # "other" ist gültig, aber signalisiert: nicht eindeutig klassifizierbar.
         if fi.category not in DEBUG_CONFIG.allowed_categories:
             unknown_categories.add(fi.category)
-        # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
 
-        # Check tags against the configured allow-list
         for tag in (fi.tags or []):
             if tag not in DEBUG_CONFIG.allowed_tags:
                 unknown_tags.add(tag)
 
         status = determine_inclusion_status(fi, level, max_file_bytes)
-
-        # Explicitly removed: automatic downgrade from "full" to "truncated"
-        # if status == "full" and fi.size > max_file_bytes:
-        #    status = "truncated"
 
         processed_files.append((fi, status))
 
@@ -2071,13 +1951,8 @@ def iter_report_blocks(
     text_files = [fi for fi in files if fi.is_text]
     included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
 
-    cat_stats = summarize_categories(files)
-
-    # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
-    # um später im Plan pro Repo eine Coverage-Zeile auszugeben
     included_by_root: Dict[str, int] = {}
 
-    # Declared Purpose (Patch C)
     declared_purpose = ""
     try:
         if sources:
@@ -2092,7 +1967,6 @@ def iter_report_blocks(
     code_folders = set()
     doc_folders = set()
 
-    # Organismus-Rollen (ohne neue Tags/Kategorien):
     organism_ai_ctx: List[FileInfo] = []
     organism_contracts: List[FileInfo] = []
     organism_pipelines: List[FileInfo] = []
@@ -2107,7 +1981,6 @@ def iter_report_blocks(
         if "docs" in parts:
             doc_folders.add("docs")
 
-        # Organismus-Rollen:
         if fi.category == "contract":
             organism_contracts.append(fi)
         if "ai-context" in (fi.tags or []):
@@ -2117,16 +1990,10 @@ def iter_report_blocks(
         if "wgx-profile" in (fi.tags or []):
             organism_wgx_profiles.append(fi)
 
-    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    # Re-calculate or re-use existing categorization?
-    # We need files_by_root NOW for Health Check, before Header.
-    # It was originally calculated later (at Plan block).
-    # So we move the calculation here.
     files_by_root: Dict[str, List[FileInfo]] = {}
     for fi in files:
         files_by_root.setdefault(fi.root_label, []).append(fi)
 
-    # jetzt, nachdem processed_files existiert, die Coverage pro Root berechnen
     for fi, status in processed_files:
         if status in ("full", "truncated"):
             included_by_root[fi.root_label] = included_by_root.get(fi.root_label, 0) + 1
@@ -2135,11 +2002,9 @@ def iter_report_blocks(
     for root, root_files in files_by_root.items():
         repo_stats[root] = summarize_repo(root_files, included_by_root.get(root, 0))
 
-    # Pre-Calculation for Health (needed for Meta Block)
     health_collector = None
     if extras.health:
         health_collector = HealthCollector()
-        # Analyze each repo
         for root in sorted(files_by_root.keys()):
             root_files = files_by_root[root]
             health_collector.analyze_repo(root, root_files)
@@ -2149,10 +2014,7 @@ def iter_report_blocks(
     header.append(f"# WC-Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
-    # --- Contract roles (agent-first clarity) ---
-    # Human-readable report contract (this Markdown)
     header.append("**Human Contract:** `wc-merge-report` (v2.4)")
-    # Machine-readable primary contract (the JSON primary artifact)
     header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.primary_json`")
     header.append("")
 
@@ -2181,7 +2043,6 @@ def iter_report_blocks(
     if max_file_bytes and max_file_bytes > 0:
         header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
     else:
-        # 0 / None = kein per-File-Limit – alles wird vollständig gelesen
         header.append("- **Max File Bytes:** unlimited")
     header.append(f"- **Spec-Version:** {SPEC_VERSION}")
     header.append(f"- **Contract:** {MERGE_CONTRACT_NAME}")
@@ -2190,24 +2051,20 @@ def iter_report_blocks(
     header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
     header.append(f"- **Render Mode:** `{render_mode}`")
 
-    # One-time navigation note (no per-file chatter).
     header.append("### Navigation")
     header.append("- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)")
     header.append("- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.")
     header.append("")
 
-    # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
     profile_usecase = PROFILE_USECASE.get(level)
     if profile_usecase:
         header.append(f"- **Profile Use-Case:** {profile_usecase}")
 
     header.append(f"- **Declared Purpose:** {declared_purpose}")
 
-    # Scope-Zeile: welche Roots/Repos sind beteiligt?
     scope_desc = describe_scope(files)
     header.append(f"- **Scope:** {scope_desc}")
 
-    # Neue, explizite Filterangaben
     if path_filter:
         header.append(f"- **Path Filter:** `{path_filter}`")
     else:
@@ -2221,25 +2078,18 @@ def iter_report_blocks(
     else:
         header.append("- **Extension Filter:** `none (all text types)`")
     
-    # Coverage in header (for quick AI assessment)
     if text_files:
         coverage_pct = int((included_count / len(text_files)) * 100)
         header.append(f"- **Coverage:** {coverage_pct}% ({included_count}/{len(text_files)} text files with content)")
     
     header.append("")
     
-    # Prepare human-readable filter descriptions for header display
-    path_filter_desc = path_filter if path_filter else "none (full tree)"
-    ext_filter_desc = ", ".join(sorted(ext_filter)) if ext_filter else "none (all text types)"
-
     # --- 3. Machine-readable Meta Block (für KIs) ---
-    # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
     if not plan_only:
         meta_lines: List[str] = []
         meta_lines.append("<!-- @meta:start -->")
         meta_lines.append("```yaml")
 
-        # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
         total_files = len(files)
         text_files_count = len(text_files)
         if text_files_count:
@@ -2260,11 +2110,11 @@ def iter_report_blocks(
                 "max_file_bytes": max_file_bytes,
                 "scope": scope_desc,
                 "source_repos": sorted([s.name for s in sources]) if sources else [],
-                "path_filter": path_filter,  # Use actual value, not description
-                "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
-                "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
-                "total_files": total_files,        # Total number of files in the merge
-                "total_size_bytes": total_size,    # Sum of all file sizes
+                "path_filter": path_filter,
+                "ext_filter": sorted(ext_filter) if ext_filter else None,
+                "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                "total_files": total_files,
+                "total_size_bytes": total_size,
                 "coverage": {
                     "included_files": included_count,
                     "text_files": text_files_count,
@@ -2273,15 +2123,12 @@ def iter_report_blocks(
             }
         }
 
-        # Extras-Flags
         if extras:
             extras_meta = _build_extras_meta(extras, len(roots))
             if extras_meta:
                 meta_dict["merge"]["extras"] = extras_meta
 
-        # Health-Status
         if extras and extras.health and health_collector:
-            # Determine overall status from collector results
             all_health = health_collector.get_all_health()
             if any(h.status == "critical" for h in all_health):
                 overall = "critical"
@@ -2292,7 +2139,6 @@ def iter_report_blocks(
 
             missing_set = set()
             for h in all_health:
-                # Naive mapping logic for 'missing' based on recommendations/warnings
                 if not h.has_contracts: missing_set.add("contracts")
                 if not h.has_ci_workflows: missing_set.add("ci")
                 if not h.has_wgx_profile: missing_set.add("wgx-profile")
@@ -2302,24 +2148,19 @@ def iter_report_blocks(
                 "missing": sorted(list(missing_set)),
             }
 
-        # --- Delta Meta (NEW fully correct block) ---
         if extras and extras.delta_reports:
             if delta_meta:
-                # Use the real delta metadata if provided
                 meta_dict["merge"]["delta"] = delta_meta
             else:
-                # Minimal enabling marker
                 meta_dict["merge"]["delta"] = {
                     "enabled": True
                 }
 
-        # Augment-Metadaten
         if extras and extras.augment_sidecar:
             augment_meta = _build_augment_meta(sources)
             if augment_meta:
                 meta_dict["merge"]["augment"] = augment_meta
 
-        # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
         if "yaml" in globals():
             meta_yaml = yaml.safe_dump(meta_dict)
             for line in meta_yaml.rstrip("\n").splitlines():
@@ -2363,7 +2204,6 @@ def iter_report_blocks(
     header.append("## Reading Plan")
     header.append("")
     if plan_only:
-        # Plan-Only: explizit machen, dass nur Plan & Meta im Merge sind.
         header.append("1. Hinweis: Dieser Merge wurde im **PLAN-ONLY** Modus erzeugt.")
         header.append("   - Enthält nur: Profilbeschreibung, Plan und Meta (`@meta`).")
         header.append("   - Enthält **nicht**: `Structure`, `Manifest` oder `Content`-Blöcke.")
@@ -2371,7 +2211,6 @@ def iter_report_blocks(
         header.append("2. Nutze diesen Merge, um schnell zu entscheiden, ob sich ein Voll-Merge lohnt,")
         header.append("   ohne Tokens für Dateiinhalte zu verbrauchen.")
     else:
-        # Standard-Lesepfad für Voll-Merges
         header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
         if level == "machine-lean":
             header.append("2. Danach: `Manifest` -> `Content`")
@@ -2395,7 +2234,6 @@ def iter_report_blocks(
         )
     plan.append("")
     
-    # Optional Delta Summary (if delta_meta is provided with summary)
     if extras.delta_reports and delta_meta and isinstance(delta_meta, dict):
         summary = delta_meta.get("summary", {})
         if isinstance(summary, dict):
@@ -2409,16 +2247,12 @@ def iter_report_blocks(
             plan.append(f"- Files changed: {files_changed}")
             plan.append("")
 
-    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    # files_by_root was calculated earlier for Health Check
-
     if files_by_root:
         plan.append("### Repo Snapshots")
         plan.append("")
         for root in sorted(files_by_root.keys()):
             root_files = files_by_root[root]
             root_total = len(root_files)
-            # „relevante Textdateien“: Code, Docs, Config, Tests, CI, Contracts
             root_text = sum(
                 1
                 for f in root_files
@@ -2443,7 +2277,6 @@ def iter_report_blocks(
     if infra_folders: plan.append(f"- Infra: `{', '.join(sorted(infra_folders))}`")
     plan.append("")
 
-    # Organismus-Overview (im Plan, ohne Spec-Reihenfolge zu brechen)
     plan.append("### Organism Overview")
     plan.append("")
     plan.append(
@@ -2462,14 +2295,13 @@ def iter_report_blocks(
 
     yield "\n".join(plan) + "\n"
 
-    # --- Health Report (Stage 1: Repo Doctor) ---
-    # Note: health_collector was already populated before header generation
+    # --- Health Report ---
     if extras.health and health_collector:
         health_report = health_collector.render_markdown()
         if health_report:
             yield health_report
 
-    # --- Delta Report Block (NEW) ---
+    # --- Delta Report Block ---
     if extras.delta_reports and delta_meta:
         try:
             delta_block = _render_delta_block(delta_meta)
@@ -2478,15 +2310,14 @@ def iter_report_blocks(
         except Exception as e:
             yield f"\n<!-- delta-error: {e} -->\n"
 
-    # --- Fleet Panorama (Stage 2 Multi-Repo) ---
+    # --- Fleet Panorama ---
     if extras.fleet_panorama:
         fleet_block = _render_fleet_panorama(sources, files)
         if fleet_block:
             yield fleet_block
 
-    # --- Organism Index (Stage 2: Single Repo) ---
+    # --- Organism Index ---
     if extras.organism_index and len(roots) == 1:
-        # Single-Repo-Organismus: Rolle + Organe explizit sichtbar machen
         repo_name = list(roots)[0]
         repo_role = infer_repo_role(repo_name, files)
 
@@ -2504,9 +2335,6 @@ def iter_report_blocks(
         organism_index.append(f"- WGX / Fleet-Profile: {len(organism_wgx_profiles)} Profil(e)")
         organism_index.append("")
 
-        # Detaillierte Abschnitte mit Fallbacks
-
-        # AI-Kontext
         if organism_ai_ctx:
             organism_index.append("### AI-Kontext")
             for fi in organism_ai_ctx:
@@ -2517,7 +2345,6 @@ def iter_report_blocks(
             organism_index.append("_Keine AI-Kontext-Dateien gefunden._")
             organism_index.append("")
 
-        # Verträge / Contracts
         if organism_contracts:
             organism_index.append("### Verträge (Contracts)")
             for fi in organism_contracts:
@@ -2528,7 +2355,6 @@ def iter_report_blocks(
             organism_index.append("_Keine Contract-Dateien gefunden._")
             organism_index.append("")
 
-        # Pipelines / CI
         if organism_pipelines:
             organism_index.append("### Pipelines (CI/CD)")
             for fi in organism_pipelines:
@@ -2539,7 +2365,6 @@ def iter_report_blocks(
             organism_index.append("_Keine CI/CD-Workflows gefunden._")
             organism_index.append("")
 
-        # WGX / Fleet-Profile
         if organism_wgx_profiles:
             organism_index.append("### WGX / Fleet-Profile")
             for fi in organism_wgx_profiles:
@@ -2554,14 +2379,14 @@ def iter_report_blocks(
         organism_index.append("")
         yield "\n".join(organism_index)
 
-    # --- AI Heatmap (Stage 3: Auto-Discovery) ---
+    # --- AI Heatmap ---
     if extras.heatmap:
         heatmap_collector = HeatmapCollector(files)
         hm_report = heatmap_collector.render_markdown()
         if hm_report:
             yield hm_report
 
-    # --- Augment Intelligence (Stage 4: Sidecar) ---
+    # --- Augment Intelligence ---
     if extras.augment_sidecar:
         augment_block = _render_augment_block(sources)
         if augment_block:
@@ -2570,7 +2395,7 @@ def iter_report_blocks(
     if plan_only:
         return
 
-    # --- 6. Structure --- (skipped for machine-lean)
+    # --- 6. Structure ---
     if level != "machine-lean":
         structure = []
         structure.append("## 📁 Structure")
@@ -2579,12 +2404,10 @@ def iter_report_blocks(
         structure.append("")
         yield "\n".join(structure) + "\n"
 
-    # --- Index (Patch B) ---
-    # Generated Categories Index - Only show non-empty categories/tags
+    # --- Index ---
     index_blocks = []
     index_blocks.extend(_heading_block(2, "index", "🧭 Index", nav=nav))
 
-    # Pre-check which categories/tags have files
     cats_to_idx = ["source", "doc", "config", "contract", "test"]
     non_empty_cats = []
     for c in cats_to_idx:
@@ -2592,15 +2415,12 @@ def iter_report_blocks(
         if cat_files:
             non_empty_cats.append(c)
     
-    # Check tag presence
     ci_files = [f for f in files if "ci" in (f.tags or [])]
     wgx_files = [f for f in files if "wgx-profile" in f.tags]
     
-    # Build TOC - only for non-empty sections
     for c in non_empty_cats:
         index_blocks.append(f"- [{c.capitalize()}](#cat-{_slug_token(c)})")
     
-    # Add tag TOC entries only if they have files
     if ci_files:
         index_blocks.append("- [CI Pipelines](#tag-ci)")
     if wgx_files:
@@ -2608,7 +2428,6 @@ def iter_report_blocks(
     
     index_blocks.append("")
 
-    # Category Lists - only non-empty
     for c in non_empty_cats:
         cat_files = [f for f in files if f.category == c]
         index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}", nav=nav))
@@ -2616,7 +2435,6 @@ def iter_report_blocks(
             index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
-    # Tag Lists – only non-empty
     if ci_files:
         index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci", nav=nav))
         for f in ci_files:
@@ -2631,7 +2449,7 @@ def iter_report_blocks(
 
     yield "\n".join(index_blocks) + "\n"
 
-    # --- 7. Manifest (Patch A) ---
+    # --- 7. Manifest ---
     manifest: List[str] = []
     manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
 
@@ -2693,7 +2511,7 @@ def iter_report_blocks(
 
         yield "\n".join(manifest) + "\n"
 
-    # --- Optional: Fleet Consistency ---
+    # --- Fleet Consistency ---
     consistency_warnings = check_fleet_consistency(files)
     if consistency_warnings:
         cons = []
@@ -2705,7 +2523,6 @@ def iter_report_blocks(
         yield "\n".join(cons) + "\n"
 
     # --- 8. Content ---
-    # Lean hierarchy: Content (#), Repo (##), File (###)
     content_header: List[str] = ["# Content", ""]
     content_roots = [fi.root_label for fi, status in processed_files if status in ("full", "truncated", "meta-only", "omitted")]
     if content_roots:
@@ -2729,9 +2546,7 @@ def iter_report_blocks(
             current_root = fi.root_label
 
         block = ["---"]
-        # Backwards-compatible alias anchor (old style without suffix)
         if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
-            # Provide HTML id for alias too (quiet mode: no visible marker spam)
             block.append(f'<a id="{fi.anchor_alias}"></a>')
             block.append("")
         block.extend(_heading_block(3, fi.anchor, nav=nav))
@@ -2746,7 +2561,6 @@ def iter_report_blocks(
         block.append(f"- MD5: {fi.md5}")
 
         content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
-        # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
         block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
 
         lang = lang_for(fi.ext)
@@ -2755,7 +2569,6 @@ def iter_report_blocks(
         block.append(content)
         block.append("```")
         block.append("")
-        # Backlinks: keep them simple
         block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
         yield "\n".join(block) + "\n\n"
 
@@ -2794,9 +2607,6 @@ def generate_report_content(
     except ValueError as e:
         if debug:
             print(f"DEBUG: Validation Error: {e}")
-        # In strict mode, we might want to raise, but for now let's just warn or allow passing if debug
-        # User said "Fehler -> kein Merge wird geschrieben." in Spec.
-        # So we should probably re-raise.
         raise
     return report
 
@@ -2815,7 +2625,6 @@ def generate_json_sidecar(
 ) -> Dict[str, Any]:
     """
     Generate a JSON sidecar structure for machine consumption.
-    Contains meta, files array, and minimal verification guards.
     """
     now = datetime.datetime.utcnow()
     requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only}
@@ -2849,11 +2658,9 @@ def generate_json_sidecar(
 
     coverage_pct = round((included_count / len(text_files)) * 100, 1) if text_files else 0.0
 
-    # Build meta block (agent-first contract)
     meta = {
         "contract": AGENT_CONTRACT_NAME,
         "contract_version": AGENT_CONTRACT_VERSION,
-        # keep existing useful fields for compatibility/traceability
         "spec_version": SPEC_VERSION,
         "profile": level,
         "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -2867,11 +2674,9 @@ def generate_json_sidecar(
         "total_files": len(files),
         "total_size_bytes": total_size,
         "source_repos": sorted([s.name for s in sources]) if sources else [],
-        # explicit include/exclude semantics (negation available even if None)
         "filters": {
             "path_filter": (path_filter or "").strip(),
             "ext_filter": ",".join(sorted(ext_filter)) if ext_filter else "",
-            # explicit negation sets (agent-safe): empty list means "no restriction" / "none excluded"
             "included_categories": sorted(list(DEBUG_CONFIG.code_only_categories)) if code_only else [],
             "excluded_categories": [],
             "included_globs": [],
@@ -2895,7 +2700,6 @@ def generate_json_sidecar(
             "included": status in ("full", "truncated"),
             "inclusion_status": status,
             "content_ref": {
-                # Markdown marker search is more robust than anchors/links.
                 "marker": f"FILE:{fid}",
             },
         }
@@ -2904,7 +2708,6 @@ def generate_json_sidecar(
     out = {
         "meta": meta,
         "artifacts": {
-            # filled by writer (paths)
             "primary_json": None,
             "human_md": None,
             "md_parts": [],
@@ -2943,49 +2746,15 @@ def write_reports_v2(
 
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
     
-    # Phase 1.3: Generate deterministic run_id once for this merge
     repo_names = [s["name"] for s in repo_summaries]
     run_id = _generate_run_id(repo_names, detail, path_filter, ext_filter_str, plan_only=plan_only, code_only=code_only)
 
-    # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
         if split_size > 0:
-            local_out_paths = []
-            part_num = 1
-            current_size = 0
-            current_lines = []
-
-            # --- Metadata tracking for parts (NEW) ---
-            parts_meta = []  # List of dicts: {first, last}
-            current_part_paths = []  # Paths in current buffer
-
-            # Helper to flush
-            def flush_part(is_last=False):
-                nonlocal part_num, current_size, current_lines, current_part_paths
-                if not current_lines:
-                    return
-
-                # Record metadata for this part
-                first = current_part_paths[0] if current_part_paths else None
-                last = current_part_paths[-1] if current_part_paths else None
-                parts_meta.append({"first": first, "last": last})
-                current_part_paths = []
-
-                # Temporärer Name während der Generierung
-                # Wir nutzen _tmp_partX, um es später sauber umzubenennen
-                out_path = output_filename_base_func(part_suffix=f"_tmp_part{part_num}")
-                out_path.write_text("".join(current_lines), encoding="utf-8")
-                local_out_paths.append(out_path)
-
-                part_num += 1
-                current_lines = []
-                # Add continuation header for next part
-                if not is_last:
-                    header = f"# WC-Merge Report (Part {part_num})\n\n"
-                    current_lines.append(header)
-                    current_size = len(header.encode('utf-8'))
-                else:
-                    current_size = 0
+            # Better approach:
+            # 1. Collect all blocks into a list.
+            # 2. Join them to validate structure.
+            # 3. If valid, iterate the list to write parts.
 
             iterator = iter_report_blocks(
                 target_files,
@@ -3001,18 +2770,58 @@ def write_reports_v2(
                 delta_meta,
             )
 
-            for block in iterator:
-                block_len = len(block.encode('utf-8'))
+            all_blocks = list(iterator)
+            full_report = "".join(all_blocks)
+            if plan_only:
+                 full_report = "<!-- MODE:PLAN_ONLY -->\n" + full_report
 
-                # --- Path detection (NEW) ---
-                # Detect path in block using regex to track range for signatures
+            if not plan_only:
+                try:
+                    validate_report_structure(full_report)
+                except ValueError as e:
+                    if debug:
+                        print(f"DEBUG: Validation Error: {e}")
+                    raise
+
+            # Now write parts
+            local_out_paths = []
+            part_num = 1
+            current_size = 0
+            current_lines = []
+
+            parts_meta = []
+            current_part_paths = []
+
+            def flush_part(is_last=False):
+                nonlocal part_num, current_size, current_lines, current_part_paths
+                if not current_lines:
+                    return
+
+                first = current_part_paths[0] if current_part_paths else None
+                last = current_part_paths[-1] if current_part_paths else None
+                parts_meta.append({"first": first, "last": last})
+                current_part_paths = []
+
+                out_path = output_filename_base_func(part_suffix=f"_tmp_part{part_num}")
+                out_path.write_text("".join(current_lines), encoding="utf-8")
+                local_out_paths.append(out_path)
+
+                part_num += 1
+                current_lines = []
+                if not is_last:
+                    header = f"# WC-Merge Report (Part {part_num})\n\n"
+                    current_lines.append(header)
+                    current_size = len(header.encode('utf-8'))
+                else:
+                    current_size = 0
+
+            for block in all_blocks:
+                block_len = len(block.encode('utf-8'))
                 m = re.search(r"\*\*Path:\*\* `(.+?)`", block)
                 block_path = m.group(1) if m else None
 
                 if current_size + block_len > split_size and len(current_lines) > 1:
                     flush_part()
-                    # After flush, block belongs to next part.
-                    # current_part_paths was cleared in flush_part.
 
                 current_lines.append(block)
                 current_size += block_len
@@ -3021,12 +2830,10 @@ def write_reports_v2(
 
             flush_part(is_last=True)
 
-            # Nachlauf: Header normalisieren UND Dateien umbenennen (Part X of Y)
             total_parts = len(local_out_paths)
             final_paths = []
 
             for idx, path in enumerate(local_out_paths, start=1):
-                # 1. Header Rewrite
                 try:
                     text = path.read_text(encoding="utf-8")
                     lines = text.splitlines(True)
@@ -3038,7 +2845,6 @@ def write_reports_v2(
                             if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
                                 lines[i] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
 
-                                # --- Inject Signature (NEW) ---
                                 if total_parts > 1:
                                     meta = parts_meta[idx - 1]
                                     p_start = meta["first"]
@@ -3047,7 +2853,6 @@ def write_reports_v2(
 
                                     prev_name = "none"
                                     if idx > 1:
-                                        # calculate name of part idx-1
                                         prev_suffix = f"_part{idx - 1}of{total_parts}"
                                         prev_path_obj = output_filename_base_func(part_suffix=prev_suffix)
                                         prev_name = prev_path_obj.name
@@ -3065,11 +2870,8 @@ def write_reports_v2(
                                 break
                     text = "".join(lines)
                 except Exception:
-                    text = None  # Skip rewrite if read fails, but still rename
+                    text = None
 
-                # 2. Rename File
-                # If total_parts == 1, no part suffix.
-                # If total_parts > 1, _partXofY.
                 if total_parts == 1:
                     new_suffix = ""
                 else:
@@ -3079,13 +2881,11 @@ def write_reports_v2(
 
                 if text is not None:
                     new_path.write_text(text, encoding="utf-8")
-                    # Delete old tmp file
                     try:
                         path.unlink()
                     except OSError:
                         pass
                 else:
-                    # Just rename if we couldn't read/edit content
                     try:
                         path.rename(new_path)
                     except OSError as e:
@@ -3096,7 +2896,7 @@ def write_reports_v2(
             out_paths.extend(final_paths)
 
         else:
-            # Standard single file (no split logic active, e.g. split_size=0)
+            # Standard single file
             content = generate_report_content(
                 target_files,
                 detail,
@@ -3139,8 +2939,6 @@ def write_reports_v2(
             ),
         )
         
-        # Write JSON sidecar if enabled (agent-first: also for plan_only)
-        # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
         if extras and extras.json_sidecar:
             total_size = sum(
                 f.size for f in all_files if (not code_only or f.category in DEBUG_CONFIG.code_only_categories)
@@ -3158,11 +2956,9 @@ def write_reports_v2(
                 delta_meta,
                 requested_flags=requested_flags,
             )
-            # Generate JSON filename: use first MD file for name, or fallback to deterministic name
             if out_paths:
                 json_path = out_paths[0].with_suffix('.json')
             else:
-                # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
                 json_path = make_output_filename(
                     merges_dir,
                     repo_names,
@@ -3189,7 +2985,6 @@ def write_reports_v2(
             s_files = s["files"]
             s_root = s["root"]
             
-            # Generate per-repo run_id for deterministic naming
             repo_run_id = _generate_run_id([s_name], detail, path_filter, ext_filter_str, plan_only=plan_only, code_only=code_only)
 
             process_and_write(
@@ -3208,8 +3003,6 @@ def write_reports_v2(
                 ),
             )
             
-            # Write JSON sidecar if enabled (agent-first: also for plan_only)
-            # JSON must be written when json_sidecar is active - no conditions like "and not plan_only"
             if extras and extras.json_sidecar:
                 total_size = sum(
                     f.size for f in s_files if (not code_only or f.category in DEBUG_CONFIG.code_only_categories)
@@ -3227,11 +3020,9 @@ def write_reports_v2(
                     delta_meta,
                     requested_flags=requested_flags,
                 )
-                # Generate JSON filename: use last MD file for name, or fallback to deterministic name
                 if out_paths:
                     json_path = out_paths[-1].with_suffix('.json')
                 else:
-                    # Fallback: generate JSON even if no MD files (shouldn't happen, but be defensive)
                     json_path = make_output_filename(
                         merges_dir,
                         [s_name],
@@ -3246,7 +3037,6 @@ def write_reports_v2(
                 
                 json_data["artifacts"]["primary_json"] = str(json_path)
                 md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
-                # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
                 json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
                 json_data["artifacts"]["human_md"] = (
                     str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
@@ -3255,37 +3045,29 @@ def write_reports_v2(
                 json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
                 out_paths.append(json_path)
 
-    # --- Post-check & deterministic ordering (primary artifact first) ---
     md_paths = [p for p in out_paths if p.suffix.lower() == ".md"]
     json_paths = [p for p in out_paths if p.suffix.lower() == ".json"]
     other_paths = [p for p in out_paths if p.suffix.lower() not in (".md", ".json")]
 
-    # Verify that reported .md outputs really exist and are non-empty.
-    # This prevents "generated" messages when the file did not land where expected.
     verified_md: List[Path] = []
     for p in md_paths:
         try:
             if p.exists() and p.is_file() and p.stat().st_size > 0:
                 verified_md.append(p)
         except Exception:
-            # treat as missing
             pass
 
     if md_paths and not verified_md:
-        # We *expected* at least one markdown output, but none is actually usable.
-        # Make this a hard error so callers don't display a success message.
         raise RuntimeError(
             "wc-merger: Report was announced as written, but no non-empty .md output exists on disk. "
             "Check merges_dir / permissions / rename logic."
         )
 
-    # If json_sidecar is enabled, JSON is the primary artifact: verify it exists & is non-empty.
     verified_json: List[Path] = []
     if extras and extras.json_sidecar:
         for p in json_paths:
             try:
                 if p.exists() and p.is_file() and p.stat().st_size > 0:
-                    # sanity: load + minimal validate
                     d = json.loads(p.read_text(encoding="utf-8"))
                     _validate_agent_json_dict(d)
                     verified_json.append(p)
@@ -3296,10 +3078,7 @@ def write_reports_v2(
                 "wc-merger: JSON primary artifact was announced as written, but no valid non-empty .json exists on disk."
             )
 
-    # Primary ordering: JSON (if enabled) first, then Markdown, then other artifacts.
-    # Return structured MergeArtifacts object instead of flat list
     if extras and extras.json_sidecar:
-        # JSON is primary when json_sidecar is enabled
         return MergeArtifacts(
             primary_json=verified_json[0] if verified_json else None,
             human_md=verified_md[0] if verified_md else None,
@@ -3307,7 +3086,6 @@ def write_reports_v2(
             other=other_paths
         )
     else:
-        # Markdown is primary when json_sidecar is disabled
         return MergeArtifacts(
             primary_json=None,
             human_md=verified_md[0] if verified_md else None,
