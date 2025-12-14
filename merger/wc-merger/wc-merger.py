@@ -322,20 +322,40 @@ def _run_extractor_on_start(hub: Path) -> None:
         return
 
 
+def _dismiss_view_best_effort(v) -> None:
+    """
+    Pythonista-UI: möglichst robust schließen, unabhängig davon,
+    ob der View via present()/sheet()/fullscreen oder als Subview hängt.
+    Reihenfolge ist Absicht: dismiss() ist bei präsentierten Views am wirksamsten.
+    """
+    if v is None:
+        return
+    # 1) dismiss (für present('fullscreen'/'sheet'/etc.))
+    try:
+        v.dismiss()
+    except Exception:
+        pass
+    # 2) close (für manche Kontexte / Fallback)
+    try:
+        v.close()
+    except Exception:
+        pass
+    # 3) remove_from_superview (falls der View irgendwo eingebettet ist)
+    try:
+        if getattr(v, "superview", None) is not None:
+            v.remove_from_superview()
+    except Exception:
+        pass
+
+
 def run_ui(hub: Path) -> int:
     """Starte den Merger im Vollbild-UI-Modus ohne Pythonista-Titlebar."""
     global _ACTIVE_MERGER_VIEW
     # If there is already a Merger view on screen, close it before presenting a new one.
     try:
-        if _ACTIVE_MERGER_VIEW is not None and getattr(_ACTIVE_MERGER_VIEW, "on_screen", False):
-            try:
-                _ACTIVE_MERGER_VIEW.close()
-            except Exception:
-                # Fallback: some contexts prefer dismiss()
-                try:
-                    _ACTIVE_MERGER_VIEW.dismiss()
-                except Exception:
-                    pass
+        if _ACTIVE_MERGER_VIEW is not None:
+            _dismiss_view_best_effort(_ACTIVE_MERGER_VIEW)
+            _ACTIVE_MERGER_VIEW = None
     except Exception:
         # Never block opening a new UI because cleanup failed.
         pass
@@ -951,7 +971,8 @@ class MergerUI(object):
         """Schließt den Merger-Screen in Pythonista."""
         global _ACTIVE_MERGER_VIEW
         try:
-            self.view.close()
+            # dismiss() ist bei präsentierten Views zuverlässiger als close()
+            _dismiss_view_best_effort(self.view)
         except Exception as e:
             # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven, aber loggen
             sys.stderr.write(f"Warning: Failed to close view: {e}\n")
