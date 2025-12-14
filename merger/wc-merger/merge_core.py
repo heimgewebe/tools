@@ -1754,13 +1754,21 @@ def make_output_filename(
     plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
     render_mode = _effective_render_mode(plan_only, code_only)
 
-    if run_id:
-        # Phase 1.3: Use deterministic run_id as base stem (already includes mode + timestamp)
-        if part_suffix:
-            filename = f"{run_id}{part_suffix}_merge.md"
-        else:
-            filename = f"{run_id}_merge.md"
-        return merges_dir / filename
+    # Normalize "no path filter" sentinels coming from UI/config.
+    # If the UI stores "root" (or "/") to mean "no specific subpath selected",
+    # we must *not* leak that into the filename.
+    if isinstance(path_filter, str):
+        pf = path_filter.strip()
+        if pf in ("", "root", "/"):
+            path_filter = None
+
+    # Phase 1.3: If run_id is provided and mode != single, use simple filename:
+    # <run_id>[_partxofy]_merge.md
+    #
+    # NOTE: We intentionally *disable* the run_id-as-filename shortcut.
+    # Reason: it produces opaque stems like "9f75ad" which are bad for humans,
+    # and it also hides useful context (mode/detail/timestamp).
+    # The run_id can still live in metadata; filenames stay descriptive.
 
     # Legacy behavior: build filename from components
     # 1. Timestamp (jetzt immer am Ende)
