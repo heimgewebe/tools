@@ -1244,13 +1244,13 @@ class MergerUI(object):
                     console.alert("wc-merger", "No saved state found.", "OK", hide_cancel_button=True)
             return
         except Exception as exc:
-            print(f"[wc-merger] could not read state: {exc!r}")
+            print(f"[wc-merger] could not read state: {exc!r}", file=sys.stderr)
             return
 
         try:
             data = json.loads(raw)
         except Exception as exc:
-            print(f"[wc-merger] invalid state JSON: {exc!r}")
+            print(f"[wc-merger] invalid state JSON: {exc!r}", file=sys.stderr)
             return
 
         # Felder setzen
@@ -1258,9 +1258,9 @@ class MergerUI(object):
         if profile and profile in self.seg_detail.segments:
             try:
                 self.seg_detail.selected_index = self.seg_detail.segments.index(profile)
-            except ValueError:
+            except ValueError as e:
                 # If the profile is not found in segments, just skip setting selected_index.
-                pass
+                print(f"[wc-merger] Profile '{profile}' not found in segments: {e}", file=sys.stderr)
 
         self.ext_field.text = data.get("ext_filter", "")
         self.path_field.text = data.get("path_filter", "")
@@ -1444,8 +1444,8 @@ class MergerUI(object):
                             and "summary" in raw
                         ):
                             delta_meta = raw
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[wc-merger] Failed to read delta.json: {e}", file=sys.stderr)
 
             if not delta_meta:
                 msg = "Could not extract delta metadata from diff."
@@ -1467,18 +1467,55 @@ class MergerUI(object):
             )
 
             # Need to scan repo for write_reports_v2
-            # delta-full implies max bytes? existing logic uses profile="delta-full".
-            # wc-merger.py presets for profiles:
-            # dev/max use max_bytes=0.
-            # Let's use max_bytes=0 (unlimited) as standard for full delta.
+            # Delta Report Strategy:
+            # 1. Scan repo fully (max_bytes=0 => unlimited)
+            # 2. Filter file list based on delta_meta (changed + added)
+            # 3. Use profile 'max' to ensure full content is included for these files
+
             summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=0)
 
+            # Filter files to include only changed/added
+            # Helper to collect paths from delta_meta
+            allowed_paths = set()
+
+            # Check for legacy arrays
+            if "files_added" in delta_meta and isinstance(delta_meta["files_added"], list):
+                allowed_paths.update(delta_meta["files_added"])
+
+            if "files_changed" in delta_meta and isinstance(delta_meta["files_changed"], list):
+                for item in delta_meta["files_changed"]:
+                    if isinstance(item, dict):
+                        path = item.get("path")
+                        if path: allowed_paths.add(path)
+                    elif isinstance(item, str):
+                        allowed_paths.add(item)
+
+            # Check for summary object (wc-merge-delta schema) if arrays are missing/empty
+            # Note: The schema stores lists in top-level usually. If they are missing, we can't filter.
+            # If allowed_paths is empty but summary says there are changes, we might have a problem.
+            # But assume delta_meta is well-formed from extractor.
+
+            if allowed_paths:
+                # Filter the file list in summary
+                # Use normalized posix string for comparison
+                filtered_files = []
+                for f in summary["files"]:
+                    if f.rel_path.as_posix() in allowed_paths:
+                        filtered_files.append(f)
+
+                summary["files"] = filtered_files
+                # Update stats
+                summary["total_files"] = len(filtered_files)
+                summary["total_bytes"] = sum(f.size for f in filtered_files)
+
             # Generate merge reports
+            # Use 'max' profile to ensure full content for the changed/added files
+            # (dev/doc logic might otherwise hide content for doc changes)
             artifacts = write_reports_v2(
                 merges_dir,
                 self.hub,
                 [summary],
-                "dev", # use 'dev' as base profile, but delta block will be added
+                "max",
                 "repo",
                 0,
                 plan_only=False,
