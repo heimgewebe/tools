@@ -65,10 +65,17 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     lines: List[str] = []
     if nav.emit_search_markers:
         lines.append(f"§§ {token}")
-    lines.extend([f'<a id="{token}"></a>', "#" * level + " " + token, ""])
+
+    # Correction for readable headers (Spec v2.4):
+    # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
+    lines.append(f'<a id="{token}"></a>')
+
     if title:
-        lines.append(f"**{title}**")
-        lines.append("")
+        lines.append("#" * level + " " + title)
+    else:
+        lines.append("#" * level + " " + token)
+
+    lines.append("")
     return lines
 
 # --- Configuration & Heuristics ---
@@ -2228,8 +2235,8 @@ def iter_report_blocks(
     try:
         if sources:
             declared_purpose = extract_purpose(sources[0])
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"Warning: extract_purpose failed: {e}\n")
 
     if not declared_purpose:
         declared_purpose = "(none)"
