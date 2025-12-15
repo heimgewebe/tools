@@ -23,6 +23,7 @@ import sys
 import os
 import json
 import traceback
+import time
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
@@ -1554,6 +1555,23 @@ class MergerUI(object):
             return
 
     def run_merge(self, sender) -> None:
+        """
+        UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
+        sonst wirkt Pythonista "eingefroren" – besonders bei Multi-Repo.
+        """
+        try:
+            import ui as _ui
+            in_bg = getattr(_ui, "in_background", None)
+        except Exception:
+            in_bg = None
+
+        if in_bg:
+            in_bg(self._run_merge_safe)()
+        else:
+            # Fallback: wenigstens nicht crashen – aber UI kann dann weiterhin blocken.
+            self._run_merge_safe()
+
+    def _run_merge_safe(self) -> None:
         try:
             # Aktuellen Zustand merken
             self.save_last_state()
@@ -1605,10 +1623,23 @@ class MergerUI(object):
             code_only = False
 
         summaries = []
-        for name in selected:
+        total = len(selected)
+        for i, name in enumerate(selected, start=1):
             root = self.hub / name
             if not root.is_dir():
                 continue
+            # Mini-Progress + UI-Yield (hilft spürbar bei Pythonista)
+            if console:
+                try:
+                    console.hud_alert(f"Scanning {i}/{total}: {name}", duration=0.6)
+                except Exception:
+                    pass
+            try:
+                import ui as _ui
+                # yield to main loop without slowing down much
+                _ui.delay(lambda: None, 0.0)
+            except Exception:
+                pass
             summary = scan_repo(root, extensions or None, path_contains, max_bytes)
             summaries.append(summary)
 
