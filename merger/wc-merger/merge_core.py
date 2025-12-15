@@ -2370,7 +2370,8 @@ def iter_report_blocks(
     # Coverage in header (for quick AI assessment)
     if text_files:
         coverage_pct = int((included_count / len(text_files)) * 100)
-        header.append(f"- **Coverage:** {coverage_pct}% ({included_count}/{len(text_files)} text files with content)")
+        # Spec v2.4: Coverage line with German suffix
+        header.append(f"- **Coverage:** {coverage_pct}% ({included_count}/{len(text_files)} Dateien mit vollem Inhalt)")
     
     header.append("")
     
@@ -3266,6 +3267,19 @@ def write_reports_v2(
                 extras,
                 delta_meta,
             )
+
+            # Spec v2.4: Always enforce Part N/M header, even for single files (1/1)
+            lines = content.splitlines(True)
+            if lines:
+                prefix_ver = "# WC-Merge Report (v"
+                prefix_main = "# WC-Merge Report"
+                for i, line in enumerate(lines):
+                    stripped = line.lstrip("\ufeff")
+                    if stripped.startswith(prefix_ver) or stripped.startswith(prefix_main):
+                        lines[i] = "# WC-Merge Report (Part 1/1)\n"
+                        break
+            content = "".join(lines)
+
             out_path = output_filename_base_func(part_suffix="")
             out_path.write_text(content, encoding="utf-8")
             out_paths.append(out_path)
