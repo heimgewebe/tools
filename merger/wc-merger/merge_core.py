@@ -2089,9 +2089,19 @@ class ReportValidator:
         elif "content" in lower and (stripped.startswith("## ") or stripped.startswith("# ")):
             # Accept "# Content" (legacy/lean) or "## 📄 Content" (spec strict)
             current_step = "content"
-        elif "index" in lower and stripped.startswith("##") and "organism" not in lower:
+        elif stripped.startswith("##") and "organism" not in lower:
             # Main Index (Patch B)
-            current_step = "index"
+            #
+            # IMPORTANT:
+            # The old check used a substring match ("index" in lower), which
+            # false-positives on headings like "Navigation-Indexe", "Indexierung",
+            # "Indexe", etc. Those can appear inside repo docs and would break
+            # the invariant structure ordering.
+            #
+            # We only treat it as the report's main Index if "index" is a whole word,
+            # or the exact "🧭 Index" header.
+            if re.search(r"(^##\s*🧭\s*index\b)|(\bindex\b)", lower):
+                current_step = "index"
 
         if current_step:
             self._enforce_order(current_step)
