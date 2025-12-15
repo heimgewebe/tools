@@ -1074,7 +1074,7 @@ def summarize_repo(files: List["FileInfo"], included_count: int) -> Dict[str, An
     text_files = sum(
         1
         for f in files
-        if f.is_text and f.category in {"source", "doc", "config", "test", "ci", "contract"}
+        if f.is_text and f.category in {"source", "doc", "config", "test", "contract"}
     )
     total_bytes = sum(f.size for f in files)
 
@@ -1200,7 +1200,7 @@ def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) 
         return "full" if is_priority_file(fi) else "meta-only"
 
     if level == "summary":
-        if fi.category in ["doc", "config", "contract", "ci"] or "ai-context" in tags or "wgx-profile" in tags:
+        if fi.category in ["doc", "config", "contract"] or "ci" in tags or "ai-context" in tags or "wgx-profile" in tags:
             return "full"
         if fi.category in ["source", "test"]:
             return "full" if is_priority_file(fi) else "meta-only"
@@ -1209,7 +1209,7 @@ def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) 
     if level in ("dev", "machine-lean"):
         if "lockfile" in tags:
             return "meta-only" if fi.size > 20_000 else "full"
-        if fi.category in ["source", "test", "config", "ci", "contract"]:
+        if fi.category in ["source", "test", "config", "contract"] or "ci" in tags:
             return "full"
         if fi.category == "doc":
             return "full" if is_priority_file(fi) else "meta-only"
