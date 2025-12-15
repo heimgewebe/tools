@@ -2007,6 +2007,7 @@ class ReportValidator:
         self.seen_sections = set()
         self.buffer = ""
         self.in_code_block = False
+        self.fence_len = 0
 
     def feed(self, chunk: str):
         """
@@ -2038,8 +2039,24 @@ class ReportValidator:
         stripped = line.strip()
 
         # Track code blocks to avoid false positives in file content
+        # Spec v2.4 fix: Support variable fence length (CommonMark)
         if stripped.startswith("```"):
-            self.in_code_block = not self.in_code_block
+            # Determine length of this fence
+            match = re.match(r"^(`+)", stripped)
+            current_len = len(match.group(1)) if match else 0
+
+            if not self.in_code_block:
+                # Opening a block
+                self.in_code_block = True
+                self.fence_len = current_len
+            else:
+                # Closing? Only if length >= opening length
+                if current_len >= self.fence_len:
+                    self.in_code_block = False
+                    self.fence_len = 0
+                else:
+                    # It's a nested fence (shorter), ignore it (treat as content)
+                    pass
             return
 
         if self.in_code_block:
@@ -2918,11 +2935,21 @@ def iter_report_blocks(
         # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
         block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
 
+        # Dynamic fence length to escape content containing backticks
+        max_ticks = 0
+        if "```" in content:
+            ticks = re.findall(r"`{3,}", content)
+            if ticks:
+                max_ticks = max(len(t) for t in ticks)
+
+        fence_len = max(3, max_ticks + 1)
+        fence = "`" * fence_len
+
         lang = lang_for(fi.ext)
         block.append("")
-        block.append(f"```{lang}")
+        block.append(f"{fence}{lang}")
         block.append(content)
-        block.append("```")
+        block.append(f"{fence}")
         block.append("")
         # Backlinks: keep them simple
         block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
