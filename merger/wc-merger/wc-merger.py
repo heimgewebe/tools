@@ -1546,7 +1546,13 @@ class MergerUI(object):
             self._run_merge_inner()
         except Exception as e:
             traceback.print_exc()
-            msg = f"Error: {e}"
+
+            # Use specific messaging for validation errors if possible
+            if "ValidationException" in type(e).__name__ or "Structure Violation" in str(e):
+                msg = f"Validation Error: {e}"
+            else:
+                msg = f"Error: {e}"
+
             if console:
                 console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
             else:
