@@ -1967,28 +1967,174 @@ def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
 
     return warnings
 
-def validate_report_structure(report: str):
-    """Checks if report follows Spec v2.3 structure."""
-    required = [
-        "## Source & Profile",
-        "## Profile Description",
-        "## Reading Plan",
-        "## Plan",
-        "## 📁 Structure",
-        "## manifest",
-        "## 📄 Content",
+
+class ValidationException(Exception):
+    pass
+
+
+class ReportValidator:
+    """
+    Validates report structure incrementally (Stream Validation).
+    Enforces Spec v2.4 Invariant Structure (Section 2).
+    """
+
+    # Normalized signatures for required sections in order
+    REQUIRED_ORDER = [
+        "header",               # # WC-Merge Report ...
+        "source_profile",       # ## Source & Profile
+        "profile_desc",         # ## Profile Description
+        "reading_plan",         # ## Reading Plan
+        "plan",                 # ## Plan
+        # Extras come here (Health, Delta, etc) -> no strict check except they are between Plan and Structure
+        # Structure is optional (machine-lean)
+        # Manifest is required
+        # Content is required
     ]
 
-    positions = []
-    for sec in required:
-        pos = report.find(sec)
-        if pos == -1:
-            raise ValueError(f"Missing section: {sec}")
-        positions.append(pos)
+    def __init__(self, plan_only: bool = False, code_only: bool = False, machine_lean: bool = False):
+        self.plan_only = plan_only
+        self.code_only = code_only
+        self.machine_lean = machine_lean
+        self.state_idx = 0
+        self.seen_sections = set()
+        self.buffer = ""
+        self.in_code_block = False
 
-    # enforce ordering
-    if positions != sorted(positions):
-        raise ValueError("Section ordering does not match Spec v2.3")
+    def feed(self, chunk: str):
+        """
+        Feed a chunk of the report (e.g. a block from iter_report_blocks).
+        Validates headings found in the chunk.
+        """
+        # We process line by line to reliably catch headings
+        self.buffer += chunk
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            self._check_line(line)
+
+    def close(self):
+        """Finalize validation."""
+        # Process remaining buffer
+        if self.buffer:
+            self._check_line(self.buffer)
+
+        # Check if we missed required sections
+        # Note: We can't strictly enforce "Content" presence here because of split-parts (last part might just be content)
+        # But for single-file generation it matters.
+        # However, since this validator is used in write_reports_v2 which might write partial files,
+        # strict "completeness" check at the end is tricky for splits.
+        # We assume if the stream finished without order violation, it's OK.
+        # Real completeness check is done via internal state logic if needed.
+        pass
+
+    def _check_line(self, line: str):
+        stripped = line.strip()
+
+        # Track code blocks to avoid false positives in file content
+        if stripped.startswith("```"):
+            self.in_code_block = not self.in_code_block
+            return
+
+        if self.in_code_block:
+            return
+
+        if not stripped.startswith("#"):
+            return
+
+        # Identify section
+        lower = stripped.lower()
+
+        # Map headings to logical steps
+        current_step = None
+
+        if stripped.startswith("# WC-Merge Report"):
+            current_step = "header"
+        elif "source & profile" in lower:
+            current_step = "source_profile"
+        elif "profile description" in lower:
+            current_step = "profile_desc"
+        elif "reading plan" in lower:
+            current_step = "reading_plan"
+        elif stripped == "## Plan":
+            current_step = "plan"
+        elif "structure" in lower and stripped.startswith("##"):
+            current_step = "structure"
+        elif "manifest" in lower and stripped.startswith("##"):
+            # Could be "## 🧾 Manifest"
+            current_step = "manifest"
+        elif "content" in lower and (stripped.startswith("## ") or stripped.startswith("# ")):
+            # Accept "# Content" (legacy/lean) or "## 📄 Content" (spec strict)
+            current_step = "content"
+        elif "index" in lower and stripped.startswith("##") and "organism" not in lower:
+            # Main Index (Patch B)
+            current_step = "index"
+
+        if current_step:
+            self._enforce_order(current_step)
+
+    def _enforce_order(self, step: str):
+        # Define the strict sequence indices
+        # We allow gaps (skipping optional sections), but not backtracking.
+
+        sequence = {
+            "header": 0,
+            "source_profile": 10,
+            "profile_desc": 20,
+            "reading_plan": 30,
+            "plan": 40,
+            # Extras range: 41-49
+            "structure": 50,
+            "index": 55, # Spec v2.4 Section 8: Index before Manifest
+            "manifest": 60,
+            "content": 70
+        }
+
+        # Plan-only stops after Plan (roughly)
+        if self.plan_only and sequence.get(step, 0) > 40:
+             # Plan-only might have headers? Usually not Structure/Manifest/Content.
+             # But if it does (e.g. meta info formatted as header), we might need to be careful.
+             # Standard iter_report_blocks breaks early for plan_only.
+             pass
+
+        if step not in sequence:
+            return
+
+        new_idx = sequence[step]
+
+        # Special case: Structure is optional.
+        # Index is optional.
+
+        if new_idx < self.state_idx:
+            # Violation!
+            raise ValidationException(
+                f"Structure Violation: Found section '{step}' (order {new_idx}) "
+                f"after reaching order {self.state_idx}. "
+                "Invariant Structure (Spec v2.4) violated."
+            )
+
+        self.state_idx = new_idx
+        self.seen_sections.add(step)
+
+    def validate_full(self, report_content: str):
+        """Validate a full string report."""
+        self.feed(report_content)
+        self.close()
+
+        # For full validation, we can check required presence
+        required = ["header", "source_profile", "profile_desc", "reading_plan", "plan"]
+        if not self.plan_only:
+            required.append("manifest")
+            if not self.machine_lean:
+                # Structure optional in machine-lean
+                pass
+                # Note: Manifest and Content are mandatory for full merge
+            required.append("content")
+
+        for req in required:
+            if req not in self.seen_sections:
+                 # Be lenient if plan_only and we check content
+                 if self.plan_only and req in ("manifest", "content"):
+                     continue
+                 raise ValidationException(f"Missing required section: {req}")
 
 
 def iter_report_blocks(
@@ -2705,8 +2851,11 @@ def iter_report_blocks(
         yield "\n".join(cons) + "\n"
 
     # --- 8. Content ---
-    # Lean hierarchy: Content (#), Repo (##), File (###)
-    content_header: List[str] = ["# Content", ""]
+    # Spec v2.4 Section 2: "7. 📄 Content" implies ## level to match invariants.
+    # However, legacy "Lean hierarchy" used # Content.
+    # We adopt ## 📄 Content for strict compliance and shift sub-levels.
+
+    content_header: List[str] = ["## 📄 Content", ""]
     content_roots = [fi.root_label for fi, status in processed_files if status in ("full", "truncated", "meta-only", "omitted")]
     if content_roots:
         nav_links = " · ".join(
@@ -2725,7 +2874,8 @@ def iter_report_blocks(
 
         if fi.root_label != current_root:
             repo_slug = _slug_token(fi.root_label)
-            yield "\n".join(_heading_block(2, f"repo-{repo_slug}", fi.root_label, nav=nav)) + "\n"
+            # Level 3 for Repos (was 2)
+            yield "\n".join(_heading_block(3, f"repo-{repo_slug}", fi.root_label, nav=nav)) + "\n"
             current_root = fi.root_label
 
         block = ["---"]
@@ -2734,7 +2884,8 @@ def iter_report_blocks(
             # Provide HTML id for alias too (quiet mode: no visible marker spam)
             block.append(f'<a id="{fi.anchor_alias}"></a>')
             block.append("")
-        block.extend(_heading_block(3, fi.anchor, nav=nav))
+        # Level 4 for Files (was 3)
+        block.extend(_heading_block(4, fi.anchor, nav=nav))
         block.append(f"**Path:** `{fi.rel_path}`")
         block.append(f"- Category: {fi.category}")
         if fi.tags:
@@ -2789,15 +2940,11 @@ def generate_report_content(
     )
     if plan_only:
         return "<!-- MODE:PLAN_ONLY -->\n" + report
-    try:
-        validate_report_structure(report)
-    except ValueError as e:
-        if debug:
-            print(f"DEBUG: Validation Error: {e}")
-        # In strict mode, we might want to raise, but for now let's just warn or allow passing if debug
-        # User said "Fehler -> kein Merge wird geschrieben." in Spec.
-        # So we should probably re-raise.
-        raise
+
+    # Use new Validator
+    validator = ReportValidator(plan_only=plan_only, code_only=code_only, machine_lean=(level=="machine-lean"))
+    validator.validate_full(report)
+
     return report
 
 def generate_json_sidecar(
@@ -2949,6 +3096,9 @@ def write_reports_v2(
 
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
+        # Instantiate stream validator
+        validator = ReportValidator(plan_only=plan_only, code_only=code_only, machine_lean=(detail=="machine-lean"))
+
         if split_size > 0:
             local_out_paths = []
             part_num = 1
@@ -2982,6 +3132,8 @@ def write_reports_v2(
                 # Add continuation header for next part
                 if not is_last:
                     header = f"# WC-Merge Report (Part {part_num})\n\n"
+                    # Note: we don't feed continuation headers to validator as they are technical split artifacts,
+                    # not part of the logical report structure.
                     current_lines.append(header)
                     current_size = len(header.encode('utf-8'))
                 else:
@@ -3002,6 +3154,9 @@ def write_reports_v2(
             )
 
             for block in iterator:
+                # Validate the block before writing
+                validator.feed(block)
+
                 block_len = len(block.encode('utf-8'))
 
                 # --- Path detection (NEW) ---
@@ -3020,6 +3175,7 @@ def write_reports_v2(
                     current_part_paths.append(block_path)
 
             flush_part(is_last=True)
+            validator.close()
 
             # Nachlauf: Header normalisieren UND Dateien umbenennen (Part X of Y)
             total_parts = len(local_out_paths)
