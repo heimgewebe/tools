@@ -240,6 +240,14 @@ def diff_trees(
     # Manifest-artige Tabelle: ein Eintrag pro betroffener Datei
     any_rows = bool(only_old or only_new or changed)
     if any_rows:
+        # Save delta metadata for downstream tools (wc-merger)
+        try:
+            delta_meta = build_delta_meta_from_diff(only_old, only_new, changed)
+            delta_json_path = merges_dir / "delta.json"
+            delta_json_path.write_text(json.dumps(delta_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to save delta.json: {e}\n")
+
         lines.append("## Dateiliste (Manifest-Stil)")
         lines.append("")
         lines.append(
