@@ -1746,6 +1746,7 @@ def make_output_filename(
     run_id: Optional[str] = None,
     plan_only: bool = False,
     code_only: bool = False,
+    timestamp: Optional[str] = None,
 ) -> Path:
     """
     Erzeugt den endgültigen Dateinamen für den Merge-Report.
@@ -1779,7 +1780,7 @@ def make_output_filename(
 
     # Legacy behavior: build filename from components
     # 1. Timestamp (jetzt immer am Ende)
-    ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
+    ts = timestamp if timestamp else datetime.datetime.now().strftime("%y%m%d-%H%M")
 
     # 2. Repo-Block
     if not repo_names:
@@ -2864,10 +2865,19 @@ def iter_report_blocks(
     # We adopt ## 📄 Content for strict compliance and shift sub-levels.
 
     content_header: List[str] = ["## 📄 Content", ""]
-    content_roots = [fi.root_label for fi, status in processed_files if status in ("full", "truncated", "meta-only", "omitted")]
-    if content_roots:
+    # Only list repos that actually have visible content blocks (full/truncated).
+    # meta-only/omitted files don't generate file blocks, so their repo header might be skipped if *all* files are skipped.
+    # We check if a repo has at least one file with status "full" or "truncated".
+
+    # Pre-calculate repos with actual content
+    visible_roots = set()
+    for fi, status in processed_files:
+        if status in ("full", "truncated"):
+            visible_roots.add(fi.root_label)
+
+    if visible_roots:
         nav_links = " · ".join(
-            f"[{root}](#repo-{_slug_token(root)})" for root in sorted(set(content_roots))
+            f"[{root}](#repo-{_slug_token(root)})" for root in sorted(visible_roots)
         )
         content_header.append(f"**Repos im Merge:** {nav_links}")
         content_header.append("")
@@ -3097,10 +3107,16 @@ def write_reports_v2(
     plan_only, code_only, requested_flags = _normalize_mode_flags(plan_only, code_only)
 
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
+
+    # Global consistent timestamp for this run (all parts/formats must share it)
+    global_ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
     
     # Phase 1.3: Generate deterministic run_id once for this merge
     repo_names = [s["name"] for s in repo_summaries]
-    run_id = _generate_run_id(repo_names, detail, path_filter, ext_filter_str, plan_only=plan_only, code_only=code_only)
+    run_id = _generate_run_id(
+        repo_names, detail, path_filter, ext_filter_str,
+        plan_only=plan_only, code_only=code_only, timestamp=global_ts
+    )
 
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
@@ -3313,6 +3329,7 @@ def write_reports_v2(
                 run_id,
                 plan_only=plan_only,
                 code_only=code_only,
+                timestamp=global_ts,
             ),
         )
         
@@ -3350,6 +3367,7 @@ def write_reports_v2(
                     run_id,
                     plan_only=plan_only,
                     code_only=code_only,
+                        timestamp=global_ts,
                 ).with_suffix('.json')
             
             json_data["artifacts"]["primary_json"] = str(json_path)
@@ -3367,7 +3385,10 @@ def write_reports_v2(
             s_root = s["root"]
             
             # Generate per-repo run_id for deterministic naming
-            repo_run_id = _generate_run_id([s_name], detail, path_filter, ext_filter_str, plan_only=plan_only, code_only=code_only)
+            repo_run_id = _generate_run_id(
+                [s_name], detail, path_filter, ext_filter_str,
+                plan_only=plan_only, code_only=code_only, timestamp=global_ts
+            )
 
             process_and_write(
                 s_files,
@@ -3382,6 +3403,7 @@ def write_reports_v2(
                     repo_run_id,
                     plan_only=plan_only,
                     code_only=code_only,
+                    timestamp=global_ts,
                 ),
             )
             
@@ -3419,6 +3441,7 @@ def write_reports_v2(
                         repo_run_id,
                         plan_only=plan_only,
                         code_only=code_only,
+                        timestamp=global_ts,
                     ).with_suffix('.json')
                 
                 json_data["artifacts"]["primary_json"] = str(json_path)

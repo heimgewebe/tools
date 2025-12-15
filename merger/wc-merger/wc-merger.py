@@ -1420,63 +1420,40 @@ class MergerUI(object):
                 print(f"[wc-merger] {msg}")
             return
 
-        # Execute delta creation
-        # Note: In Spec 2.3 logic, wc-extractor creates delta.json alongside the report
+        # Execute delta extraction (without generating a legacy report)
         try:
-            # We assume create_delta_merge_from_diff does the diff calculation and side-effects (like delta.json)
-            # but we will perform report generation via write_reports_v2 to ensure consistency.
-            # However, create_delta_merge_from_diff in current wc-extractor MIGHT generate a report.
-            # We will ignore its return value if we are re-generating, OR rely on it if it's correct.
-            # The User Patch says "Parse delta.json from wc-extractor and build delta_meta"
-            # So we assume wc-extractor writes delta.json.
-
-            # Since we cannot modify wc-extractor, we call it.
-            # It returns the path to the report it generated.
-            # BUT we want to use write_reports_v2 to get all the bells and whistles (health, etc).
-
-            # Let's call it to ensure analysis is done.
-            _ = mod.create_delta_merge_from_diff(
-                diff_path, repo_root, merges_dir, profile="delta-full"
-            )
-
-            # Now we look for delta.json in merges_dir (user patch assumption: out_dir == merges_dir)
+            # We bypass create_delta_merge_from_diff to avoid double-writing.
+            # Instead we extract metadata directly from the diff file.
             delta_meta = None
-            try:
-                delta_json_path = merges_dir / "delta.json"
-                if delta_json_path.exists():
-                    import json
-                    raw = json.loads(delta_json_path.read_text(encoding="utf-8"))
 
-                    # Expected structure:
-                    # {
-                    #   "type": "wc-merge-delta",
-                    #   "base_import": "...",
-                    #   "current_timestamp": "...",
-                    #   "summary": { ... }
-                    # }
+            if hasattr(mod, "extract_delta_meta_from_diff_file"):
+                try:
+                    delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+                except Exception as e:
+                    sys.stderr.write(f"[ERROR] Delta extraction failed: {e}\n")
 
-                    # Validate minimal required keys
-                    if (
-                        isinstance(raw, dict)
-                        and raw.get("type") == "wc-merge-delta"
-                        and "summary" in raw
-                        and ("base_import" in raw or "base_timestamp" in raw)
-                        and "current_timestamp" in raw
-                    ):
-                        delta_meta = raw
-                    else:
-                        print("[WARN] delta.json gefunden, aber unvollständig – Delta deaktiviert.")
+            # Fallback: Check for existing delta.json (from previous extractor run)
+            if not delta_meta:
+                try:
+                    delta_json_path = merges_dir / "delta.json"
+                    if delta_json_path.exists():
+                        raw = json.loads(delta_json_path.read_text(encoding="utf-8"))
+                        if (
+                            isinstance(raw, dict)
+                            and raw.get("type") == "wc-merge-delta"
+                            and "summary" in raw
+                        ):
+                            delta_meta = raw
+                except Exception:
+                    pass
+
+            if not delta_meta:
+                msg = "Could not extract delta metadata from diff."
+                if console:
+                    console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
                 else:
-                    # Fallback: Try to extract from diff file if delta.json missing (like CLI does)
-                    if hasattr(mod, "extract_delta_meta_from_diff_file"):
-                        delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
-
-                    if not delta_meta:
-                        print("[INFO] Keine delta.json gefunden – Delta deaktiviert.")
-
-            except Exception as e:
-                sys.stderr.write(f"[ERROR] Delta-Parsing fehlgeschlagen: {e}\n")
-                delta_meta = None
+                    print(f"[wc-merger] {msg}")
+                return
 
             # Determine extras config consistent with UI
             # We use self.extras_config but enable delta_reports
