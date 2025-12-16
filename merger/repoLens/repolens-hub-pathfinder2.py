@@ -18,7 +18,7 @@ def safe_script_path() -> Path:
         return Path(__file__).resolve()
     except Exception:
         # letzte Rettung: aktuelles Verzeichnis
-        return Path.cwd().resolve() / "repolens-hub-pathfinder.py"
+        return Path.cwd().resolve() / "repolens-hub-pathfinder2.py"
 
 
 def find_repolens_dirs(home: Path) -> list[Path]:
