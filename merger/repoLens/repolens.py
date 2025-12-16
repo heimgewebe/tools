@@ -393,8 +393,8 @@ class MergerUI(object):
             try:
                 mod.detect_hub(str(self.hub))
             except TypeError:
-                # older extractor signature: detect_hub(explicit_hub=None)
-                mod.detect_hub(str(self.hub))
+                # older extractor signature: detect_hub() with no args
+                mod.detect_hub()
         except Exception as e:
             # Keep UI functional; extractor is an enhancement, not a hard dependency.
             print(f"[extractor] warmup skipped: {e}")
