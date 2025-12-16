@@ -84,8 +84,8 @@ except ImportError:
     )
 
 
-def detect_hub() -> Path:
-    return detect_hub_dir(SCRIPT_PATH)
+def detect_hub(explicit_hub: Optional[str] = None) -> Path:
+    return detect_hub_dir(SCRIPT_PATH, explicit_hub)
 
 
 def build_delta_meta_from_diff(
