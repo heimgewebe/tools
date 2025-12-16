@@ -2071,6 +2071,10 @@ class ReportValidator:
         # Map headings to logical steps
         current_step = None
 
+        # Helper: only treat *level-2* headings ("## ") as report sections.
+        # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
+        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
+
         if stripped.startswith("# WC-Merge Report"):
             current_step = "header"
         elif "source & profile" in lower:
@@ -2081,15 +2085,15 @@ class ReportValidator:
             current_step = "reading_plan"
         elif stripped == "## Plan":
             current_step = "plan"
-        elif "structure" in lower and stripped.startswith("## "):
+        elif "structure" in lower and is_h2:
             current_step = "structure"
-        elif "manifest" in lower and stripped.startswith("## "):
+        elif "manifest" in lower and is_h2:
             # Could be "## 🧾 Manifest"
             current_step = "manifest"
         elif "content" in lower and (stripped.startswith("## ") or stripped.startswith("# ")):
             # Accept "# Content" (legacy/lean) or "## 📄 Content" (spec strict)
             current_step = "content"
-        elif stripped.startswith("## ") and "organism" not in lower:
+        elif is_h2 and "organism" not in lower:
             # Main Index (Patch B)
             #
             # IMPORTANT:
@@ -2099,9 +2103,12 @@ class ReportValidator:
             # the invariant structure ordering.
             #
             # We only treat it as the report's main Index if it strictly matches
-            # "## Index" or "## 🧭 Index". We use a regex anchored to start (^)
-            # to avoid matching "#### file-repo-index-ts".
-            if re.search(r"^##\s+(?:🧭\s*)?index\b", lower):
+            # "## Index" or "## 🧭 Index".
+            #
+            # Additionally: never treat "### file-...index..." anchors as the main Index.
+            # Those are file section headings and may appear after Content has started,
+            # especially in multi-repo merges where many repos contain index.* files.
+            if re.search(r"^##\s*(?:🧭\s*)?index\s*$", lower):
                 current_step = "index"
 
         if current_step:
