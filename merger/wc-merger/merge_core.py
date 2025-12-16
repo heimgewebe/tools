@@ -2081,15 +2081,15 @@ class ReportValidator:
             current_step = "reading_plan"
         elif stripped == "## Plan":
             current_step = "plan"
-        elif "structure" in lower and stripped.startswith("##"):
+        elif "structure" in lower and stripped.startswith("## "):
             current_step = "structure"
-        elif "manifest" in lower and stripped.startswith("##"):
+        elif "manifest" in lower and stripped.startswith("## "):
             # Could be "## 🧾 Manifest"
             current_step = "manifest"
         elif "content" in lower and (stripped.startswith("## ") or stripped.startswith("# ")):
             # Accept "# Content" (legacy/lean) or "## 📄 Content" (spec strict)
             current_step = "content"
-        elif stripped.startswith("##") and "organism" not in lower:
+        elif stripped.startswith("## ") and "organism" not in lower:
             # Main Index (Patch B)
             #
             # IMPORTANT:
@@ -2098,9 +2098,10 @@ class ReportValidator:
             # "Indexe", etc. Those can appear inside repo docs and would break
             # the invariant structure ordering.
             #
-            # We only treat it as the report's main Index if "index" is a whole word,
-            # or the exact "🧭 Index" header.
-            if re.search(r"(^##\s*🧭\s*index\b)|(\bindex\b)", lower):
+            # We only treat it as the report's main Index if it strictly matches
+            # "## Index" or "## 🧭 Index". We use a regex anchored to start (^)
+            # to avoid matching "#### file-repo-index-ts".
+            if re.search(r"^##\s+(?:🧭\s*)?index\b", lower):
                 current_step = "index"
 
         if current_step:
