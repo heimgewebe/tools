@@ -40,14 +40,19 @@ def main() -> int:
             except Exception:
                 pass
 
-        # Use pick_document with folder type for stability in Pythonista
-        selected = dialogs.pick_document(types=['public.folder'])
-        if selected:
-            hub_dir = Path(selected).resolve()
-        else:
-            # User cancelled, inform them
-            msg = "Selection cancelled. Using detected path."
-            print(msg)
+        # Use pick_document with file_mode=False for folder picking in Pythonista (same as OmniWandler)
+        # Standard 'public.folder' UTI can cause ValueError in some versions.
+        try:
+            selected = dialogs.pick_document(file_mode=False)
+            if selected:
+                hub_dir = Path(selected).resolve()
+            else:
+                # User cancelled, inform them
+                msg = "Selection cancelled. Using detected path."
+                print(msg)
+        except Exception as e:
+            # Fallback if pick_document fails
+            print(f"Folder picker failed ({e}), falling back to detected path.")
 
     script_path = safe_script_path()
     script_dir = script_path.parent
