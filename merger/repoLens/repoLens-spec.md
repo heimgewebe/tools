@@ -1,4 +1,4 @@
-# WC-MERGER SPEC v2.4
+# REPOLENS SPEC v2.4
 
 (Normative Spezifikation)
 
@@ -20,7 +20,7 @@ Der Report weist den Modus explizit aus:
 
 ## 1. Zweck
 
-Der wc-merger erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.
+Der repoLens erzeugt aus Working-Copy-Repositories KI-optimierte, strukturierte Hyper-Merges.
 Diese dienen KIs als Navigations- und Arbeitsfläche, ähnlich einer Mini-IDE.
 
 ---
@@ -89,7 +89,7 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
      - `Coverage: 17/35 Dateien mit vollem Inhalt`
    - Im `@meta`-Block:
      - `merge.extras.*`-Flags für alle aktivierten Extras ergänzen.
-     - Schema `wc-merge-report.schema.json` entsprechend erweitern.
+     - Schema `repolens-report.schema.json` entsprechend erweitern.
      - Beispiel:
 
        ```yaml
@@ -110,7 +110,7 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
      - `# WC-Merge Report (Part N/M)` setzen (bei Single-Part-Merges `1/1`).
 
 4. **Validierung**
-   - Alle Änderungen strikt gegen `wc-merge-report.schema.json` und die oben definierte Abschnittsreihenfolge prüfen.
+   - Alle Änderungen strikt gegen `repolens-report.schema.json` und die oben definierte Abschnittsreihenfolge prüfen.
    - Keine neuen Kategorien/Tags einführen, solange die Spec nicht explizit erweitert wird.
 
 ---
@@ -140,7 +140,7 @@ Optional:
 
 ## 3b. Merge-Contract
 
-Jeder wc-merger-Report implementiert einen formalen „Merge-Contract“.
+Jeder repoLens-Report implementiert einen formalen „Merge-Contract“.
 Ziel:
 
 - eindeutige Identifikation des Formats,
@@ -151,14 +151,14 @@ Pflichtfelder:
 
 Im Abschnitt **Source & Profile**:
 
-- `Contract: wc-merge-report`
+- `Contract: repolens-report`
 - `Contract-Version: 2.4`
 
 Im `@meta`-Block (eingebettet in HTML-Kommentare `<!-- @meta:start -->` ... `<!-- @meta:end -->`):
 
 ```yaml
 merge:
-  contract: "wc-merge-report"
+  contract: "repolens-report"
   contract_version: "2.4"
 ```
 

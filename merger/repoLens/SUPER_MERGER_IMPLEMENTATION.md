@@ -6,16 +6,16 @@
 
 ### Implementierung
 
-- eigener Delta-Contract `wc-merge-delta.schema.json`
+- eigener Delta-Contract `repolens-delta.schema.json`
 - Delta-Metadaten im `@meta`-Block des Haupt-Merges
-- UI-Button „Delta from Last Import“ nutzt weiterhin `wc-extractor.py` für die eigentliche Delta-Berechnung
+- UI-Button „Delta from Last Import“ nutzt weiterhin `repolens-extractor.py` für die eigentliche Delta-Berechnung
 
 ### Schema-Struktur (Meta-Ausschnitt)
 
 ```json
 {
   "delta": {
-    "type": "wc-merge-delta",
+    "type": "repolens-delta",
     "base_import": "2025-12-01T22:14:00Z",
     "current_timestamp": "2025-12-07T12:30:00Z",
     "summary": {
@@ -47,7 +47,7 @@ augment:
   version: 1
 
   hotspots:
-    - path: merger/wc-merger/merge_core.py
+    - path: merger/repoLens/merge_core.py
       reason: "Complex branching logic"
       severity: "medium"
 
@@ -72,7 +72,7 @@ augment:
 
 ### Implementierung
 
-- `wc-merge-report.schema.json` um `extras`, `health`, `delta`, `augment` erweitert
+- `repolens-report.schema.json` um `extras`, `health`, `delta`, `augment` erweitert
 - Contract-Validator `validate_merge_meta.py`
 - alle generierten Reports validieren gegen die Schema-Contracts
 - standardisierte Header („Part N/M“) für Multi-Part-Merges
@@ -114,7 +114,7 @@ class ExtrasConfig:
 merge:
   spec_version: "2.3"
   profile: "dev"
-  contract: "wc-merge-report"
+  contract: "repolens-report"
   contract_version: "2.3"
   # ... standard fields ...
   extras:
@@ -151,13 +151,13 @@ merge:
   - Augment-Sidecar-Support
   - Delta-Metadaten im `@meta`-Block
 
-- `wc-merger.py`
+- `repolens.py`
   - UI-Toggles für Extras (bereits vorhanden)
 
-- `wc-merge-report.schema.json`
+- `repolens-report.schema.json`
   - Extras, Health, Delta, Augment-Felder
 
-- `wc-merge-delta.schema.json`
+- `repolens-delta.schema.json`
   - eigener Contract für Delta-Snapshots
 
 - `tools_augment.yml`

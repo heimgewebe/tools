@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-merge_core – Core functions for wc-merger (v2.4 Standard).
+merge_core – Core functions for repoLens (v2.4 Standard).
 Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 """
 
@@ -83,10 +83,10 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
 
-# Formale Contract-Deklaration für alle wc-merger-Reports.
+# Formale Contract-Deklaration für alle repoLens-Reports.
 # Name/Version können von nachgelagerten Tools verwendet werden,
 # um das Format eindeutig zu erkennen.
-MERGE_CONTRACT_NAME = "wc-merge-report"
+MERGE_CONTRACT_NAME = "repolens-report"
 MERGE_CONTRACT_VERSION = SPEC_VERSION
 
 # Ab v2.3+: 0 = "kein Limit pro Datei".
@@ -144,7 +144,7 @@ class DebugConfig:
 
 DEBUG_CONFIG = DebugConfig.defaults()
 
-AGENT_CONTRACT_NAME = "wc-merge-agent"
+AGENT_CONTRACT_NAME = "repolens-agent"
 AGENT_CONTRACT_VERSION = "v1"
 
 # Delta Report configuration
@@ -983,7 +983,7 @@ LANG_MAP = {
 
 HARDCODED_HUB_PATH = (
     "/private/var/mobile/Containers/Data/Application/"
-    "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/wc-hub"
+    "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/repolens-hub"
 )
 
 # Semantische Use-Case-Beschreibung pro Profil.
@@ -1265,7 +1265,7 @@ def is_noise_file(fi: "FileInfo") -> bool:
     return False
 
 def detect_hub_dir(script_path: Path, arg_base_dir: Optional[str] = None) -> Path:
-    env_base = os.environ.get("WC_MERGER_BASEDIR")
+    env_base = os.environ.get("REPOLENS_BASEDIR")
     if env_base:
         p = Path(env_base).expanduser()
         if p.is_dir(): return p
@@ -1988,7 +1988,7 @@ class ReportValidator:
 
     # Normalized signatures for required sections in order
     REQUIRED_ORDER = [
-        "header",               # # WC-Merge Report ...
+        "header",               # # repoLens Report ...
         "source_profile",       # ## Source & Profile
         "profile_desc",         # ## Profile Description
         "reading_plan",         # ## Reading Plan
@@ -2075,7 +2075,7 @@ class ReportValidator:
         # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
         is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
 
-        if stripped.startswith("# WC-Merge Report"):
+        if stripped.startswith("# repoLens Report"):
             current_step = "header"
         elif "source & profile" in lower:
             current_step = "source_profile"
@@ -2335,12 +2335,12 @@ def iter_report_blocks(
 
     # --- 1. Header ---
     header = []
-    header.append(f"# WC-Merge Report (v{SPEC_VERSION.split('.')[0]}.x)")
+    header.append(f"# repoLens Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
     # --- Contract roles (agent-first clarity) ---
     # Human-readable report contract (this Markdown)
-    header.append("**Human Contract:** `wc-merge-report` (v2.4)")
+    header.append("**Human Contract:** `repolens-report` (v2.4)")
     # Machine-readable primary contract (the JSON primary artifact)
     header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.primary_json`")
     header.append("")
@@ -3200,7 +3200,7 @@ def write_reports_v2(
                 current_lines = []
                 # Add continuation header for next part
                 if not is_last:
-                    header = f"# WC-Merge Report (Part {part_num})\n\n"
+                    header = f"# repoLens Report (Part {part_num})\n\n"
                     # Note: we don't feed continuation headers to validator as they are technical split artifacts,
                     # not part of the logical report structure.
                     current_lines.append(header)
@@ -3256,12 +3256,12 @@ def write_reports_v2(
                     text = path.read_text(encoding="utf-8")
                     lines = text.splitlines(True)
                     if lines:
-                        prefix_part = "# WC-Merge Report (Part "
-                        prefix_main = "# WC-Merge Report"
+                        prefix_part = "# repoLens Report (Part "
+                        prefix_main = "# repoLens Report"
                         for i, line in enumerate(lines):
                             stripped = line.lstrip("\ufeff")
                             if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
-                                lines[i] = f"# WC-Merge Report (Part {idx}/{total_parts})\n"
+                                lines[i] = f"# repoLens Report (Part {idx}/{total_parts})\n"
 
                                 # --- Inject Signature (NEW) ---
                                 if total_parts > 1:
@@ -3339,12 +3339,12 @@ def write_reports_v2(
             # Spec v2.4: Always enforce Part N/M header, even for single files (1/1)
             lines = content.splitlines(True)
             if lines:
-                prefix_ver = "# WC-Merge Report (v"
-                prefix_main = "# WC-Merge Report"
+                prefix_ver = "# repoLens Report (v"
+                prefix_main = "# repoLens Report"
                 for i, line in enumerate(lines):
                     stripped = line.lstrip("\ufeff")
                     if stripped.startswith(prefix_ver) or stripped.startswith(prefix_main):
-                        lines[i] = "# WC-Merge Report (Part 1/1)\n"
+                        lines[i] = "# repoLens Report (Part 1/1)\n"
                         break
             content = "".join(lines)
 
@@ -3520,7 +3520,7 @@ def write_reports_v2(
         # We *expected* at least one markdown output, but none is actually usable.
         # Make this a hard error so callers don't display a success message.
         raise RuntimeError(
-            "wc-merger: Report was announced as written, but no non-empty .md output exists on disk. "
+            "repoLens: Report was announced as written, but no non-empty .md output exists on disk. "
             "Check merges_dir / permissions / rename logic."
         )
 
@@ -3538,7 +3538,7 @@ def write_reports_v2(
                 pass
         if json_paths and not verified_json:
             raise RuntimeError(
-                "wc-merger: JSON primary artifact was announced as written, but no valid non-empty .json exists on disk."
+                "repoLens: JSON primary artifact was announced as written, but no valid non-empty .json exists on disk."
             )
 
     # Primary ordering: JSON (if enabled) first, then Markdown, then other artifacts.
