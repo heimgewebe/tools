@@ -4,7 +4,7 @@
 
 ## 🎯 Zweck
 
-Der **OmniWandler** (ehemals all-ein-wandler) ist das Gegenstück zum `wc-merger`. Während `wc-merger` für Code-Repositories optimiert ist, kümmert sich der `OmniWandler` um **Inhalts-Ordner**:
+Der **OmniWandler** (ehemals all-ein-wandler) ist das Gegenstück zum `repoLens`. Während `repoLens` für Code-Repositories optimiert ist, kümmert sich der `OmniWandler` um **Inhalts-Ordner**:
 
 - Schulunterlagen / Studienmaterial
 - Projektdokumente (PDFs, Word, Bilder)
@@ -56,9 +56,9 @@ backend = "shortcut"        # "none" oder "shortcut"
 shortcut_name = "OmniWandler OCR" # Name des iOS Shortcuts
 ```
 
-## 🤖 Unterschied zu `wc-merger`
+## 🤖 Unterschied zu `repoLens`
 
-| Feature | `OmniWandler` | `wc-merger` |
+| Feature | `OmniWandler` | `repoLens` |
 | :--- | :--- | :--- |
 | **Ziel** | Dokumente, PDFs, Bilder, Notizen | Code-Repositories, Software-Projekte |
 | **Output** | Fokus auf Lesbarkeit & Content | Fokus auf Struktur, Diff & Code-Kontext |

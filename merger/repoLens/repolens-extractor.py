@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-wc_extractor – ZIPs im wc-hub entpacken und Repos aktualisieren.
+repolens_extractor – ZIPs im repolens-hub entpacken und Repos aktualisieren.
 Verwendet merge_core.
 
 Funktion:
-- Suche alle *.zip im Hub (wc-hub).
+- Suche alle *.zip im Hub (repolens-hub).
 - Für jede ZIP:
   - Entpacke in temporären Ordner.
   - Wenn es bereits einen Zielordner mit gleichem Namen gibt:
@@ -95,7 +95,7 @@ def build_delta_meta_from_diff(
     base_timestamp: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Builds a delta metadata dict conforming to wc-merge-delta.schema.json.
+    Builds a delta metadata dict conforming to repolens-delta.schema.json.
     
     Args:
         only_old: List of files removed
@@ -109,7 +109,7 @@ def build_delta_meta_from_diff(
     now = datetime.datetime.now(datetime.timezone.utc)
     
     delta_meta = {
-        "type": "wc-merge-delta",
+        "type": "repolens-delta",
         "base_import": base_timestamp or now.isoformat(),
         "current_timestamp": now.isoformat(),
         "summary": {
@@ -140,7 +140,7 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
         diff_path: Path to the import-diff markdown file
     
     Returns:
-        Delta metadata dict conforming to wc-merge-delta.schema.json,
+        Delta metadata dict conforming to repolens-delta.schema.json,
         or None if extraction fails
     """
     try:
@@ -240,7 +240,7 @@ def diff_trees(
     # Manifest-artige Tabelle: ein Eintrag pro betroffener Datei
     any_rows = bool(only_old or only_new or changed)
     if any_rows:
-        # Save delta metadata for downstream tools (wc-merger)
+        # Save delta metadata for downstream tools (repoLens)
         try:
             delta_meta = build_delta_meta_from_diff(only_old, only_new, changed)
             delta_json_path = merges_dir / "delta.json"
@@ -442,7 +442,7 @@ def run_extractor(
     show_alert: bool = False,
     incremental: bool = True,
 ) -> Tuple[int, str]:
-    """Programmatic entry point for callers like wc-merger.
+    """Programmatic entry point for callers like repoLens.
 
     By default: quiet (no alerts), best-effort, returns a status+message.
     """
@@ -499,7 +499,7 @@ def run_extractor(
 
 def main() -> int:
     import argparse
-    parser = argparse.ArgumentParser(description="wc-extractor-v2: Import ZIPs to hub.")
+    parser = argparse.ArgumentParser(description="repolens-extractor-v2: Import ZIPs to hub.")
     parser.add_argument("--hub", help="Hub directory override.")
     args = parser.parse_args()
 
@@ -511,14 +511,14 @@ def main() -> int:
 
     merges_dir = get_merges_dir(hub)
 
-    print("wc_extractor-v2 – Hub:", hub)
+    print("repolens_extractor-v2 – Hub:", hub)
     zips = sorted(hub.glob("*.zip"))
 
     if not zips:
         msg = "Keine ZIP-Dateien im Hub gefunden."
         print(msg)
         if console:
-            console.alert("wc_extractor-v2", msg, "OK", hide_cancel_button=True)
+            console.alert("repolens_extractor-v2", msg, "OK", hide_cancel_button=True)
         return 0
 
     diff_paths = []
@@ -547,7 +547,7 @@ def main() -> int:
     print(summary)
 
     if console:
-        console.alert("wc_extractor-v2", summary, "OK", hide_cancel_button=True)
+        console.alert("repolens_extractor-v2", summary, "OK", hide_cancel_button=True)
 
     return 0
 

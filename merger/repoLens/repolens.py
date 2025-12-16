@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-wc-merger – Working-Copy Merger.
+repoLens – A structural lens for repositories.
 Enhanced AI-optimized reports with strict Pflichtenheft structure.
 
 Default-Config (Dec 2025)
@@ -125,7 +125,7 @@ def force_close_files(paths: List[Path]) -> None:
 
 
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
-LAST_STATE_FILENAME = ".wc-merger-state.json"
+LAST_STATE_FILENAME = ".repoLens-state.json"
 
 # Import core logic
 try:
@@ -277,8 +277,8 @@ def _parse_extras_csv(extras_csv: str) -> List[str]:
     return normalized
 
 
-def _load_wc_extractor_module():
-    """Dynamically load wc-extractor.py from the same directory.
+def _load_repolens_extractor_module():
+    """Dynamically load repolens-extractor.py from the same directory.
 
     In Pythonista ist ``__file__`` nicht immer gesetzt (z. B. bei Ausführung
     aus bestimmten UI-/Shortcut-Kontexten). In dem Fall fallen wir auf
@@ -288,25 +288,25 @@ def _load_wc_extractor_module():
     from importlib.machinery import SourceFileLoader
     import types
 
-    extractor_path = SCRIPT_PATH.with_name("wc-extractor.py")
+    extractor_path = SCRIPT_PATH.with_name("repolens-extractor.py")
     if not extractor_path.exists():
         return None
     try:
-        loader = SourceFileLoader("wc_extractor", str(extractor_path))
+        loader = SourceFileLoader("repolens_extractor", str(extractor_path))
         mod = types.ModuleType(loader.name)
         loader.exec_module(mod)
         return mod
     except Exception as exc:
-        print(f"[wc-merger] could not load wc-extractor: {exc}")
+        print(f"[repoLens] could not load repolens-extractor: {exc}")
         return None
 
 
 # --- UI Class (Pythonista) ---
 
 def _run_extractor_on_start(hub: Path) -> None:
-    """Run wc-extractor automatically at app start (best-effort, quiet)."""
+    """Run repolens-extractor automatically at app start (best-effort, quiet)."""
     try:
-        extractor = _load_wc_extractor_module()
+        extractor = _load_repolens_extractor_module()
         if extractor is None:
             return
         # Preferred API (added for startup auto-run)
@@ -388,7 +388,7 @@ class MergerUI(object):
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
         # without breaking the main UI if anything is missing.
         try:
-            mod = _load_wc_extractor_module()
+            mod = _load_repolens_extractor_module()
             # Prefer passing the detected hub explicitly so extractor and UI agree.
             try:
                 mod.detect_hub(str(self.hub))
@@ -400,7 +400,7 @@ class MergerUI(object):
             print(f"[extractor] warmup skipped: {e}")
 
         # Basic argv parsing for UI defaults
-        # Expected format: wc-merger.py --level max --mode gesamt ...
+        # Expected format: repolens.py --level max --mode gesamt ...
         import argparse
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("--level", default=DEFAULT_LEVEL)
@@ -1173,13 +1173,13 @@ class MergerUI(object):
         except FileNotFoundError:
             return
         except Exception as exc:
-            print(f"[wc-merger] could not read ignore state: {exc!r}")
+            print(f"[repoLens] could not read ignore state: {exc!r}")
             return
 
         try:
             data = json.loads(raw)
         except Exception as exc:
-            print(f"[wc-merger] invalid ignore state JSON: {exc!r}")
+            print(f"[repoLens] invalid ignore state JSON: {exc!r}")
             return
 
         if isinstance(data, dict):
@@ -1204,7 +1204,7 @@ class MergerUI(object):
                 if isinstance(existing, dict):
                     data.update(existing)
             except Exception as exc:
-                print(f"[wc-merger] could not read existing state: {exc!r}")
+                print(f"[repoLens] could not read existing state: {exc!r}")
 
         # Ignore-Liste wird *immer* aktualisiert
         data["ignored_repos"] = sorted(self.ignored_repos)
@@ -1247,7 +1247,7 @@ class MergerUI(object):
         try:
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:
-            print(f"[wc-merger] could not persist state: {exc}")
+            print(f"[repoLens] could not persist state: {exc}")
 
     def restore_last_state(self, sender=None) -> None:
         try:
@@ -1255,16 +1255,16 @@ class MergerUI(object):
         except FileNotFoundError:
             if sender: # Nur bei Klick Feedback geben
                 if console:
-                    console.alert("wc-merger", "No saved state found.", "OK", hide_cancel_button=True)
+                    console.alert("repoLens", "No saved state found.", "OK", hide_cancel_button=True)
             return
         except Exception as exc:
-            print(f"[wc-merger] could not read state: {exc!r}", file=sys.stderr)
+            print(f"[repoLens] could not read state: {exc!r}", file=sys.stderr)
             return
 
         try:
             data = json.loads(raw)
         except Exception as exc:
-            print(f"[wc-merger] invalid state JSON: {exc!r}", file=sys.stderr)
+            print(f"[repoLens] invalid state JSON: {exc!r}", file=sys.stderr)
             return
 
         # Felder setzen
@@ -1274,7 +1274,7 @@ class MergerUI(object):
                 self.seg_detail.selected_index = self.seg_detail.segments.index(profile)
             except ValueError as e:
                 # If the profile is not found in segments, just skip setting selected_index.
-                print(f"[wc-merger] Profile '{profile}' not found in segments: {e}", file=sys.stderr)
+                print(f"[repoLens] Profile '{profile}' not found in segments: {e}", file=sys.stderr)
 
         self.ext_field.text = data.get("ext_filter", "")
         self.path_field.text = data.get("path_filter", "")
@@ -1373,25 +1373,25 @@ class MergerUI(object):
     def run_delta_from_last_import(self, sender) -> None:
         """
         Erzeugt einen Delta-Merge aus dem neuesten Import-Diff im merges-Ordner.
-        Nutzt die Delta-Helfer aus wc-extractor.py (falls verfügbar).
+        Nutzt die Delta-Helfer aus repolens-extractor.py (falls verfügbar).
         """
         merges_dir = get_merges_dir(self.hub)
         try:
             candidates = list(merges_dir.glob("*-import-diff-*.md"))
         except Exception as exc:
-            print(f"[wc-merger] could not scan merges dir: {exc}")
+            print(f"[repoLens] could not scan merges dir: {exc}")
             candidates = []
 
         if not candidates:
             if console:
                 console.alert(
-                    "wc-merger",
+                    "repoLens",
                     "No import diff found.",
                     "OK",
                     hide_cancel_button=True,
                 )
             else:
-                print("[wc-merger] No import diff found.")
+                print("[repoLens] No import diff found.")
             return
 
         # jüngstes Diff wählen
@@ -1400,13 +1400,13 @@ class MergerUI(object):
         except Exception as exc:
             if console:
                 console.alert(
-                    "wc-merger",
+                    "repoLens",
                     f"Failed to select latest diff: {exc}",
                     "OK",
                     hide_cancel_button=True,
                 )
             else:
-                print(f"[wc-merger] Failed to select latest diff: {exc}")
+                print(f"[repoLens] Failed to select latest diff: {exc}")
             return
 
         name = diff_path.name
@@ -1420,18 +1420,18 @@ class MergerUI(object):
         if not repo_root.exists():
             msg = f"Repo root not found for diff {diff_path.name}"
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
             return
 
-        mod = _load_wc_extractor_module()
+        mod = _load_repolens_extractor_module()
         if mod is None or not hasattr(mod, "create_delta_merge_from_diff"):
-            msg = "Delta helper (wc-extractor) not available."
+            msg = "Delta helper (repolens-extractor) not available."
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
             return
 
         # Execute delta extraction (without generating a legacy report)
@@ -1454,19 +1454,19 @@ class MergerUI(object):
                         raw = json.loads(delta_json_path.read_text(encoding="utf-8"))
                         if (
                             isinstance(raw, dict)
-                            and raw.get("type") == "wc-merge-delta"
+                            and raw.get("type") == "repolens-delta"
                             and "summary" in raw
                         ):
                             delta_meta = raw
                 except Exception as e:
-                    print(f"[wc-merger] Failed to read delta.json: {e}", file=sys.stderr)
+                    print(f"[repoLens] Failed to read delta.json: {e}", file=sys.stderr)
 
             if not delta_meta:
                 msg = "Could not extract delta metadata from diff."
                 if console:
-                    console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                    console.alert("repoLens", msg, "OK", hide_cancel_button=True)
                 else:
-                    print(f"[wc-merger] {msg}")
+                    print(f"[repoLens] {msg}")
                 return
 
             # Determine extras config consistent with UI
@@ -1504,7 +1504,7 @@ class MergerUI(object):
                     elif isinstance(item, str):
                         allowed_paths.add(item)
 
-            # Check for summary object (wc-merge-delta schema) if arrays are missing/empty
+            # Check for summary object (repolens-delta schema) if arrays are missing/empty
             # Note: The schema stores lists in top-level usually. If they are missing, we can't filter.
             # If allowed_paths is empty but summary says there are changes, we might have a problem.
             # But assume delta_meta is well-formed from extractor.
@@ -1555,16 +1555,16 @@ class MergerUI(object):
                 try:
                     console.hud_alert(msg)
                 except Exception:
-                    console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                    console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
 
         except Exception as exc:
             msg = f"Delta merge failed: {exc}"
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print(f"[wc-merger] {msg}")
+                print(f"[repoLens] {msg}")
             return
 
     def run_merge(self, sender) -> None:
@@ -1599,7 +1599,7 @@ class MergerUI(object):
                 msg = f"Error: {e}"
 
             if console:
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
                 print(msg, file=sys.stderr)
 
@@ -1607,7 +1607,7 @@ class MergerUI(object):
         selected = self._get_selected_repos()
         if not selected:
             if console:
-                console.alert("wc-merger", "No repos selected.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No repos selected.", "OK", hide_cancel_button=True)
             return
 
         ext_text = (self.ext_field.text or "").strip()
@@ -1658,7 +1658,7 @@ class MergerUI(object):
 
         if not summaries:
             if console:
-                console.alert("wc-merger", "No valid repos found.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No valid repos found.", "OK", hide_cancel_button=True)
             return
 
         merges_dir = get_merges_dir(self.hub)
@@ -1681,7 +1681,7 @@ class MergerUI(object):
         out_paths = artifacts.get_all_paths()
         if not out_paths:
             if console:
-                console.alert("wc-merger", "No report generated.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No report generated.", "OK", hide_cancel_button=True)
             else:
                 print("No report generated.")
             return
@@ -1706,9 +1706,9 @@ class MergerUI(object):
                 console.hud_alert(msg, status, 1.2 if status == "success" else 1.5)
             except Exception as e:
                 sys.stderr.write(f"Warning: Failed to show HUD alert (falling back to alert): {e}\n")
-                console.alert("wc-merger", msg, "OK", hide_cancel_button=True)
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
         else:
-            print(f"wc-merger: {msg}")
+            print(f"repoLens: {msg}")
             for p in out_paths:
                 print(f"  - {p.name}")
 
@@ -1718,15 +1718,15 @@ class MergerUI(object):
 def _is_headless_requested() -> bool:
     # Headless wenn:
     # 1) --headless Flag, oder
-    # 2) WC_HEADLESS=1 in der Umgebung, oder
+    # 2) REPOLENS_HEADLESS=1 in der Umgebung, oder
     # 3) ui-Framework nicht verfügbar
-    return ("--headless" in sys.argv) or (os.environ.get("WC_HEADLESS") == "1") or (ui is None)
+    return ("--headless" in sys.argv) or (os.environ.get("REPOLENS_HEADLESS") == "1") or (ui is None)
 
 def main_cli():
     import argparse
-    parser = argparse.ArgumentParser(description="wc-merger CLI")
+    parser = argparse.ArgumentParser(description="repoLens CLI")
     parser.add_argument("paths", nargs="*", help="Repositories to merge")
-    parser.add_argument("--hub", help="Base directory (wc-hub)")
+    parser.add_argument("--hub", help="Base directory (repolens-hub)")
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default=DEFAULT_LEVEL)
     parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default=DEFAULT_MODE)
     # 0 = unbegrenzt pro Datei
@@ -1819,7 +1819,7 @@ def main_cli():
         # Only try to find delta for single-repo merges
         repo_name = summaries[0]["name"]
         try:
-            mod = _load_wc_extractor_module()
+            mod = _load_repolens_extractor_module()
             if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
                 diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
                 if diff_path:
@@ -1870,7 +1870,7 @@ def main():
             if console:
                 try:
                     console.alert(
-                        "wc-merger",
+                        "repoLens",
                         f"UI not available, falling back to CLI. ({e})",
                         "OK",
                         hide_cancel_button=True,
@@ -1879,7 +1879,7 @@ def main():
                     pass
             else:
                 print(
-                    f"wc-merger: UI not available, falling back to CLI. ({e})",
+                    f"repoLens: UI not available, falling back to CLI. ({e})",
                     file=sys.stderr,
                 )
             main_cli()
