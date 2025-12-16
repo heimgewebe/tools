@@ -32,7 +32,7 @@ DEFAULT_LEVEL = "dev"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
-DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,ai_heatmap"
+DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
 
 try:
     import appex  # type: ignore
@@ -702,7 +702,20 @@ class MergerUI(object):
         split_field = ui.TextField()
         # Leer oder 0 = kein Split → ein Merge ohne globales Größenlimit.
         split_field.placeholder = "leer/0 = kein Split"
-        split_field.text = args.split_size if args.split_size != "0" else ""
+        # UI erwartet MB als Zahl; CLI/Config dürfen aber auch "25MB" o.ä. liefern.
+        split_text = ""
+        raw_split = (getattr(args, "split_size", "") or "").strip()
+        if raw_split and raw_split != "0":
+            if raw_split.isdigit():
+                split_text = raw_split
+            else:
+                try:
+                    mb = int(round(parse_human_size(raw_split) / (1024 * 1024)))
+                    split_text = str(mb) if mb > 0 else ""
+                except Exception:
+                    # Fallback: lieber sichtbar machen als stillschweigend löschen
+                    split_text = raw_split
+        split_field.text = split_text
         split_field.frame = (130, cy - 2, 140, 28)
         split_field.flex = "W"
         _style_textfield(split_field)
