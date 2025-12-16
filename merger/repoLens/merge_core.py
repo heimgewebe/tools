@@ -986,6 +986,8 @@ HARDCODED_HUB_PATH = (
     "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/repolens-hub"
 )
 
+HUB_PATH_FILENAME = ".repolens-hub-path.txt"
+
 # Semantische Use-Case-Beschreibung pro Profil.
 # Wichtig: das ersetzt NICHT den Repo-Zweck (Declared Purpose),
 # sondern ergänzt ihn um die Rolle des aktuellen Merges.
@@ -1035,6 +1037,36 @@ class FileInfo(object):
 
 
 # --- Utilities ---
+
+def _hub_path_file(script_path: Path) -> Path:
+    # liegt im repoLens-Skriptordner (neben repolens.py)
+    return script_path.parent / HUB_PATH_FILENAME
+
+
+def load_saved_hub_path(script_path: Path) -> Optional[Path]:
+    f = _hub_path_file(script_path)
+    try:
+        if not f.is_file():
+            return None
+        raw = f.read_text(encoding="utf-8").strip()
+        if not raw:
+            return None
+        p = Path(raw).expanduser()
+        if p.is_dir():
+            return p
+    except Exception:
+        return None
+    return None
+
+
+def save_hub_path(script_path: Path, hub_dir: Path) -> bool:
+    f = _hub_path_file(script_path)
+    try:
+        f.write_text(str(hub_dir.resolve()), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
 
 def infer_repo_role(root_label: str, files: List["FileInfo"]) -> str:
     """
@@ -1268,17 +1300,24 @@ def detect_hub_dir(script_path: Path, arg_base_dir: Optional[str] = None) -> Pat
     env_base = os.environ.get("REPOLENS_BASEDIR")
     if env_base:
         p = Path(env_base).expanduser()
-        if p.is_dir(): return p
+        if p.is_dir():
+            return p
+
+    saved = load_saved_hub_path(script_path)
+    if saved is not None:
+        return saved
 
     p = Path(HARDCODED_HUB_PATH)
     try:
-        if p.expanduser().is_dir(): return p
+        if p.expanduser().is_dir():
+            return p
     except Exception as e:
         sys.stderr.write(f"Warning: Failed to check hub dir {p}: {e}\n")
 
     if arg_base_dir:
         p = Path(arg_base_dir).expanduser()
-        if p.is_dir(): return p
+        if p.is_dir():
+            return p
 
     return script_path.parent
 

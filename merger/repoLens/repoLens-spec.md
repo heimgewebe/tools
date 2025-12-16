@@ -181,7 +181,16 @@ Optional:
 
 - Spec-Checksum: <sha256>
 
-## 3c. Profil- und Modus-Flags
+## 3c. Hub Path (Configuration)
+
+repoLens speichert den Hub-Pfad in `.repolens-hub-path.txt` im Skript-Verzeichnis, um Umbenennungen (z. B. `wc-hub` -> `repolens-hub`) robust zu überstehen.
+
+**Hub setzen:**
+1. Öffne den gewünschten Hub-Ordner (z. B. `wc-hub`) in Pythonista als Working Directory.
+2. Führe `repolens-hub-pathfinder.py` aus.
+3. Starte `repolens.py` neu.
+
+## 3d. Profil- und Modus-Flags
 
 - `level` (string)
   - `overview`, `summary`, `dev`, `max`
