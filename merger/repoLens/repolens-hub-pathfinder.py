@@ -2,89 +2,110 @@
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
+import os
 import sys
-
-# Visual cue for user to verify they are running the fixed version
-print("repoLens Pathfinder (Fixed Version)")
 
 try:
     import console  # type: ignore
 except Exception:
     console = None  # type: ignore
 
-try:
-    import dialogs  # type: ignore
-except Exception:
-    dialogs = None  # type: ignore
 
 def safe_script_path() -> Path:
     try:
         return Path(__file__).resolve()
     except Exception:
-        # letzte Rettung
+        # letzte Rettung: aktuelles Verzeichnis
         return Path.cwd().resolve() / "repolens-hub-pathfinder.py"
 
-def main() -> int:
-    # Default fallback: CWD (Place-and-run workflow)
-    hub_dir = Path.cwd().resolve()
 
-    # Heuristic: If we are in 'merger/repoLens', the hub is likely two levels up.
-    if hub_dir.name == "repoLens" and hub_dir.parent.name == "merger":
-        hub_dir = hub_dir.parent.parent
+def find_repolens_dirs(home: Path) -> list[Path]:
+    """
+    Heuristik: typische Install-Orte in Pythonista.
+    Wir schreiben den Pfad in jedes gefundene repoLens-Verzeichnis.
+    """
+    candidates = [
+        home / "merger" / "repoLens",
+        home / "repoLens",
+        home / "wc-merger",
+        home / "merger" / "wc-merger",
+    ]
 
-    # If UI is available, ask the user what to do
-    if dialogs and console:
+    found: list[Path] = []
+    for d in candidates:
         try:
-            # Ask user: Use detected path (CWD) or pick manually?
-            choice = console.alert(
-                "repoLens Setup",
-                f"Current Directory:\n{hub_dir.name}\n\nUse this as Hub?",
-                "Use Current",
-                "Pick Folder...",
-                hide_cancel_button=True
-            )
-
-            if choice == 2:  # "Pick Folder..."
-                # Use pick_document with file_mode=False for folder picking
-                # Wrapped in try/except because some Pythonista versions/contexts are picky
-                try:
-                    selected = dialogs.pick_document(file_mode=False)
-                    if selected:
-                        hub_dir = Path(selected).resolve()
-                    else:
-                        print("Selection cancelled. Keeping detected path.")
-                except Exception as e:
-                    console.alert("Picker Error", f"{e}", "OK", hide_cancel_button=True)
-                    print(f"Picker Error: {e}")
+            if d.is_dir():
+                # repoLens lässt sich meist über repolens.py erkennen
+                if (d / "repolens.py").exists() or (d / "repolens_app.py").exists():
+                    found.append(d)
+                else:
+                    # notfalls trotzdem aufnehmen, wenn es "repoLens" heißt
+                    if d.name.lower() == "repolens":
+                        found.append(d)
         except Exception:
-            # Fallback if alert fails (e.g. background run)
             pass
 
-    script_path = safe_script_path()
-    script_dir = script_path.parent
+    # Duplikate entfernen, Reihenfolge behalten
+    uniq: list[Path] = []
+    for d in found:
+        if d not in uniq:
+            uniq.append(d)
+    return uniq
 
-    out_file = script_dir / ".repolens-hub-path.txt"
+
+def write_pathfile(target_dir: Path, hub_dir: Path) -> tuple[bool, str]:
+    out_file = target_dir / ".repolens-hub-path.txt"
+    try:
+        out_file.write_text(str(hub_dir), encoding="utf-8")
+        return True, str(out_file)
+    except Exception as e:
+        return False, f"{out_file} -> {e}"
+
+
+def main() -> int:
+    script_path = safe_script_path()
+    hub_dir = script_path.parent.resolve()  # <- das ist der ganze Trick
 
     if not hub_dir.is_dir():
-        msg = f"Not a directory: {hub_dir}"
+        msg = f"Not a directory (script parent): {hub_dir}"
         print(msg)
         if console:
             console.alert("repoLens hub pathfinder", msg, "OK", hide_cancel_button=True)
         return 2
 
-    try:
-        out_file.write_text(str(hub_dir), encoding="utf-8")
-        msg = f"Saved hub path:\n{hub_dir}\n\n→ {out_file.name}"
-        print(msg)
-        if console:
-            console.alert("repoLens hub pathfinder", msg, "OK", hide_cancel_button=True)
-        return 0
-    except Exception as e:
-        msg = f"Failed to write {out_file}:\n{e}"
-        print(msg)
-        if console:
-            console.alert("repoLens hub pathfinder", msg, "OK", hide_cancel_button=True)
-        return 3
+    home = Path(os.path.expanduser("~")).resolve()
+
+    # 1) immer in den Hub selbst schreiben
+    ok_hub, info_hub = write_pathfile(hub_dir, hub_dir)
+
+    # 2) zusätzlich in repoLens-Verzeichnisse schreiben (falls gefunden)
+    repolens_dirs = find_repolens_dirs(home)
+    results = []
+    for d in repolens_dirs:
+        ok, info = write_pathfile(d, hub_dir)
+        results.append((ok, info))
+
+    lines = []
+    lines.append(f"Hub detected as script folder:\n{hub_dir}\n")
+    lines.append("Written files:")
+
+    lines.append(f"- HUB: {'OK' if ok_hub else 'FAIL'}  {info_hub}")
+
+    if repolens_dirs:
+        for (d, (ok, info)) in zip(repolens_dirs, results):
+            lines.append(f"- repoLens @ {d}: {'OK' if ok else 'FAIL'}  {info}")
+    else:
+        lines.append("- repoLens: (not found automatically)")
+
+    msg = "\n".join(lines)
+    print(msg)
+
+    if console:
+        console.alert("repoLens hub pathfinder", msg, "OK", hide_cancel_button=True)
+
+    # Wenn der Hub-Eintrag schon nicht geht, ist es wirklich kaputt.
+    return 0 if ok_hub else 3
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
