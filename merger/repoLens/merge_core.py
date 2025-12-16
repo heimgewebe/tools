@@ -1525,15 +1525,17 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
 
             # MD5 calculation:
             # - Textdateien: immer kompletter MD5
-            # - Binärdateien: nur, falls ein positives Limit gesetzt ist
-            #   und die Datei kleiner/gleich diesem Limit ist.
+            # - Binärdateien:
+            #   a) wenn kein Limit gesetzt ist (unlimited) -> hashen
+            #   b) wenn Limit gesetzt ist -> nur hashen, wenn size <= Limit
             md5 = ""
             # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
             limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
             if is_text:
                 md5 = compute_md5(abs_path, limit_bytes)
             else:
-                if limit_bytes is not None and size <= limit_bytes:
+                # Fix v2.4: Allow binary hashing if unlimited (limit_bytes is None)
+                if limit_bytes is None or size <= limit_bytes:
                     md5 = compute_md5(abs_path, limit_bytes)
 
             fi = FileInfo(
@@ -2613,7 +2615,7 @@ def iter_report_blocks(
                 1
                 for f in root_files
                 if f.is_text
-                and f.category in {"source", "doc", "config", "test", "ci", "contract"}
+                and f.category in {"source", "doc", "config", "test", "contract"}
             )
             root_bytes = sum(f.size for f in root_files)
             root_included = included_by_root.get(root, 0)
