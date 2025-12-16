@@ -1287,15 +1287,23 @@ class MergerUI(object):
         self.ignored_repos = set(data.get("ignored_repos", []))
 
         # Restore Extras
+        # Important: only overwrite if key exists, otherwise keep default (which might be True for new features)
         extras_data = data.get("extras", {})
         if extras_data:
-            self.extras_config.health = extras_data.get("health", False)
-            self.extras_config.organism_index = extras_data.get("organism_index", False)
-            self.extras_config.fleet_panorama = extras_data.get("fleet_panorama", False)
-            self.extras_config.delta_reports = extras_data.get("delta_reports", False)
-            self.extras_config.augment_sidecar = extras_data.get("augment_sidecar", False)
-            self.extras_config.heatmap = extras_data.get("heatmap", False)
-            self.extras_config.json_sidecar = extras_data.get("json_sidecar", False)
+            if "health" in extras_data:
+                self.extras_config.health = extras_data["health"]
+            if "organism_index" in extras_data:
+                self.extras_config.organism_index = extras_data["organism_index"]
+            if "fleet_panorama" in extras_data:
+                self.extras_config.fleet_panorama = extras_data["fleet_panorama"]
+            if "delta_reports" in extras_data:
+                self.extras_config.delta_reports = extras_data["delta_reports"]
+            if "augment_sidecar" in extras_data:
+                self.extras_config.augment_sidecar = extras_data["augment_sidecar"]
+            if "heatmap" in extras_data:
+                self.extras_config.heatmap = extras_data["heatmap"]
+            if "json_sidecar" in extras_data:
+                self.extras_config.json_sidecar = extras_data["json_sidecar"]
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
