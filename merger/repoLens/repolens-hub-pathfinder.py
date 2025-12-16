@@ -33,6 +33,16 @@ def find_repolens_dirs(home: Path) -> list[Path]:
         home / "merger" / "wc-merger",
     ]
 
+    # Add standard iCloud path for Pythonista
+    icloud_docs = Path("/private/var/mobile/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents")
+    if icloud_docs.exists():
+        candidates.extend([
+            icloud_docs / "merger" / "repoLens",
+            icloud_docs / "repoLens",
+            icloud_docs / "wc-merger",
+            icloud_docs / "merger" / "wc-merger",
+        ])
+
     found: list[Path] = []
     for d in candidates:
         try:
