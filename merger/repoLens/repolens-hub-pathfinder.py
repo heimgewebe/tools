@@ -4,6 +4,9 @@
 from pathlib import Path
 import sys
 
+# Visual cue for user to verify they are running the fixed version
+print("repoLens Pathfinder (Fixed Version)")
+
 try:
     import console  # type: ignore
 except Exception:
@@ -22,7 +25,7 @@ def safe_script_path() -> Path:
         return Path.cwd().resolve() / "repolens-hub-pathfinder.py"
 
 def main() -> int:
-    # Default fallback: CWD
+    # Default fallback: CWD (Place-and-run workflow)
     hub_dir = Path.cwd().resolve()
 
     # Heuristic: If we are in 'merger/repoLens', the hub is likely two levels up.
@@ -52,6 +55,7 @@ def main() -> int:
                         print("Selection cancelled. Keeping detected path.")
                 except Exception as e:
                     console.alert("Picker Error", f"{e}", "OK", hide_cancel_button=True)
+                    print(f"Picker Error: {e}")
         except Exception:
             # Fallback if alert fails (e.g. background run)
             pass
