@@ -3,7 +3,6 @@
 
 from pathlib import Path
 import sys
-import os
 
 try:
     import console  # type: ignore
@@ -26,33 +25,36 @@ def main() -> int:
     # Default fallback: CWD
     hub_dir = Path.cwd().resolve()
 
-    # Try to be smart if CWD seems to be the tool dir itself (e.g. merger/repoLens)
-    # If we are in 'merger/repoLens', the hub is likely two levels up.
+    # Heuristic: If we are in 'merger/repoLens', the hub is likely two levels up.
     if hub_dir.name == "repoLens" and hub_dir.parent.name == "merger":
-        # Propose grandparent as default if we are deep in the structure
         hub_dir = hub_dir.parent.parent
 
-    # If UI is available, let the user pick explicitly
-    if dialogs:
-        if console:
-            try:
-                console.hud_alert("Select Hub Folder...", "system", 1.0)
-            except Exception:
-                pass
-
-        # Use pick_document with file_mode=False for folder picking in Pythonista (same as OmniWandler)
-        # Standard 'public.folder' UTI can cause ValueError in some versions.
+    # If UI is available, ask the user what to do
+    if dialogs and console:
         try:
-            selected = dialogs.pick_document(file_mode=False)
-            if selected:
-                hub_dir = Path(selected).resolve()
-            else:
-                # User cancelled, inform them
-                msg = "Selection cancelled. Using detected path."
-                print(msg)
-        except Exception as e:
-            # Fallback if pick_document fails
-            print(f"Folder picker failed ({e}), falling back to detected path.")
+            # Ask user: Use detected path (CWD) or pick manually?
+            choice = console.alert(
+                "repoLens Setup",
+                f"Current Directory:\n{hub_dir.name}\n\nUse this as Hub?",
+                "Use Current",
+                "Pick Folder...",
+                hide_cancel_button=True
+            )
+
+            if choice == 2:  # "Pick Folder..."
+                # Use pick_document with file_mode=False for folder picking
+                # Wrapped in try/except because some Pythonista versions/contexts are picky
+                try:
+                    selected = dialogs.pick_document(file_mode=False)
+                    if selected:
+                        hub_dir = Path(selected).resolve()
+                    else:
+                        print("Selection cancelled. Keeping detected path.")
+                except Exception as e:
+                    console.alert("Picker Error", f"{e}", "OK", hide_cancel_button=True)
+        except Exception:
+            # Fallback if alert fails (e.g. background run)
+            pass
 
     script_path = safe_script_path()
     script_dir = script_path.parent
