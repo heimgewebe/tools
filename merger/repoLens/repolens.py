@@ -1893,6 +1893,10 @@ def main():
                 )
             main_cli()
     else:
+        # User Feedback: UI is platform-bound
+        if ui is None:
+            print("repoLens: Pythonista-UI not available on this interpreter; running CLI mode.")
+            print("Hint: On iOS run repolens.py inside Pythonista to get the UI.")
         main_cli()
 
 if __name__ == "__main__":

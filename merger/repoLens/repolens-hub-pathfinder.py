@@ -61,15 +61,38 @@ def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
 
 def find_repolens_dirs(home: Path) -> list[Path]:
     """
-    Heuristik: typische Install-Orte in Pythonista.
+    Heuristik: typische Install-Orte in Pythonista + Desktop.
     Wir schreiben den Pfad in jedes gefundene repoLens-Verzeichnis.
     """
-    candidates = [
+    candidates = []
+
+    # 1. Environment Override
+    env_dir = os.environ.get("REPOLENS_DIR")
+    if env_dir:
+        candidates.append(Path(env_dir))
+
+    # 2. Relative search from script location (useful for side-by-side layouts)
+    script_path = safe_script_path()
+    try:
+        script_dir = script_path.parent
+        # Common relative paths if pathfinder is in hub or nearby
+        candidates.extend([
+            script_dir / "tools" / "merger" / "repoLens",
+            script_dir.parent / "tools" / "merger" / "repoLens",
+            script_dir / "repoLens",
+        ])
+    except Exception:
+        pass
+
+    # 3. Standard candidates (Pythonista + Desktop)
+    candidates.extend([
         home / "merger" / "repoLens",
         home / "repoLens",
         home / "wc-merger",
         home / "merger" / "wc-merger",
-    ]
+        # Desktop / Pop!_OS Standard
+        home / "repos" / "tools" / "merger" / "repoLens",
+    ])
 
     # Add standard iCloud path for Pythonista
     icloud_docs = Path("/private/var/mobile/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents")
