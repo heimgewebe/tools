@@ -9,7 +9,7 @@ import os
 # Add parent directory to path to import merge_core
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from merge_core import HealthCollector, FileInfo, scan_repo, is_critical_file, RepoHealth, iter_report_blocks, ExtrasConfig
+from merge_core import HealthCollector, FileInfo, scan_repo, is_critical_file, RepoHealth, iter_report_blocks, ExtrasConfig, EPISTEMIC_HUMILITY_WARNING
 
 class TestSemanticsV2(unittest.TestCase):
     def setUp(self):
@@ -46,6 +46,11 @@ class TestSemanticsV2(unittest.TestCase):
 
         # main.py should be excluded
         self.assertNotIn("src/main.py", rel_paths)
+
+        # Check inclusion_reason
+        for f in files:
+            if f.rel_path.name == "README.md":
+                self.assertEqual(f.inclusion_reason, "force_include")
 
     def test_partial_merge_health_semantics(self):
         """Test 1: Partial-Merge with existing .ai-context.yml -> No CRITICAL."""
@@ -93,19 +98,19 @@ class TestSemanticsV2(unittest.TestCase):
         # 1. Test MAX profile -> No warning
         blocks_max = list(iter_report_blocks(files, "max", 0, [self.repo_path], False))
         header_max = blocks_max[0]
-        self.assertNotIn("Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein", header_max)
+        self.assertNotIn(EPISTEMIC_HUMILITY_WARNING, header_max)
 
         # 2. Test SUMMARY profile -> Warning present
         blocks_sum = list(iter_report_blocks(files, "summary", 0, [self.repo_path], False))
         header_sum = blocks_sum[0]
-        self.assertIn("Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein", header_sum)
+        self.assertIn(EPISTEMIC_HUMILITY_WARNING, header_sum)
 
         # 3. Test Filter active -> Warning present (even if max?)
         # Wait, the code says: allows_negative_claims = (level in ("max",)) and not path_filter and not ext_filter
         # So filters should trigger warning even in max.
         blocks_filter = list(iter_report_blocks(files, "max", 0, [self.repo_path], False, path_filter="src"))
         header_filter = blocks_filter[0]
-        self.assertIn("Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein", header_filter)
+        self.assertIn(EPISTEMIC_HUMILITY_WARNING, header_filter)
 
 if __name__ == '__main__':
     unittest.main()
