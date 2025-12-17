@@ -399,7 +399,13 @@ class HealthCollector:
             for f in files
         )
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
-        has_contracts = any(f.category == "contract" for f in files)
+        # 4. Contracts (heuristic extended: contracts/ OR **/*.schema.json)
+        def is_contract(f):
+            if f.category == "contract": return True
+            if f.rel_path.name.endswith(".schema.json"): return True
+            return False
+
+        has_contracts = any(is_contract(f) for f in files)
         # Enhanced AI context detection: check tags and file paths (cached to avoid repeated conversions)
         has_ai_context = False
         for f in files:
@@ -1518,6 +1524,26 @@ def _normalize_ext_list(ext_text: str) -> List[str]:
 
 # --- Repo Scan Logic ---
 
+def is_critical_file(rel_path_str: str) -> bool:
+    """
+    Checks if a file is critical and should be force-included regardless of filters.
+    Rules:
+    - README.md (any case)
+    - .ai-context.yml
+    - .wgx/profile.yml
+    - .github/workflows/*guard*
+    """
+    lower = rel_path_str.lower()
+    if lower == "readme.md" or lower.endswith("/readme.md"):
+        return True
+    if lower == ".ai-context.yml" or lower.endswith("/.ai-context.yml"):
+        return True
+    if ".wgx/profile.yml" in lower:
+        return True
+    if ".github/workflows/" in lower and "guard" in lower:
+        return True
+    return False
+
 def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES) -> Dict[str, Any]:
     repo_root = repo_root.resolve()
     root_label = repo_root.name
@@ -1552,12 +1578,19 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 continue
 
             rel_path_str = rel_path.as_posix()
-            if path_filter and path_filter not in rel_path_str:
-                continue
 
-            ext = abs_path.suffix.lower()
-            if ext_filter is not None and ext not in ext_filter:
-                continue
+            # Filter Logic with Force Include
+            is_critical = is_critical_file(rel_path_str)
+
+            if not is_critical:
+                if path_filter and path_filter not in rel_path_str:
+                    continue
+
+                ext = abs_path.suffix.lower()
+                if ext_filter is not None and ext not in ext_filter:
+                    continue
+            else:
+                 ext = abs_path.suffix.lower()
 
             try:
                 st = abs_path.stat()
