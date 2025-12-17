@@ -21,6 +21,44 @@ def safe_script_path() -> Path:
         return Path.cwd().resolve() / "repolens-hub-pathfinder.py"
 
 
+def _is_pythonista_runtime() -> bool:
+    sp = str(sys.executable)
+    return ("/private/var/mobile/" in sp) or ("Pythonista" in sp)
+
+
+def _depth(root: Path, p: Path) -> int:
+    try:
+        rel = p.resolve().relative_to(root.resolve())
+        return len(rel.parts)
+    except Exception:
+        return 10**9
+
+
+def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
+    found: list[Path] = []
+    try:
+        root_res = root.resolve()
+    except Exception:
+        root_res = root
+
+    try:
+        for hit in root_res.rglob("repolens.py"):
+            if _depth(root_res, hit) > max_depth:
+                continue
+            d = hit.parent
+            if d.is_dir():
+                found.append(d)
+    except Exception:
+        pass
+
+    # uniq
+    uniq: list[Path] = []
+    for d in found:
+        if d not in uniq:
+            uniq.append(d)
+    return uniq
+
+
 def find_repolens_dirs(home: Path) -> list[Path]:
     """
     Heuristik: typische Install-Orte in Pythonista.
@@ -92,6 +130,18 @@ def main() -> int:
 
     # 2) zusätzlich in repoLens-Verzeichnisse schreiben (falls gefunden)
     repolens_dirs = find_repolens_dirs(home)
+
+    # NEW BLOCK: Scan current hub tree if not on Pythonista
+    if not _is_pythonista_runtime():
+        repolens_dirs.extend(find_repolens_dirs_in_tree(hub_dir, max_depth=8))
+
+    # final uniq
+    uniq: list[Path] = []
+    for d in repolens_dirs:
+        if d not in uniq:
+            uniq.append(d)
+    repolens_dirs = uniq
+
     results = []
     for d in repolens_dirs:
         ok, info = write_pathfile(d, hub_dir)
