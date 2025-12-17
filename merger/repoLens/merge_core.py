@@ -401,8 +401,11 @@ class HealthCollector:
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
         # 4. Contracts (heuristic extended: contracts/ OR **/*.schema.json)
         def is_contract(f):
-            if f.category == "contract": return True
-            if f.rel_path.name.endswith(".schema.json"): return True
+            if f.category == "contract":
+                return True
+            rel = str(getattr(f, "rel_path", "")).lower()
+            if rel.endswith(".schema.json"):
+                return True
             return False
 
         has_contracts = any(is_contract(f) for f in files)
@@ -1590,7 +1593,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 if ext_filter is not None and ext not in ext_filter:
                     continue
             else:
-                 ext = abs_path.suffix.lower()
+                ext = abs_path.suffix.lower()
 
             try:
                 st = abs_path.stat()
@@ -2478,6 +2481,17 @@ def iter_report_blocks(
     header.append("- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)")
     header.append("- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.")
     header.append("")
+
+    # Requirement 2: Profile Capability Warning (Epistemic Humility)
+    # Profiles other than max/full/dev cannot prove absence.
+    # Also if any filters are active.
+    # Note: 'full' is not a standard profile key in repoLens (overview, summary, dev, max, machine-lean).
+    # 'max' is the full profile.
+    allows_negative_claims = (level in ("max",)) and not path_filter and not ext_filter
+
+    if not allows_negative_claims:
+        header.append("⚠️ **Hinweis:** Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein von Dateien im Repository. Fehlende Einträge bedeuten lediglich „nicht im Ausschnitt enthalten“.")
+        header.append("")
 
     # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
     profile_usecase = PROFILE_USECASE.get(level)

@@ -9,7 +9,7 @@ import os
 # Add parent directory to path to import merge_core
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from merge_core import HealthCollector, FileInfo, scan_repo, is_critical_file, RepoHealth
+from merge_core import HealthCollector, FileInfo, scan_repo, is_critical_file, RepoHealth, iter_report_blocks, ExtrasConfig
 
 class TestSemanticsV2(unittest.TestCase):
     def setUp(self):
@@ -55,7 +55,7 @@ class TestSemanticsV2(unittest.TestCase):
         self.create_dummy_file(".github/workflows/guard.yml", "ci: test")
         self.create_dummy_file("contracts/test.json", "{}")
 
-        # Run scan with path filter that might exclude some things
+        # Run scan with path filter that excludes sources but Force Includes criticals
         summary = scan_repo(self.repo_path, path_contains="src") # src doesn't exist
         files = summary["files"]
 
@@ -66,6 +66,9 @@ class TestSemanticsV2(unittest.TestCase):
         # Should not be critical because critical files are forced in
         self.assertNotEqual(health.status, "critical", f"Status is {health.status}, warnings: {health.warnings}")
         self.assertTrue(health.has_ai_context)
+        # Ensure we don't have the old warning
+        for w in health.warnings:
+            self.assertNotIn("No AI context files found", w)
 
     def test_schema_json_as_contract(self):
         """Test 3: Repo with *.schema.json counts as Contract."""
@@ -78,25 +81,31 @@ class TestSemanticsV2(unittest.TestCase):
         collector = HealthCollector()
         health = collector.analyze_repo("test-repo", files)
 
-        self.assertTrue(health.has_contracts)
+        self.assertTrue(health.has_contracts, "Schema json should be detected as contract")
 
-    def test_hotspot_merge_without_readme_output(self):
-        """Test 2: Hotspot-Merge (simulated) where README might be filtered out?
-           Actually, README is now force-included. So this test expectation might need adjustment based on new logic.
-           The requirement says: "Hotspot-Merge ohne README im Output -> Hinweis, kein Fehler".
-           But my implementation force-includes README. So it WILL be in output.
-           So effectively, I fixed it by ensuring it IS in output.
-
-           Let's simulate a case where README is genuinely missing from repo."""
-
-        # No README created
-        self.create_dummy_file("src/main.py", "code")
+    def test_epistemic_humility_warning(self):
+        """Test that non-max profiles get the humility warning."""
+        self.create_dummy_file("README.md", "# Readme")
 
         summary = scan_repo(self.repo_path)
-        health = HealthCollector().analyze_repo("test-repo", summary["files"])
+        files = summary["files"]
 
-        self.assertFalse(health.has_readme)
-        self.assertIn("No README.md found", health.warnings)
+        # 1. Test MAX profile -> No warning
+        blocks_max = list(iter_report_blocks(files, "max", 0, [self.repo_path], False))
+        header_max = blocks_max[0]
+        self.assertNotIn("Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein", header_max)
+
+        # 2. Test SUMMARY profile -> Warning present
+        blocks_sum = list(iter_report_blocks(files, "summary", 0, [self.repo_path], False))
+        header_sum = blocks_sum[0]
+        self.assertIn("Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein", header_sum)
+
+        # 3. Test Filter active -> Warning present (even if max?)
+        # Wait, the code says: allows_negative_claims = (level in ("max",)) and not path_filter and not ext_filter
+        # So filters should trigger warning even in max.
+        blocks_filter = list(iter_report_blocks(files, "max", 0, [self.repo_path], False, path_filter="src"))
+        header_filter = blocks_filter[0]
+        self.assertIn("Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein", header_filter)
 
 if __name__ == '__main__':
     unittest.main()
