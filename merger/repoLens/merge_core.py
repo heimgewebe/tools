@@ -23,6 +23,7 @@ except ImportError:
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
+EPISTEMIC_HUMILITY_WARNING = "⚠️ **Hinweis:** Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein von Dateien im Repository. Fehlende Einträge bedeuten lediglich „nicht im Ausschnitt enthalten“."
 
 def _slug_token(s: str) -> str:
     """Deterministic ASCII token suitable for heading ids across renderers."""
@@ -399,7 +400,16 @@ class HealthCollector:
             for f in files
         )
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
-        has_contracts = any(f.category == "contract" for f in files)
+        # 4. Contracts (heuristic extended: contracts/ OR **/*.schema.json)
+        def is_contract(f):
+            if f.category == "contract":
+                return True
+            rel = str(getattr(f, "rel_path", "")).lower()
+            if rel.endswith(".schema.json"):
+                return True
+            return False
+
+        has_contracts = any(is_contract(f) for f in files)
         # Enhanced AI context detection: check tags and file paths (cached to avoid repeated conversions)
         has_ai_context = False
         for f in files:
@@ -1026,7 +1036,7 @@ REPO_ORDER = [
 
 class FileInfo(object):
     """Container for file metadata."""
-    def __init__(self, root_label, abs_path, rel_path, size, is_text, md5, category, tags, ext, skipped=False, reason=None, content=None):
+    def __init__(self, root_label, abs_path, rel_path, size, is_text, md5, category, tags, ext, skipped=False, reason=None, content=None, inclusion_reason="normal"):
         self.root_label = root_label
         self.abs_path = abs_path
         self.rel_path = rel_path
@@ -1039,6 +1049,7 @@ class FileInfo(object):
         self.skipped = skipped
         self.reason = reason
         self.content = content
+        self.inclusion_reason = inclusion_reason
         self.anchor = "" # Will be set during report generation
         self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
         self.roles = [] # Will be computed during report generation
@@ -1518,6 +1529,26 @@ def _normalize_ext_list(ext_text: str) -> List[str]:
 
 # --- Repo Scan Logic ---
 
+def is_critical_file(rel_path_str: str) -> bool:
+    """
+    Checks if a file is critical and should be force-included regardless of filters.
+    Rules:
+    - README.md (any case)
+    - .ai-context.yml
+    - .wgx/profile.yml
+    - .github/workflows/*guard*
+    """
+    lower = rel_path_str.lower()
+    if lower == "readme.md" or lower.endswith("/readme.md"):
+        return True
+    if lower == ".ai-context.yml" or lower.endswith("/.ai-context.yml"):
+        return True
+    if ".wgx/profile.yml" in lower:
+        return True
+    if ".github/workflows/" in lower and "guard" in lower:
+        return True
+    return False
+
 def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES) -> Dict[str, Any]:
     repo_root = repo_root.resolve()
     root_label = repo_root.name
@@ -1552,12 +1583,22 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 continue
 
             rel_path_str = rel_path.as_posix()
-            if path_filter and path_filter not in rel_path_str:
-                continue
 
-            ext = abs_path.suffix.lower()
-            if ext_filter is not None and ext not in ext_filter:
-                continue
+            # Filter Logic with Force Include
+            is_critical = is_critical_file(rel_path_str)
+            inclusion_reason = "normal"
+
+            if is_critical:
+                ext = abs_path.suffix.lower()
+                inclusion_reason = "force_include"
+            else:
+                # Normal filtering
+                if path_filter and path_filter not in rel_path_str:
+                    continue
+
+                ext = abs_path.suffix.lower()
+                if ext_filter is not None and ext not in ext_filter:
+                    continue
 
             try:
                 st = abs_path.stat()
@@ -1596,7 +1637,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 md5=md5,
                 category=category,
                 tags=tags,
-                ext=ext
+                ext=ext,
+                inclusion_reason=inclusion_reason
             )
             files.append(fi)
 
@@ -2446,6 +2488,17 @@ def iter_report_blocks(
     header.append("- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.")
     header.append("")
 
+    # Requirement 2: Profile Capability Warning (Epistemic Humility)
+    # Profiles other than max/full/dev cannot prove absence.
+    # Also if any filters are active.
+    # Note: 'full' is not a standard profile key in repoLens (overview, summary, dev, max, machine-lean).
+    # 'max' is the full profile.
+    allows_negative_claims = (level in ("max",)) and not path_filter and not ext_filter
+
+    if not allows_negative_claims:
+        header.append(EPISTEMIC_HUMILITY_WARNING)
+        header.append("")
+
     # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
     profile_usecase = PROFILE_USECASE.get(level)
     if profile_usecase:
@@ -3009,6 +3062,17 @@ def iter_report_blocks(
         content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
         # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
         block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
+
+        # File Meta Block (Spec Patch)
+        block.append("<!--")
+        block.append("file_meta:")
+        block.append(f"  repo: {fi.root_label}")
+        block.append(f"  path: {fi.rel_path}")
+        block.append(f"  lines: {len(content.splitlines())}")
+        block.append(f"  included: {status}")
+        if getattr(fi, "inclusion_reason", "normal") != "normal":
+            block.append(f"  inclusion_reason: {fi.inclusion_reason}")
+        block.append("-->")
 
         # Dynamic fence length to escape content containing backticks
         max_ticks = 0
