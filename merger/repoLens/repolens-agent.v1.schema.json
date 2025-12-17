@@ -5,6 +5,17 @@
   "type": "object",
   "required": ["meta", "artifacts", "files"],
   "properties": {
+    "reading_policy": {
+      "type": "object",
+      "description": "Declares the canonical source of truth and reading requirements.",
+      "properties": {
+        "canonical_source": { "type": "string", "enum": ["md"] },
+        "md_required": { "type": "boolean" },
+        "json_role": { "type": "string" },
+        "md_contains_full_information": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "meta": {
       "type": "object",
       "required": ["contract", "contract_version", "generated_at", "profile"],
@@ -25,10 +36,10 @@
     },
     "artifacts": {
       "type": "object",
-      "required": ["primary_json"],
+      "required": ["index_json"],
       "properties": {
-        "primary_json": { "type": ["string", "null"] },
-        "human_md": { "type": ["string", "null"] },
+        "index_json": { "type": ["string", "null"] },
+        "canonical_md": { "type": ["string", "null"] },
         "md_parts": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": true

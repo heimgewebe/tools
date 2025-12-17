@@ -239,10 +239,10 @@ def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = Fal
     artifacts = d.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("agent-json: missing/invalid artifacts")
-    if "primary_json" not in artifacts:
-        raise ValueError("agent-json: artifacts.primary_json missing")
-    if not allow_empty_primary and not artifacts.get("primary_json"):
-        raise ValueError("agent-json: artifacts.primary_json missing")
+    if "index_json" not in artifacts:
+        raise ValueError("agent-json: artifacts.index_json missing")
+    if not allow_empty_primary and not artifacts.get("index_json"):
+        raise ValueError("agent-json: artifacts.index_json missing")
     files = d.get("files")
     if not isinstance(files, list):
         raise ValueError("agent-json: missing/invalid files[]")
@@ -320,8 +320,8 @@ class MergeArtifacts:
     Result object for write_reports_v2() containing all generated artifacts.
     Makes it explicit which artifact is the primary (JSON or Markdown).
     """
-    primary_json: Optional[Path] = None
-    human_md: Optional[Path] = None
+    index_json: Optional[Path] = None
+    canonical_md: Optional[Path] = None
     md_parts: List[Path] = None
     other: List[Path] = None
 
@@ -334,10 +334,10 @@ class MergeArtifacts:
     def get_all_paths(self) -> List[Path]:
         """Return all paths in deterministic order: primary first, then others."""
         paths = []
-        if self.primary_json:
-            paths.append(self.primary_json)
-        if self.human_md and self.human_md not in paths:
-            paths.append(self.human_md)
+        if self.index_json:
+            paths.append(self.index_json)
+        if self.canonical_md and self.canonical_md not in paths:
+            paths.append(self.canonical_md)
         for p in self.md_parts:
             if p not in paths:
                 paths.append(p)
@@ -348,7 +348,7 @@ class MergeArtifacts:
 
     def get_primary_path(self) -> Optional[Path]:
         """Return the primary artifact path (JSON if exists, otherwise Markdown)."""
-        return self.primary_json or self.human_md
+        return self.index_json or self.canonical_md
 
 
 @dataclass
@@ -2381,11 +2381,22 @@ def iter_report_blocks(
     header.append(f"# repoLens Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
+    # --- Canonical Note (Epistemic Protection) ---
+    header.append("> **Kanonischer Hinweis**")
+    header.append(">")
+    header.append("> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des repoLens-Merges.")
+    header.append("> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.")
+    header.append(">")
+    header.append("> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,")
+    header.append("> Filterung und Metainformation.")
+    header.append("> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**")
+    header.append("")
+
     # --- Contract roles (agent-first clarity) ---
     # Human-readable report contract (this Markdown)
     header.append("**Human Contract:** `repolens-report` (v2.4)")
     # Machine-readable primary contract (the JSON primary artifact)
-    header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.primary_json`")
+    header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.index_json`")
     header.append("")
 
     render_mode = _effective_render_mode(plan_only, code_only)
@@ -3156,10 +3167,16 @@ def generate_json_sidecar(
 
     out = {
         "meta": meta,
+        "reading_policy": {
+            "canonical_source": "md",
+            "md_required": True,
+            "json_role": "index_and_metadata_only",
+            "md_contains_full_information": True,
+        },
         "artifacts": {
             # filled by writer (paths)
-            "primary_json": None,
-            "human_md": None,
+            "index_json": None,
+            "canonical_md": None,
             "md_parts": [],
         },
         "coverage": {
@@ -3458,10 +3475,10 @@ def write_reports_v2(
                         timestamp=global_ts,
                 ).with_suffix('.json')
             
-            json_data["artifacts"]["primary_json"] = str(json_path)
+            json_data["artifacts"]["index_json"] = str(json_path)
             md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
             json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
-            json_data["artifacts"]["human_md"] = str(md_parts[0]) if md_parts else None
+            json_data["artifacts"]["canonical_md"] = str(md_parts[0]) if md_parts else None
             _validate_agent_json_dict(json_data)
             json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
             out_paths.append(json_path)
@@ -3532,11 +3549,11 @@ def write_reports_v2(
                         timestamp=global_ts,
                     ).with_suffix('.json')
                 
-                json_data["artifacts"]["primary_json"] = str(json_path)
+                json_data["artifacts"]["index_json"] = str(json_path)
                 md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
                 # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
                 json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
-                json_data["artifacts"]["human_md"] = (
+                json_data["artifacts"]["canonical_md"] = (
                     str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
                 )
                 _validate_agent_json_dict(json_data)
@@ -3589,16 +3606,16 @@ def write_reports_v2(
     if extras and extras.json_sidecar:
         # JSON is primary when json_sidecar is enabled
         return MergeArtifacts(
-            primary_json=verified_json[0] if verified_json else None,
-            human_md=verified_md[0] if verified_md else None,
+            index_json=verified_json[0] if verified_json else None,
+            canonical_md=verified_md[0] if verified_md else None,
             md_parts=verified_md,
             other=other_paths
         )
     else:
         # Markdown is primary when json_sidecar is disabled
         return MergeArtifacts(
-            primary_json=None,
-            human_md=verified_md[0] if verified_md else None,
+            index_json=None,
+            canonical_md=verified_md[0] if verified_md else None,
             md_parts=verified_md,
             other=other_paths
         )
