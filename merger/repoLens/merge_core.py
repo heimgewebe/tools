@@ -2266,7 +2266,6 @@ def iter_report_blocks(
 
     unknown_categories = set()
     unknown_tags = set()
-    files_missing_anchor = []
     roots = set(f.root_label for f in files)
 
     for fi in files:
@@ -2284,14 +2283,15 @@ def iter_report_blocks(
         # Debug checks
         # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
         # "other" ist gültig, aber signalisiert: nicht eindeutig klassifizierbar.
-        if fi.category not in DEBUG_CONFIG.allowed_categories:
+        if debug and fi.category not in DEBUG_CONFIG.allowed_categories:
             unknown_categories.add(fi.category)
         # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
 
         # Check tags against the configured allow-list
-        for tag in (fi.tags or []):
-            if tag not in DEBUG_CONFIG.allowed_tags:
-                unknown_tags.add(tag)
+        if debug:
+            for tag in (fi.tags or []):
+                if tag not in DEBUG_CONFIG.allowed_tags:
+                    unknown_tags.add(tag)
 
         status = determine_inclusion_status(fi, level, max_file_bytes)
 
@@ -2310,8 +2310,6 @@ def iter_report_blocks(
     total_size = sum(fi.size for fi in files)
     text_files = [fi for fi in files if fi.is_text]
     included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
-
-    cat_stats = summarize_categories(files)
 
     # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
     # um später im Plan pro Repo eine Coverage-Zeile auszugeben
@@ -2481,10 +2479,6 @@ def iter_report_blocks(
     
     header.append("")
     
-    # Prepare human-readable filter descriptions for header display
-    path_filter_desc = path_filter if path_filter else "none (full tree)"
-    ext_filter_desc = ", ".join(sorted(ext_filter)) if ext_filter else "none (all text types)"
-
     # --- 3. Machine-readable Meta Block (für KIs) ---
     # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
     if not plan_only:
