@@ -3,7 +3,7 @@
   "$id": "https://heimgewebe.local/contracts/repolens-agent.v1.schema.json",
   "title": "repolens-agent.v1",
   "type": "object",
-  "required": ["meta", "artifacts", "files"],
+  "required": ["reading_policy", "meta", "artifacts", "files"],
   "properties": {
     "reading_policy": {
       "type": "object",
@@ -36,7 +36,7 @@
     },
     "artifacts": {
       "type": "object",
-      "required": ["index_json"],
+      "required": ["index_json", "canonical_md", "md_parts"],
       "properties": {
         "index_json": { "type": ["string", "null"] },
         "canonical_md": { "type": ["string", "null"] },

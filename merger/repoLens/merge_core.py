@@ -33,6 +33,14 @@ def _slug_token(s: str) -> str:
     return s
 
 
+READING_POLICY_BANNER = (
+    "**READING POLICY (verbindlich):**\n"
+    "- Dieses Markdown ist die kanonische Quelle und vollständig zu lesen.\n"
+    "- Die JSON-Datei ist nur Index/Metadaten/Einstieg und enthält NICHT die volle Information.\n"
+    "\n"
+)
+
+
 @dataclass(frozen=True)
 class NavStyle:
     """
@@ -2378,6 +2386,7 @@ def iter_report_blocks(
 
     # --- 1. Header ---
     header = []
+    header.append(READING_POLICY_BANNER)
     header.append(f"# repoLens Report (v{SPEC_VERSION.split('.')[0]}.x)")
     header.append("")
 
