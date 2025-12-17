@@ -319,7 +319,8 @@ def _run_extractor_on_start(hub: Path) -> None:
                 extractor.run_extractor(hub)
             return
         # Fallback: do nothing rather than popping alerts or blocking startup.
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"[repoLens] Extractor auto-run warning: {e}\n")
         return
 
 
