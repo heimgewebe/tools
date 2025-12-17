@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import List, Any, Dict, Optional
 
 
-DEFAULT_LEVEL = "dev"
+DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0

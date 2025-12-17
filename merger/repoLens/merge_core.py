@@ -983,7 +983,7 @@ LANG_MAP = {
 
 HARDCODED_HUB_PATH = (
     "/private/var/mobile/Containers/Data/Application/"
-    "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/repolens-hub"
+    "B60D0157-973D-489A-AA59-464C3BF6D240/Documents/wc-hub"
 )
 
 HUB_PATH_FILENAME = ".repolens-hub-path.txt"
