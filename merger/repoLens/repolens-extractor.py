@@ -425,7 +425,8 @@ def _read_state(merges_dir: Path) -> Dict[str, Any]:
         if not p.exists():
             return {}
         return json.loads(p.read_text("utf-8"))
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to read extractor state: {e}\n")
         return {}
 
 
@@ -433,8 +434,8 @@ def _write_state(merges_dir: Path, state: Dict[str, Any]) -> None:
     p = _state_path(merges_dir)
     try:
         p.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", "utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to write extractor state: {e}\n")
 
 
 def run_extractor(
@@ -485,7 +486,8 @@ def run_extractor(
             diff_path = import_zip_wrapper(zp, hub, merges_dir)
             if diff_path is not None:
                 processed += 1
-        except Exception:
+        except Exception as e:
+            sys.stderr.write(f"Error processing {zp.name}: {e}\n")
             failures += 1
 
     # Update state after a run (even if some failures happened)

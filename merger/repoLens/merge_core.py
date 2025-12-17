@@ -1054,7 +1054,8 @@ def load_saved_hub_path(script_path: Path) -> Optional[Path]:
         p = Path(raw).expanduser()
         if p.is_dir():
             return p
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to load hub path from {f}: {e}\n")
         return None
     return None
 
@@ -1064,7 +1065,8 @@ def save_hub_path(script_path: Path, hub_dir: Path) -> bool:
     try:
         f.write_text(str(hub_dir.resolve()), encoding="utf-8")
         return True
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to save hub path to {f}: {e}\n")
         return False
 
 
