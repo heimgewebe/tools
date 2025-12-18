@@ -163,7 +163,13 @@ class JobRunner:
 
             # 4. Write Reports
             log("Generating reports...")
-            merges_dir = get_merges_dir(hub)
+            if req.merges_dir:
+                merges_dir = Path(req.merges_dir)
+                merges_dir.mkdir(parents=True, exist_ok=True)
+                # Ensure security/validation for custom merges_dir if needed
+                # For now assuming if user can specify it, they have access.
+            else:
+                merges_dir = get_merges_dir(hub)
 
             # Re-check cancel status before write (expensive operation)
             job = self.job_store.get_job(job_id)

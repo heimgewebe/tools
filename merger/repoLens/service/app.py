@@ -34,13 +34,15 @@ def _is_loopback_host(host: str) -> bool:
 # Global State
 class ServiceState:
     hub: Path = None
+    merges_dir: Path = None
     job_store: JobStore = None
     runner: JobRunner = None
 
 state = ServiceState()
 
-def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1"):
+def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1", merges_dir: Optional[Path] = None):
     state.hub = hub_path
+    state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
 
@@ -86,8 +88,61 @@ def health():
         "status": "ok",
         "version": SPEC_VERSION,
         "hub": str(state.hub),
+        "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
         "running_jobs": len(state.runner.futures) if state.runner else 0
+    }
+
+@app.get("/api/fs/list", dependencies=[Depends(verify_token)])
+def list_fs(path: Optional[str] = None):
+    """
+    List directories in the given path (or root if None).
+    Supports a simple 'folder picker' in the UI.
+    """
+    if not path:
+        # Default start: hub or current dir or root
+        start_path = state.hub if state.hub else Path(".")
+    else:
+        start_path = Path(path)
+
+    if not start_path.exists():
+        # Fallback to current dir if invalid
+        start_path = Path(".")
+
+    # Resolve to absolute
+    try:
+        start_path = start_path.resolve()
+    except Exception:
+        pass
+
+    entries = []
+    parent = start_path.parent
+
+    # Add parent entry
+    entries.append({
+        "name": "..",
+        "path": str(parent),
+        "is_dir": True
+    })
+
+    try:
+        for p in sorted(start_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            try:
+                if p.is_dir() and not p.name.startswith("."):
+                     entries.append({
+                         "name": p.name,
+                         "path": str(p),
+                         "is_dir": True
+                     })
+            except Exception:
+                pass
+    except Exception as e:
+        # Permission error etc.
+        return {"path": str(start_path), "entries": [], "error": str(e)}
+
+    return {
+        "path": str(start_path),
+        "entries": entries
     }
 
 @app.get("/api/repos", dependencies=[Depends(verify_token)])
@@ -107,6 +162,10 @@ def create_job(request: JobRequest):
     req_hub = state.hub
     if request.hub:
          req_hub = validate_hub_path(request.hub)
+
+    # Apply default merges dir if not specified
+    if not request.merges_dir and state.merges_dir:
+        request.merges_dir = str(state.merges_dir)
 
     # Validate repo names early (API must be strict)
     if request.repos:
