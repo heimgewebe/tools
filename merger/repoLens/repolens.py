@@ -1448,27 +1448,69 @@ class MergerUI(object):
             # We bypass create_delta_merge_from_diff to avoid double-writing.
             # Instead we extract metadata directly from the diff file.
             delta_meta = None
+            extract_returned_none = False
+            diff_mtime = None
+
+            try:
+                diff_mtime = diff_path.stat().st_mtime
+            except Exception:
+                diff_mtime = None
 
             if hasattr(mod, "extract_delta_meta_from_diff_file"):
                 try:
                     delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+                    if delta_meta is None:
+                        extract_returned_none = True
                 except Exception as e:
                     sys.stderr.write(f"[ERROR] Delta extraction failed: {e}\n")
 
-            # Fallback: Check for existing delta.json (from previous extractor run)
-            if not delta_meta:
+            # Wenn der Extraktor erfolgreich lief, aber kein Delta liefert, kein Fallback zulassen
+            if extract_returned_none:
+                msg = "Diff enthält keine Delta-Zeilen (keine Änderungen?) – breche ohne Fallback ab."
+                if console:
+                    console.alert("repoLens", msg, "OK", hide_cancel_button=True)
+                else:
+                    print(f"[repoLens] {msg}")
+                return
+
+            # Fallback nur, wenn der Extraktor nicht verfügbar war oder fehlgeschlagen ist
+            if delta_meta is None:
                 try:
-                    delta_json_path = merges_dir / "delta.json"
-                    if delta_json_path.exists():
-                        raw = json.loads(delta_json_path.read_text(encoding="utf-8"))
+                    candidate_paths = []
+                    delta_from_diff = diff_path.with_suffix(".delta.json")
+                    candidate_paths.append(delta_from_diff)
+                    try:
+                        repo_specific = sorted(
+                            merges_dir.glob(f"{repo_name}-import-diff-*.delta.json"),
+                            key=lambda p: p.stat().st_mtime,
+                            reverse=True,
+                        )
+                        candidate_paths.extend(repo_specific)
+                    except Exception:
+                        pass
+                    legacy_delta = merges_dir / "delta.json"
+                    candidate_paths.append(legacy_delta)
+
+                    for candidate in candidate_paths:
+                        if not candidate.exists():
+                            continue
+                        # Verhindere veraltete Artefakte: nur Dateien akzeptieren, die zeitlich zum Diff passen
+                        try:
+                            cand_mtime = candidate.stat().st_mtime
+                            if diff_mtime is not None and cand_mtime + 1 < diff_mtime:
+                                continue
+                        except Exception:
+                            pass
+                        raw = json.loads(candidate.read_text(encoding="utf-8"))
                         if (
                             isinstance(raw, dict)
                             and raw.get("type") == "repolens-delta"
                             and "summary" in raw
                         ):
                             delta_meta = raw
+                            break
                 except Exception as e:
-                    print(f"[repoLens] Failed to read delta.json: {e}", file=sys.stderr)
+                    print(f"[repoLens] Failed to read delta metadata: {e}", file=sys.stderr)
 
             if not delta_meta:
                 msg = "Could not extract delta metadata from diff."

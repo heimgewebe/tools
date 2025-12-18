@@ -145,11 +145,7 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
     """
     try:
         text = diff_path.read_text(encoding="utf-8")
-        rows = parse_import_diff_table(text)
-        
-        if not rows:
-            return None
-        
+
         # Extract base timestamp from diff file if available
         base_timestamp = None
         lines = text.splitlines()
@@ -166,6 +162,12 @@ def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any
                 except (IndexError, ValueError):
                     pass
                 break
+
+        rows = parse_import_diff_table(text)
+
+        # Auch bei fehlender Tabelle ein „leeres“ Delta zurückgeben, um Stale-Fallbacks zu vermeiden
+        if not rows:
+            return build_delta_meta_from_diff([], [], [], base_timestamp)
         
         # Categorize rows
         only_old = [r["path"] for r in rows if r["status"] == "removed"]
@@ -239,15 +241,19 @@ def diff_trees(
 
     # Manifest-artige Tabelle: ein Eintrag pro betroffener Datei
     any_rows = bool(only_old or only_new or changed)
-    if any_rows:
-        # Save delta metadata for downstream tools (repoLens)
-        try:
-            delta_meta = build_delta_meta_from_diff(only_old, only_new, changed)
-            delta_json_path = merges_dir / "delta.json"
-            delta_json_path.write_text(json.dumps(delta_meta, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception as e:
-            sys.stderr.write(f"Warning: Failed to save delta.json: {e}\n")
 
+    # Immer Delta-Metadaten neben das Diff schreiben – auch wenn keine Änderungen vorliegen
+    try:
+        delta_meta = build_delta_meta_from_diff(only_old, only_new, changed)
+        delta_json_path = out_path.with_suffix(".delta.json")
+        delta_json_path.write_text(
+            json.dumps(delta_meta, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to save delta metadata: {e}\n")
+
+    if any_rows:
         lines.append("## Dateiliste (Manifest-Stil)")
         lines.append("")
         lines.append(
