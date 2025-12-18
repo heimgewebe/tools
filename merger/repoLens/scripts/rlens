@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPOLENS_DIR="${REPOLENS_DIR:-$HOME/repos/tools/merger/repoLens}"
-export REPOLENS_HUB="${REPOLENS_HUB:-$HOME/repos}"
-export REPOLENS_HOST="${REPOLENS_HOST:-127.0.0.1}"
-export REPOLENS_PORT="${REPOLENS_PORT:-8787}"
+RLENS_DIR="${RLENS_DIR:-$HOME/repos/tools/merger/repoLens}"
+export RLENS_HUB="${RLENS_HUB:-$HOME/repos}"
+export RLENS_HOST="${RLENS_HOST:-127.0.0.1}"
+export RLENS_PORT="${RLENS_PORT:-8787}"
 
 # bequemste Tokenvariante lokal: default nur für loopback ok
-export REPOLENS_TOKEN="${REPOLENS_TOKEN:-heimgewebe-local}"
+export RLENS_TOKEN="${RLENS_TOKEN:-heimgewebe-local}"
 
-cd "$REPOLENS_DIR"
-exec python3 repolensd.py --open
+cd "$RLENS_DIR"
+exec python3 service/rlens.py --open

@@ -3,10 +3,10 @@
 const API_BASE = '/api';
 
 // Token handling
-const TOKEN_KEY = 'repolens_token';
-const SETS_KEY = 'repolens_sets';
-const CONFIG_KEY = 'repolens_config';
-const ATLAS_CONFIG_KEY = 'repolens_atlas_config';
+const TOKEN_KEY = 'rlens_token';
+const SETS_KEY = 'rlens_sets';
+const CONFIG_KEY = 'rlens_config';
+const ATLAS_CONFIG_KEY = 'rlens_atlas_config';
 
 // Picker state
 let currentPickerTarget = null;

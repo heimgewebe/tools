@@ -12,7 +12,7 @@ except ImportError:
 class JobStore:
     def __init__(self, hub_path: Path):
         self.hub_path = hub_path
-        self.storage_dir = self.hub_path / MERGES_DIR_NAME / ".repolens-service"
+        self.storage_dir = self.hub_path / MERGES_DIR_NAME / ".rlens-service"
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_file = self.storage_dir / "jobs.json"
         self.artifacts_file = self.storage_dir / "artifacts.json"
