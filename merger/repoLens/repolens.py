@@ -139,6 +139,7 @@ try:
         _normalize_ext_list,
         ExtrasConfig,
         MergeArtifacts,
+    parse_human_size,
     )
 except ImportError:
     sys.path.append(str(SCRIPT_DIR))
@@ -152,6 +153,7 @@ except ImportError:
         _normalize_ext_list,
         ExtrasConfig,
         MergeArtifacts,
+        parse_human_size,
     )
 
 PROFILE_DESCRIPTIONS = {
@@ -250,21 +252,6 @@ def _pick_human_md(paths) -> Optional[Path]:
         except Exception:
             pass
     return None
-
-def parse_human_size(text: str) -> int:
-    text = text.upper().strip()
-    if not text: return 0
-    if text.isdigit(): return int(text)
-
-    units = {"K": 1024, "M": 1024**2, "G": 1024**3}
-    for u, m in units.items():
-        if text.endswith(u) or text.endswith(u+"B"):
-            val = text.rstrip(u+"B").rstrip(u)
-            try:
-                return int(float(val) * m)
-            except ValueError:
-                return 0
-    return 0
 
 
 def _parse_extras_csv(extras_csv: str) -> List[str]:
@@ -1803,9 +1790,35 @@ def main_cli():
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
     parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
 
+    # Service arguments
+    parser.add_argument("--serve", action="store_true", help="Start repoLens as a local web service")
+    parser.add_argument("--host", default="127.0.0.1", help="Service host (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8787, help="Service port (default: 8787)")
+    parser.add_argument("--open", action="store_true", help="Open browser on start")
+    parser.add_argument("--token", help="Security token for API access (override env REPOLENS_TOKEN)")
+
     args = parser.parse_args()
 
     hub = detect_hub_dir(SCRIPT_PATH, args.hub)
+
+    if args.serve:
+        try:
+            # Lazy import to avoid dependencies on iOS
+            try:
+                from repolens_service import run_server
+            except ImportError:
+                # Handle package-relative import if needed
+                # Note: This is tricky when running as script.
+                # Attempt to adjust sys.path if module not found.
+                sys.path.append(str(SCRIPT_DIR))
+                from repolens_service import run_server
+
+            run_server(hub, args.host, args.port, args.open, args.token)
+            return
+        except ImportError as e:
+            print(f"Service dependencies missing or import error: {e}")
+            print("Please install requirements: pip install fastapi uvicorn pydantic")
+            sys.exit(1)
 
     sources = []
     if args.paths:

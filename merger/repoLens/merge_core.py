@@ -1656,6 +1656,21 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         "ext_hist": ext_hist,
     }
 
+def parse_human_size(text: str) -> int:
+    text = str(text).upper().strip()
+    if not text: return 0
+    if text.isdigit(): return int(text)
+
+    units = {"K": 1024, "M": 1024**2, "G": 1024**3}
+    for u, m in units.items():
+        if text.endswith(u) or text.endswith(u+"B"):
+            val = text.rstrip(u+"B").rstrip(u)
+            try:
+                return int(float(val) * m)
+            except ValueError:
+                return 0
+    return 0
+
 def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
     """
     Liefert einen Snapshot des Repos für Diff-Zwecke.
