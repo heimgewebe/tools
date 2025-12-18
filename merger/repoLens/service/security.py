@@ -21,8 +21,11 @@ class SecurityConfig:
         # If no roots configured, allow nothing? Or allow everything?
         # Requirement: "Default allowlist: nur hub und Subdirs"
         if not self.allowlist_roots:
-             # Fallback if no roots added yet (should be added at init)
-             return
+            # Deny by default if no allowlist root is configured (defense in depth)
+            raise HTTPException(
+                status_code=403,
+                detail="Path validation failed: no allowlist roots configured. Access denied."
+            )
 
         is_allowed = False
         for root in self.allowlist_roots:
