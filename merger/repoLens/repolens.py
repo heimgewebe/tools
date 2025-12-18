@@ -1790,35 +1790,9 @@ def main_cli():
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
     parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
 
-    # Service arguments
-    parser.add_argument("--serve", action="store_true", help="Start rLens (Service)")
-    parser.add_argument("--host", default="127.0.0.1", help="Service host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8787, help="Service port (default: 8787)")
-    parser.add_argument("--open", action="store_true", help="Open browser on start")
-    parser.add_argument("--token", help="Security token for API access (override env REPOLENS_TOKEN)")
-
     args = parser.parse_args()
 
     hub = detect_hub_dir(SCRIPT_PATH, args.hub)
-
-    if args.serve:
-        try:
-            # Lazy import to avoid dependencies on iOS
-            try:
-                from service.rlens import run_server
-            except ImportError:
-                # Handle package-relative import if needed
-                # Note: This is tricky when running as script.
-                # Attempt to adjust sys.path if module not found.
-                sys.path.append(str(SCRIPT_DIR))
-                from service.rlens import run_server
-
-            run_server(hub, args.host, args.port, args.open, args.token)
-            return
-        except ImportError as e:
-            print(f"Service dependencies missing or import error: {e}")
-            print("Please install requirements: pip install fastapi uvicorn pydantic")
-            sys.exit(1)
 
     sources = []
     if args.paths:
