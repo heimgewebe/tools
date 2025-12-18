@@ -5,6 +5,24 @@ const API_BASE = '/api';
 // Token handling
 const TOKEN_KEY = 'repolens_token';
 
+// Available Extras
+const EXTRAS_OPTIONS = [
+    'health',
+    'augment_sidecar',
+    'organism_index',
+    'fleet_panorama',
+    'json_sidecar',
+    'heatmap'
+];
+
+// Default selected extras (based on existing logic/user preference)
+const DEFAULT_EXTRAS = [
+    'health',
+    'augment_sidecar',
+    'json_sidecar',
+    'heatmap'
+];
+
 function getToken() {
     return document.getElementById('authToken').value || localStorage.getItem(TOKEN_KEY) || '';
 }
@@ -68,7 +86,7 @@ async function fetchRepos(hub) {
             div.className = "flex items-center space-x-2";
             div.innerHTML = `
                 <input type="checkbox" name="repos" value="${repo}" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
-                <span>${repo}</span>
+                <span class="font-bold text-gray-300">${repo}</span>
             `;
             list.appendChild(div);
         });
@@ -79,8 +97,28 @@ async function fetchRepos(hub) {
 
 function selectAllRepos() {
     const boxes = document.querySelectorAll('input[name="repos"]');
+    if (boxes.length === 0) return;
+
+    // Check if all are currently checked
     const allChecked = Array.from(boxes).every(b => b.checked);
+    // Toggle
     boxes.forEach(b => b.checked = !allChecked);
+}
+
+function renderExtras() {
+    const container = document.getElementById('extras-container');
+    container.innerHTML = '';
+
+    EXTRAS_OPTIONS.forEach(opt => {
+        const isChecked = DEFAULT_EXTRAS.includes(opt);
+        const label = document.createElement('label');
+        label.className = "flex items-center space-x-2 cursor-pointer text-xs";
+        label.innerHTML = `
+            <input type="checkbox" name="extras" value="${opt}" ${isChecked ? 'checked' : ''} class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+            <span>${opt}</span>
+        `;
+        container.appendChild(label);
+    });
 }
 
 async function loadArtifacts() {
@@ -151,6 +189,7 @@ async function loadArtifacts() {
             try {
                 const url = btn.getAttribute('data-dl');
                 const name = btn.getAttribute('data-name') || 'artifact';
+                // Use the updated function for secure downloads
                 await downloadWithAuth(url, name);
             } catch (e) {
                 alert(e.message);
@@ -165,11 +204,19 @@ async function startJob(e) {
     btn.disabled = true;
     btn.innerText = "Starting...";
 
+    // Dynamically query selected repos from the DOM
     const selectedRepos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
 
     // Extensions
     const extRaw = document.getElementById('extFilter').value.trim();
     const extensions = extRaw ? extRaw.split(',').map(s => s.trim()) : null;
+
+    // Extras
+    const checkedExtras = Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value);
+    const extrasCsv = checkedExtras.join(',');
+
+    // JSON Sidecar legacy logic
+    const jsonSidecar = checkedExtras.includes('json_sidecar');
 
     const payload = {
         hub: document.getElementById('hubPath').value,
@@ -180,10 +227,10 @@ async function startJob(e) {
         split_size: document.getElementById('splitSize').value,
         plan_only: document.getElementById('planOnly').checked,
         code_only: document.getElementById('codeOnly').checked,
-        json_sidecar: document.getElementById('jsonSidecar').checked,
+        json_sidecar: jsonSidecar,
         path_filter: document.getElementById('pathFilter').value.trim() || null,
         extensions: extensions,
-        extras: document.getElementById('extras').value.trim()
+        extras: extrasCsv
     };
 
     try {
@@ -243,6 +290,9 @@ function streamLogs(jobId) {
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
+    // Render extras immediately
+    renderExtras();
+
     // Restore token
     const savedToken = localStorage.getItem(TOKEN_KEY);
     if (savedToken) {
@@ -269,9 +319,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Secure download via blob
-async function downloadArtifact(id, key) {
+async function downloadWithAuth(url, name) {
     try {
-        const url = `${API_BASE}/artifacts/${id}/download?key=${key}`;
         const res = await apiFetch(url);
 
         if (!res.ok) {
@@ -285,13 +334,10 @@ async function downloadArtifact(id, key) {
         a.href = downloadUrl;
 
         // Try to get filename from header
-        const contentDisp = res.headers.get('Content-Disposition');
-        let filename = `artifact-${id}.${key === 'json' ? 'json' : 'md'}`;
-        if (contentDisp && contentDisp.indexOf('filename=') !== -1) {
-            filename = contentDisp.split('filename=')[1].replace(/['"]/g, '');
-        }
+        // For blob downloads, the name passed in is usually better if available
+        // But we can check Content-Disposition if needed.
 
-        a.download = filename;
+        a.download = name;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
