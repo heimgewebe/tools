@@ -27,7 +27,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="repoLens Service", version="1.0.0")
+app = FastAPI(title="rLens", version="1.0.0")
 
 # Security: Root Jail for File System Browsing
 # Set to system root to allow full access, but preventing traversal above it (which is impossible anyway).
@@ -83,7 +83,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_origin_regex=allow_origin_regex,
             allow_credentials=False,
             allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type", "x-repolens-token"],
+            allow_headers=["Authorization", "Content-Type", "x-rlens-token"],
         )
 
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
