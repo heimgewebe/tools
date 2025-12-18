@@ -80,7 +80,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_origin_regex=allow_origin_regex,
             allow_credentials=False,
             allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_headers=["Authorization", "Content-Type", "x-repolens-token"],
         )
 
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
