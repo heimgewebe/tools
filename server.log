@@ -1,0 +1,19 @@
+INFO:     Started server process [4530]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:9999 (Press CTRL+C to quit)
+Starting repoLens Service on http://127.0.0.1:9999
+Hub: /app/merger/repoLens
+INFO:     127.0.0.1:43292 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43292 - "GET /style.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43298 - "GET /app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43298 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43298 - "GET /api/repos HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43292 - "GET /api/artifacts HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43292 - "POST /api/jobs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43292 - "GET /api/jobs/99939fe3-0d0a-4392-bc17-c74cb32c308e/logs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43292 - "GET /api/artifacts HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [4530]

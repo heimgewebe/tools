@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>repoLens Service</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="app.js" defer></script>
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans">
+    <div class="container mx-auto p-4 max-w-4xl">
+        <header class="mb-6 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-blue-400">repoLens Service</h1>
+            <div id="status" class="text-sm text-gray-400">Loading...</div>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Job Configuration -->
+            <section class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
+                <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2">New Job</h2>
+                <form id="jobForm" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Hub</label>
+                        <input type="text" id="hubPath" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" readonly>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Repos</label>
+                        <div id="repoList" class="h-32 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-sm space-y-1">
+                            <!-- Populated via JS -->
+                            <div class="text-gray-500 italic">Loading repos...</div>
+                        </div>
+                        <div class="text-xs text-right mt-1 text-gray-500 cursor-pointer hover:text-blue-300" onclick="selectAllRepos()">Select All / None</div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Profile</label>
+                            <select id="profile" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                                <option value="overview">Overview</option>
+                                <option value="summary">Summary</option>
+                                <option value="dev" selected>Dev</option>
+                                <option value="max">Max</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Mode</label>
+                            <select id="mode" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                                <option value="gesamt" selected>Combined</option>
+                                <option value="pro-repo">Per Repo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                         <div>
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Split Size</label>
+                            <input type="text" id="splitSize" value="25MB" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Max File Bytes</label>
+                            <input type="text" id="maxBytes" value="0" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        </div>
+                    </div>
+
+                    <div>
+                         <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Filter</label>
+                         <div class="grid grid-cols-2 gap-4">
+                             <input type="text" id="pathFilter" placeholder="Path (e.g. src/)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                             <input type="text" id="extFilter" placeholder="Ext (e.g. .py,.md)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                         </div>
+                    </div>
+
+                    <div class="flex space-x-4">
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="planOnly" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                            <span class="text-sm">Plan Only</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="codeOnly" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                            <span class="text-sm">Code Only</span>
+                        </label>
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                             <input type="checkbox" id="jsonSidecar" checked class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                             <span class="text-sm">JSON Sidecar</span>
+                        </label>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Extras</label>
+                        <input type="text" id="extras" value="health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-400">
+                    </div>
+
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded transition-colors">Start Job</button>
+                </form>
+            </section>
+
+            <!-- Status & Logs -->
+            <div class="space-y-6">
+                <section class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700 h-64 flex flex-col">
+                     <h2 class="text-xl mb-2 font-semibold border-b border-gray-700 pb-2">Live Logs</h2>
+                     <pre id="logs" class="flex-1 overflow-y-auto font-mono text-xs bg-black p-2 rounded text-green-400 whitespace-pre-wrap">No active job.</pre>
+                </section>
+
+                <section class="bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-700">
+                    <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2 flex justify-between">
+                        <span>Recent Artifacts</span>
+                        <button onclick="loadArtifacts()" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+                    </h2>
+                    <div id="artifactList" class="space-y-2 text-sm max-h-64 overflow-y-auto">
+                        <!-- Populated via JS -->
+                        <div class="text-gray-500 italic">No artifacts yet.</div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Minimal Tailwind via CDN for simplicity in MVP, or just include raw CSS if strictly no-build -->
+    <!-- Instruction said: "Kein Frontend-Buildsystem ... MVP ohne Toolchain". Using a CDN is the simplest way. -->
+    <!-- Or raw css in style.css. I will generate style.css below. -->
+</body>
+</html>
