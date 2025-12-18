@@ -22,17 +22,14 @@ except ImportError:
 
 app = FastAPI(title="repoLens Service", version="1.0.0")
 
-def _cors_origins_for_host(host: str):
-    # Strict if not loopback
+def _is_loopback_host(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if h in ("127.0.0.1", "localhost", "::1"):
+        return True
     try:
-        ip = ipaddress.ip_address(host)
-        is_loopback = ip.is_loopback
-    except ValueError:
-        is_loopback = (host == "localhost")
-    if is_loopback:
-        return ["http://127.0.0.1", "http://localhost", "http://127.0.0.1:*", "http://localhost:*"]
-    # Non-loopback: do not allow arbitrary web pages to call this API
-    return []
+        return ipaddress.ip_address(h).is_loopback
+    except Exception:
+        return False
 
 # Global State
 class ServiceState:
@@ -55,14 +52,33 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     # Also allow current dir if different? No, start with Hub.
 
     # Apply CORS based on host
-    origins = _cors_origins_for_host(host)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
+    # Prevent middleware duplication (if init called multiple times in tests)
+    # Check if CORSMiddleware is already in app.user_middleware
+    # Note: user_middleware is a list of Middleware objects.
+    # We can just clear and re-add or check.
+    # Simple dedupe: check if any middleware has cls==CORSMiddleware
+
+    # Actually, simpler is to rely on allow_origin_regex for loopback
+    # and explicit strictness.
+
+    has_cors = any(m.cls == CORSMiddleware for m in app.user_middleware)
+    if not has_cors:
+        if _is_loopback_host(host):
+            # Regex for localhost/127.0.0.1 with any port
+            allow_origin_regex = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+            allow_origins = []
+        else:
+            allow_origin_regex = None
+            allow_origins = [] # Strict for non-loopback by default
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allow_origins,
+            allow_origin_regex=allow_origin_regex,
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
 
 @app.get("/api/health")
 def health():

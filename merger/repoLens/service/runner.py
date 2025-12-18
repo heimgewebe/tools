@@ -147,9 +147,14 @@ class JobRunner:
             summaries = []
             total_sources = len(sources)
             for i, src in enumerate(sources, 1):
-                if job.status == "canceled":
+                # Refresh job status from store to detect external cancel
+                current_job = self.job_store.get_job(job_id)
+                if current_job and current_job.status == "canceled":
                     log("Job canceled during scan.")
                     return
+
+                # Defense in depth: validate each src before scanning
+                validate_source_dir(src)
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
