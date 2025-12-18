@@ -23,3 +23,7 @@ metrics.json
 # Merger output files
 merges/
 *_merge.md
+
+# RepoLens
+merger/repoLens/merges/
+**/.repolens-hub-path.txt
