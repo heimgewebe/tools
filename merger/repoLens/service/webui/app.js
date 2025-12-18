@@ -6,6 +6,7 @@ const API_BASE = '/api';
 const TOKEN_KEY = 'repolens_token';
 const SETS_KEY = 'repolens_sets';
 const CONFIG_KEY = 'repolens_config';
+const ATLAS_CONFIG_KEY = 'repolens_atlas_config';
 
 // Picker state
 let currentPickerTarget = null;
@@ -254,6 +255,15 @@ function restoreConfig() {
              boxes.forEach(b => {
                  b.checked = config.extras.includes(b.value);
              });
+        }
+
+        // Restore Atlas Config
+        const atlasConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY));
+        if (atlasConfig) {
+             if (atlasConfig.root) document.getElementById('atlasRoot').value = atlasConfig.root;
+             if (atlasConfig.depth) document.getElementById('atlasDepth').value = atlasConfig.depth;
+             if (atlasConfig.limit) document.getElementById('atlasLimit').value = atlasConfig.limit;
+             if (atlasConfig.excludes) document.getElementById('atlasExcludes').value = atlasConfig.excludes;
         }
 
     } catch (e) { console.error("Error restoring config", e); }
@@ -568,8 +578,156 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadArtifacts();
     }
 
+    // Load Atlas artifacts too if tab is visible? Or just always.
+    // loadAtlasArtifacts();
+
     document.getElementById('jobForm').addEventListener('submit', startJob);
+    document.getElementById('atlasForm').addEventListener('submit', startAtlasJob);
 });
+
+// --- Tabs ---
+function switchTab(tabId) {
+    document.querySelectorAll('.layout-view').forEach(el => el.classList.add('hidden'));
+    document.getElementById(`layout-${tabId}`).classList.remove('hidden');
+
+    // Toggle active state on buttons
+    document.getElementById('tab-job').className = tabId === 'job'
+        ? "px-3 py-1 rounded bg-blue-600 text-white font-bold text-sm"
+        : "px-3 py-1 rounded bg-gray-700 text-gray-300 hover:text-white text-sm";
+
+    document.getElementById('tab-atlas').className = tabId === 'atlas'
+        ? "px-3 py-1 rounded bg-blue-600 text-white font-bold text-sm"
+        : "px-3 py-1 rounded bg-gray-700 text-gray-300 hover:text-white text-sm";
+
+    if (tabId === 'atlas') {
+        loadAtlasArtifacts();
+    }
+}
+
+// --- Atlas Logic ---
+async function startAtlasJob(e) {
+    e.preventDefault();
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.innerText = "Scanning...";
+
+    // Save Atlas Config
+    const config = {
+        root: document.getElementById('atlasRoot').value,
+        depth: document.getElementById('atlasDepth').value,
+        limit: document.getElementById('atlasLimit').value,
+        excludes: document.getElementById('atlasExcludes').value
+    };
+    localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(config));
+
+    const payload = {
+        root: config.root,
+        max_depth: parseInt(config.depth),
+        max_entries: parseInt(config.limit),
+        exclude_globs: config.excludes.split(',').map(s => s.trim())
+    };
+
+    try {
+        const res = await apiFetch(`${API_BASE}/atlas`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error("Atlas scan failed: " + res.statusText);
+
+        const art = await res.json();
+        alert(`Atlas scan started/completed: ${art.id}`);
+        loadAtlasArtifacts();
+
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "Create Atlas";
+    }
+}
+
+async function loadAtlasArtifacts() {
+    const list = document.getElementById('atlasList');
+    list.innerHTML = '<div class="text-gray-500 italic">Loading...</div>';
+
+    try {
+        // We only have 'latest' endpoint for now or we could list all files in merges dir via fs list?
+        // But app.py has /api/atlas/latest.
+        // Let's use /api/atlas/latest to show the current map.
+        // Or if we want a list, we need an endpoint.
+        // The instruction B3 said: GET /api/atlas/latest.
+        // But UI shows "Atlas Results".
+
+        const res = await apiFetch(`${API_BASE}/atlas/latest`);
+        if (res.status === 404) {
+             list.innerHTML = '<div class="text-gray-500 italic">No atlas artifacts found.</div>';
+             return;
+        }
+        if (!res.ok) throw new Error("Failed to load atlas");
+
+        const art = await res.json();
+
+        list.innerHTML = '';
+
+        const div = document.createElement('div');
+        div.className = "bg-gray-900 p-2 rounded border border-gray-700 flex flex-col";
+
+        const date = new Date(art.created_at).toLocaleString();
+
+        // Show Stats if available
+        let statsHtml = '';
+        if (art.stats && art.stats.total_files) {
+            const mb = (art.stats.total_bytes / (1024*1024)).toFixed(2);
+            statsHtml = `
+                <div class="mt-2 text-xs grid grid-cols-2 gap-2 text-gray-400">
+                    <div>Files: <span class="text-white">${art.stats.total_files}</span></div>
+                    <div>Dirs: <span class="text-white">${art.stats.total_dirs}</span></div>
+                    <div>Size: <span class="text-white">${mb} MB</span></div>
+                    <div>Duration: <span class="text-white">${art.stats.duration_seconds.toFixed(2)}s</span></div>
+                </div>
+            `;
+        }
+
+        div.innerHTML = `
+            <div class="flex justify-between items-start">
+                <span class="font-bold text-green-400">${art.id}</span>
+                <span class="text-xs text-gray-500">${date}</span>
+            </div>
+            <div class="text-xs text-gray-400">Root: ${art.root_scanned}</div>
+            ${statsHtml}
+            <div class="flex flex-wrap gap-2 text-xs mt-3 border-t border-gray-800 pt-2">
+                 <button data-dl="${API_BASE}/atlas/${art.id}/download?key=json" data-name="${art.paths.json}" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-green-400">Download JSON</button>
+                 <button data-dl="${API_BASE}/atlas/${art.id}/download?key=md" data-name="${art.paths.md}" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-blue-400">Download Report</button>
+            </div>
+        `;
+        list.appendChild(div);
+
+        // Wire buttons
+        div.querySelectorAll('button[data-dl]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                downloadWithAuth(btn.getAttribute('data-dl'), btn.getAttribute('data-name'));
+            });
+        });
+
+    } catch (e) {
+        list.innerHTML = `<div class="text-gray-500 italic">Error: ${e.message}</div>`;
+    }
+}
+
+async function startExport() {
+    if (!confirm("Prepare export for webmaschine? This will overwrite files in exports/webmaschine.")) return;
+
+    try {
+        const res = await apiFetch(`${API_BASE}/export/webmaschine`, { method: 'POST' });
+        if (!res.ok) throw new Error("Export failed");
+        const data = await res.json();
+        alert(`Export successful!\nPath: ${data.path}`);
+    } catch (e) {
+        alert(e.message);
+    }
+}
 
 // Secure download via blob
 async function downloadWithAuth(url, name) {

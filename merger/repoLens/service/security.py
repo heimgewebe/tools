@@ -93,3 +93,24 @@ def validate_source_dir(path: Path) -> Path:
     if not path.exists() or not path.is_dir():
         raise HTTPException(status_code=400, detail=f"Invalid repo path: {path}")
     return path
+
+def resolve_relative_path(root: Path, requested: Optional[str]) -> Path:
+    """
+    Safely resolves a requested path relative to a root.
+    Strictly forbids absolute paths and directory traversal.
+    """
+    if not requested or requested.strip() == "":
+        return root.resolve()
+
+    # Block absolute paths explicitly (user requirement)
+    if Path(requested).is_absolute():
+        raise HTTPException(status_code=403, detail="Absolute paths are not allowed. Please use path relative to root.")
+
+    try:
+        # Resolve and ensure it is inside root
+        candidate = (root / requested).resolve()
+        candidate.relative_to(root.resolve())
+        return candidate
+    except (ValueError, OSError, RuntimeError):
+        # Path traversal or outside root
+        raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")

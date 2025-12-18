@@ -1,4 +1,4 @@
-from typing import List, Optional, Literal, Dict
+from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel
 import uuid
 from datetime import datetime
@@ -17,6 +17,21 @@ class JobRequest(BaseModel):
     path_filter: Optional[str] = None
     extras: Optional[str] = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
     json_sidecar: bool = True  # Default true for service
+
+class AtlasRequest(BaseModel):
+    root: Optional[str] = None  # Relative to Hub. Default: Hub root.
+    max_depth: int = 6
+    max_entries: int = 200000
+    exclude_globs: Optional[List[str]] = None
+    sample_files: bool = False
+
+class AtlasArtifact(BaseModel):
+    id: str
+    created_at: str
+    hub: str
+    root_scanned: str
+    paths: Dict[str, str] # {"json": "...", "md": "..."}
+    stats: Dict[str, Any] # Summary stats
 
 class Artifact(BaseModel):
     id: str
