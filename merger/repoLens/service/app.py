@@ -9,6 +9,7 @@ import json
 import time
 import ipaddress
 import logging
+import re
 from datetime import datetime
 
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
@@ -484,29 +485,42 @@ def get_latest_atlas():
 
 @app.get("/api/atlas/{id}/download", dependencies=[Depends(verify_token)])
 def download_atlas(id: str, key: str = "md"):
-    # Similar to download_artifact but simple
-    # Validate ID format to prevent traversal via ID
-    if not id.replace("-", "").isalnum(): # Simple check
-         raise HTTPException(status_code=400, detail="Invalid ID format")
+    # Hard allowlist: atlas ids are generated as "atlas-<unix_ts>"
+    if not re.fullmatch(r"atlas-\d+", (id or "").strip()):
+        raise HTTPException(status_code=400, detail="Invalid atlas id format")
 
-    merges_dir = state.merges_dir or get_merges_dir(state.hub)
-
-    filename = f"{id}.{key}" # json or md
-    if key not in ["json", "md"]:
+    if key not in ("json", "md"):
         raise HTTPException(status_code=400, detail="Invalid key. Use 'json' or 'md'.")
 
-    file_path = merges_dir / filename
+    if not state.hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
 
-    # Traversal check
-    try:
-        file_path.resolve().relative_to(merges_dir.resolve())
-    except ValueError:
-         raise HTTPException(status_code=403, detail="Access denied")
+    merges_dir = (state.merges_dir or get_merges_dir(state.hub)).resolve()
+    if not merges_dir.exists():
+        raise HTTPException(status_code=404, detail="Merges directory not found")
 
-    if not file_path.exists():
+    # IMPORTANT: do NOT build a path from user input.
+    # Enumerate allowed files and then select by id.
+    candidates = {}
+    for p in merges_dir.glob(f"atlas-*.{key}"):
+        try:
+            rp = p.resolve()
+            rp.relative_to(merges_dir)  # containment even under symlinks
+        except Exception:
+            continue
+        candidates[p.stem] = rp
+
+    file_path = candidates.get(id)
+    if not file_path:
         raise HTTPException(status_code=404, detail="File not found")
 
-    return FileResponse(file_path, filename=filename)
+    # Final belt-and-suspenders containment check
+    try:
+        file_path.relative_to(merges_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return FileResponse(file_path, filename=file_path.name)
 
 @app.post("/api/export/webmaschine", dependencies=[Depends(verify_token)])
 def export_webmaschine():
