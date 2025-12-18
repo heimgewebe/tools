@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 import ipaddress
+import logging
 
 from .models import JobRequest, Job, Artifact
 from .jobstore import JobStore
@@ -19,8 +20,15 @@ try:
 except ImportError:
     from ...merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
 
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="repoLens Service", version="1.0.0")
+
+# Security: Root Jail for File System Browsing
+# Default to User Home. Can be overridden if needed via Env or Config in future.
+FS_ROOT = Path.home().resolve()
 
 def _is_loopback_host(host: str) -> bool:
     h = (host or "").strip().lower()
@@ -55,14 +63,6 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
 
     # Apply CORS based on host
     # Prevent middleware duplication (if init called multiple times in tests)
-    # Check if CORSMiddleware is already in app.user_middleware
-    # Note: user_middleware is a list of Middleware objects.
-    # We can just clear and re-add or check.
-    # Simple dedupe: check if any middleware has cls==CORSMiddleware
-
-    # Actually, simpler is to rely on allow_origin_regex for loopback
-    # and explicit strictness.
-
     has_cors = any(m.cls == CORSMiddleware for m in app.user_middleware)
     if not has_cors:
         if _is_loopback_host(host):
@@ -97,51 +97,64 @@ def health():
 def list_fs(path: Optional[str] = None):
     """
     List directories in the given path (or root if None).
-    Supports a simple 'folder picker' in the UI.
+    Restricted to FS_ROOT (User Home) for security.
     """
-    if not path:
-        # Default start: hub or current dir or root
-        start_path = state.hub if state.hub else Path(".")
-    else:
-        start_path = Path(path)
+    target = FS_ROOT
 
-    if not start_path.exists():
-        # Fallback to current dir if invalid
-        start_path = Path(".")
+    if path:
+        p = Path(path)
+        # Normalize and resolve
+        try:
+            if p.is_absolute():
+                 # If absolute, verify it's inside FS_ROOT
+                 resolved = p.resolve()
+                 resolved.relative_to(FS_ROOT)
+                 target = resolved
+            else:
+                 # If relative, join with FS_ROOT and verify
+                 resolved = (FS_ROOT / p).resolve()
+                 resolved.relative_to(FS_ROOT)
+                 target = resolved
+        except (ValueError, OSError, RuntimeError):
+             # Path traversal or outside root
+             logger.warning(f"Access denied to path: {path}")
+             raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")
 
-    # Resolve to absolute
-    try:
-        start_path = start_path.resolve()
-    except Exception:
-        pass
+    if not target.exists() or not target.is_dir():
+         # Instead of leaking 404 details, we might just default to root or error?
+         # User expects to list a folder. If it doesn't exist, 404 is appropriate.
+         raise HTTPException(status_code=404, detail="Directory not found")
 
     entries = []
-    parent = start_path.parent
 
-    # Add parent entry
-    entries.append({
-        "name": "..",
-        "path": str(parent),
-        "is_dir": True
-    })
+    # Add parent entry only if we are not at FS_ROOT
+    if target != FS_ROOT:
+        entries.append({
+            "name": "..",
+            "path": str(target.parent),
+            "is_dir": True
+        })
 
     try:
-        for p in sorted(start_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-            try:
-                if p.is_dir() and not p.name.startswith("."):
-                     entries.append({
-                         "name": p.name,
-                         "path": str(p),
-                         "is_dir": True
-                     })
-            except Exception:
-                pass
+        # Sort directories first, then files (though we only list dirs likely? No, list folders for picking)
+        # The user wants "Folder Picker". We can filter for is_dir().
+        # We list everything but UI might filter. Let's list directories primarily.
+
+        for item in sorted(target.iterdir(), key=lambda x: x.name.lower()):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                 entries.append({
+                     "name": item.name,
+                     "path": str(item),
+                     "is_dir": True
+                 })
     except Exception as e:
-        # Permission error etc.
-        return {"path": str(start_path), "entries": [], "error": str(e)}
+        logger.exception(f"Error listing directory {target}: {e}")
+        raise HTTPException(status_code=500, detail="Error listing directory")
 
     return {
-        "path": str(start_path),
+        "path": str(target),
         "entries": entries
     }
 
