@@ -93,6 +93,9 @@ def _resolve_in_allowed_roots(raw: str, hub: Optional[Path], merges_dir: Optiona
     If `raw` is relative and hub exists, it is resolved relative to hub for backward compatibility.
     """
     raw = (raw or "").strip()
+    if "\x00" in raw:
+        raise HTTPException(status_code=400, detail="Invalid path request")
+
     if raw in ("", "/"):
         # default: hub root if available, else merges_dir, else error
         if hub:
@@ -107,14 +110,32 @@ def _resolve_in_allowed_roots(raw: str, hub: Optional[Path], merges_dir: Optiona
     if not roots:
         raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
 
-    # interpret relative paths inside hub if possible (legacy)
     p = Path(raw)
-    if not p.is_absolute():
+
+    # Helper: resolve safely by binding to a known root
+    def _bind_under_root(root: Path, rel: Path) -> Path:
+        # reject traversal in rel explicitly
+        if rel.is_absolute() or ".." in rel.parts:
+            raise HTTPException(status_code=400, detail="Invalid path request")
+        return (root / rel).resolve()
+
+    # Absolute path: accept ONLY if it is already under one of the allowed roots.
+    # We convert it into a relative path to that root, then re-bind (root/rel).
+    if p.is_absolute():
+        for r in roots:
+            try:
+                rel = p.relative_to(r)
+                candidate = _bind_under_root(r, rel)
+                break
+            except ValueError:
+                continue
+        else:
+            raise HTTPException(status_code=403, detail="Path escapes allowed roots")
+    else:
+        # Relative: resolve within hub (legacy)
         if hub_r is None:
             raise HTTPException(status_code=400, detail="Relative path requires hub")
-        candidate = (hub_r / raw).resolve()
-    else:
-        candidate = p.expanduser().resolve()
+        candidate = _bind_under_root(hub_r, p)
 
     # jail check: must be within at least one allowed root
     def _inside(root: Path, cand: Path) -> bool:
