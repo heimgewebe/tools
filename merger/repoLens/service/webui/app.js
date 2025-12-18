@@ -7,6 +7,10 @@ const TOKEN_KEY = 'repolens_token';
 const SETS_KEY = 'repolens_sets';
 const CONFIG_KEY = 'repolens_config';
 
+// Picker state
+let currentPickerTarget = null;
+let currentPickerPath = null;
+
 // Available Extras
 const EXTRAS_OPTIONS = [
     'health',
@@ -57,7 +61,15 @@ async function fetchHealth() {
         const data = await res.json();
         const authStatus = data.auth_enabled ? '🔒 Auth' : '🔓 Open';
         document.getElementById('status').innerText = `v${data.version} • ${authStatus} • Hub: ${data.hub}`;
-        document.getElementById('hubPath').value = data.hub;
+
+        // Only set values if empty (respect user changes or saved config)
+        if (!document.getElementById('hubPath').value) {
+            document.getElementById('hubPath').value = data.hub || '';
+        }
+        if (!document.getElementById('mergesPath').value && data.merges_dir) {
+            document.getElementById('mergesPath').value = data.merges_dir || '';
+        }
+
         return data.hub;
     } catch (e) {
         document.getElementById('status').innerText = 'Offline';
@@ -70,11 +82,23 @@ async function fetchRepos(hub) {
     list.innerHTML = '<div class="text-gray-500 italic">Loading repos...</div>';
 
     try {
-        const res = await apiFetch(`${API_BASE}/repos`);
+        // Construct query string properly
+        let url = `${API_BASE}/repos`;
+        if (hub) {
+            url += `?hub=${encodeURIComponent(hub)}`;
+        }
+
+        const res = await apiFetch(url);
         if (res.status === 401 || res.status === 403) {
              list.innerHTML = '<div class="text-red-400">Access Denied (Check Token)</div>';
              return;
         }
+
+        if (!res.ok) {
+             list.innerHTML = '<div class="text-red-400">Error fetching repos</div>';
+             return;
+        }
+
         const repos = await res.json();
 
         list.innerHTML = '';
@@ -99,7 +123,7 @@ async function fetchRepos(hub) {
             list.appendChild(div);
         });
     } catch (e) {
-        list.innerHTML = '<div class="text-red-500">Error loading repos.</div>';
+        list.innerHTML = '<div class="text-red-500">Error loading repos: ' + e.message + '</div>';
     }
 }
 
@@ -194,7 +218,10 @@ function saveConfig() {
         codeOnly: document.getElementById('codeOnly').checked,
         pathFilter: document.getElementById('pathFilter').value,
         extFilter: document.getElementById('extFilter').value,
-        extras: Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value)
+        extras: Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value),
+        // Persist paths too if desired
+        hubPath: document.getElementById('hubPath').value,
+        mergesPath: document.getElementById('mergesPath').value
     };
     localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
 
@@ -217,6 +244,9 @@ function restoreConfig() {
         if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
         if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
         if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
+
+        if (config.hubPath) document.getElementById('hubPath').value = config.hubPath;
+        if (config.mergesPath) document.getElementById('mergesPath').value = config.mergesPath;
 
         // Extras need to be handled carefully as they are rendered async or statically
         if (config.extras) {
@@ -243,6 +273,75 @@ function renderExtras() {
         `;
         container.appendChild(label);
     });
+}
+
+// --- Folder Picker ---
+
+async function openPicker(targetId) {
+    currentPickerTarget = targetId;
+    const currentVal = document.getElementById(targetId).value;
+
+    document.getElementById('pickerModal').classList.remove('hidden');
+    await loadPickerPath(currentVal || '');
+}
+
+function closePicker() {
+    document.getElementById('pickerModal').classList.add('hidden');
+    currentPickerTarget = null;
+    currentPickerPath = null;
+}
+
+async function loadPickerPath(path) {
+    const list = document.getElementById('pickerList');
+    const pathDisplay = document.getElementById('pickerCurrentPath');
+    list.innerHTML = '<div class="text-gray-500 italic">Loading...</div>';
+
+    try {
+        let url = `${API_BASE}/fs/list`;
+        if (path) url += `?path=${encodeURIComponent(path)}`;
+
+        const res = await apiFetch(url);
+        if (!res.ok) throw new Error("Fetch failed");
+
+        const data = await res.json();
+
+        if (data.error) {
+            list.innerHTML = `<div class="text-red-400">Error: ${data.error}</div>`;
+            return;
+        }
+
+        currentPickerPath = data.path;
+        pathDisplay.value = data.path;
+        list.innerHTML = '';
+
+        data.entries.forEach(entry => {
+            const div = document.createElement('div');
+            div.className = "flex items-center cursor-pointer hover:bg-gray-700 p-1 rounded";
+            div.onclick = () => loadPickerPath(entry.path);
+
+            let icon = '📁';
+            if (entry.name === '..') icon = '⬆️';
+
+            div.innerHTML = `<span class="mr-2">${icon}</span> <span>${entry.name}</span>`;
+            list.appendChild(div);
+        });
+
+    } catch (e) {
+        list.innerHTML = `<div class="text-red-400">Error: ${e.message}</div>`;
+    }
+}
+
+function pickerSelect() {
+    if (currentPickerTarget && currentPickerPath) {
+        document.getElementById(currentPickerTarget).value = currentPickerPath;
+
+        // If hub changed, reload repos
+        if (currentPickerTarget === 'hubPath') {
+            fetchRepos(currentPickerPath);
+        }
+
+        closePicker();
+    }
 }
 
 async function loadArtifacts() {
@@ -344,6 +443,7 @@ async function startJob(e) {
 
     const payload = {
         hub: document.getElementById('hubPath').value,
+        merges_dir: document.getElementById('mergesPath').value || null,
         repos: selectedRepos.length > 0 ? selectedRepos : null,
         level: document.getElementById('profile').value,
         mode: document.getElementById('mode').value,
@@ -450,9 +550,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     });
 
+    // Also listen for manual hub changes (blur)
+    document.getElementById('hubPath').addEventListener('blur', (e) => {
+        fetchRepos(e.target.value);
+    });
+
     const hub = await fetchHealth();
     if (hub) {
-        fetchRepos(hub);
+        // If persisted hub is different from server hub, use persisted if available
+        const persisted = document.getElementById('hubPath').value;
+        fetchRepos(persisted || hub);
+        loadArtifacts();
+    } else {
+        // Try fetch repos with whatever we have
+        const persisted = document.getElementById('hubPath').value;
+        if(persisted) fetchRepos(persisted);
         loadArtifacts();
     }
 

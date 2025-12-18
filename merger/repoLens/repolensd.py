@@ -34,7 +34,7 @@ def _is_loopback_host(host: str) -> bool:
     return h in ("127.0.0.1", "localhost", "::1")
 
 
-def run(host: str, port: int, hub: str | None, token: str | None, open_browser: bool = False) -> None:
+def run(host: str, port: int, hub: str | None, token: str | None, open_browser: bool = False, merges: str | None = None) -> None:
     hub_path = None
     if hub:
         hub_path = Path(hub).expanduser().resolve()
@@ -43,11 +43,20 @@ def run(host: str, port: int, hub: str | None, token: str | None, open_browser: 
         if not hub_path.is_dir():
             raise SystemExit(f"[repolens] hub path is not a directory: {hub_path}")
 
+    merges_path = None
+    if merges:
+        merges_path = Path(merges).expanduser().resolve()
+        if not merges_path.exists():
+            try:
+                merges_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                raise SystemExit(f"[repolens] output/merges path could not be created: {merges_path} ({e})")
+
     # Safety: Enforce token for non-loopback hosts
     if not _is_loopback_host(host) and not token:
         raise SystemExit("[repolens] refusing to bind non-loopback host without token. Set --token or REPOLENS_TOKEN.")
 
-    init_service(hub_path=hub_path, token=token)
+    init_service(hub_path=hub_path, token=token, merges_dir=merges_path)
 
     url = f"http://{host}:{port}"
     if open_browser:
@@ -59,6 +68,7 @@ def run(host: str, port: int, hub: str | None, token: str | None, open_browser: 
 
     print(f"[repolens] serving on {url}", flush=True)
     print(f"[repolens] hub: {hub_path if hub_path else '(not set)'}", flush=True)
+    print(f"[repolens] output: {merges_path if merges_path else '(default: hub/merges)'}", flush=True)
     print(f"[repolens] token: {'(set)' if token else '(not set)'}", flush=True)
 
     if hub_path:
@@ -76,7 +86,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="repolensd.py")
     p.add_argument("--host", default=os.environ.get("REPOLENS_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("REPOLENS_PORT", "8787")))
-    p.add_argument("--hub", default=os.environ.get("REPOLENS_HUB"))
+    p.add_argument("--hub", "--input", dest="hub", default=os.environ.get("REPOLENS_HUB"), help="Input Hub Directory")
+    p.add_argument("--merges", "--output", dest="merges", default=os.environ.get("REPOLENS_MERGES"), help="Output Directory for Reports")
     p.add_argument("--token", default=os.environ.get("REPOLENS_TOKEN"))
     p.add_argument("--open", action="store_true", help="open browser after start")
     return p.parse_args(argv)
@@ -84,7 +95,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     ns = _parse_args(sys.argv[1:] if argv is None else argv)
-    run(host=ns.host, port=ns.port, hub=ns.hub, token=ns.token, open_browser=ns.open)
+    run(host=ns.host, port=ns.port, hub=ns.hub, token=ns.token, open_browser=ns.open, merges=ns.merges)
     return 0
 
 

@@ -5,6 +5,7 @@ from datetime import datetime
 
 class JobRequest(BaseModel):
     hub: Optional[str] = None
+    merges_dir: Optional[str] = None # Output directory override
     repos: Optional[List[str]] = None  # None/empty = all
     level: Literal["overview", "summary", "dev", "max"] = "dev"
     mode: Literal["gesamt", "pro-repo"] = "gesamt"

@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 import ipaddress
+import logging
 
 from .models import JobRequest, Job, Artifact
 from .jobstore import JobStore
@@ -19,8 +20,15 @@ try:
 except ImportError:
     from ...merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
 
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="repoLens Service", version="1.0.0")
+
+# Security: Root Jail for File System Browsing
+# Default to User Home. Can be overridden if needed via Env or Config in future.
+FS_ROOT = Path.home().resolve()
 
 def _is_loopback_host(host: str) -> bool:
     h = (host or "").strip().lower()
@@ -34,13 +42,15 @@ def _is_loopback_host(host: str) -> bool:
 # Global State
 class ServiceState:
     hub: Path = None
+    merges_dir: Path = None
     job_store: JobStore = None
     runner: JobRunner = None
 
 state = ServiceState()
 
-def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1"):
+def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1", merges_dir: Optional[Path] = None):
     state.hub = hub_path
+    state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
 
@@ -53,14 +63,6 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
 
     # Apply CORS based on host
     # Prevent middleware duplication (if init called multiple times in tests)
-    # Check if CORSMiddleware is already in app.user_middleware
-    # Note: user_middleware is a list of Middleware objects.
-    # We can just clear and re-add or check.
-    # Simple dedupe: check if any middleware has cls==CORSMiddleware
-
-    # Actually, simpler is to rely on allow_origin_regex for loopback
-    # and explicit strictness.
-
     has_cors = any(m.cls == CORSMiddleware for m in app.user_middleware)
     if not has_cors:
         if _is_loopback_host(host):
@@ -86,8 +88,74 @@ def health():
         "status": "ok",
         "version": SPEC_VERSION,
         "hub": str(state.hub),
+        "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
         "running_jobs": len(state.runner.futures) if state.runner else 0
+    }
+
+@app.get("/api/fs/list", dependencies=[Depends(verify_token)])
+def list_fs(path: Optional[str] = None):
+    """
+    List directories in the given path (or root if None).
+    Restricted to FS_ROOT (User Home) for security.
+    """
+    target = FS_ROOT
+
+    if path:
+        p = Path(path)
+        # Normalize and resolve
+        try:
+            if p.is_absolute():
+                 # If absolute, verify it's inside FS_ROOT
+                 resolved = p.resolve()
+                 resolved.relative_to(FS_ROOT)
+                 target = resolved
+            else:
+                 # If relative, join with FS_ROOT and verify
+                 resolved = (FS_ROOT / p).resolve()
+                 resolved.relative_to(FS_ROOT)
+                 target = resolved
+        except (ValueError, OSError, RuntimeError):
+             # Path traversal or outside root
+             logger.warning(f"Access denied to path: {path}")
+             raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")
+
+    if not target.exists() or not target.is_dir():
+         # Instead of leaking 404 details, we might just default to root or error?
+         # User expects to list a folder. If it doesn't exist, 404 is appropriate.
+         raise HTTPException(status_code=404, detail="Directory not found")
+
+    entries = []
+
+    # Add parent entry only if we are not at FS_ROOT
+    if target != FS_ROOT:
+        entries.append({
+            "name": "..",
+            "path": str(target.parent),
+            "is_dir": True
+        })
+
+    try:
+        # Sort directories first, then files (though we only list dirs likely? No, list folders for picking)
+        # The user wants "Folder Picker". We can filter for is_dir().
+        # We list everything but UI might filter. Let's list directories primarily.
+
+        for item in sorted(target.iterdir(), key=lambda x: x.name.lower()):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                 entries.append({
+                     "name": item.name,
+                     "path": str(item),
+                     "is_dir": True
+                 })
+    except Exception as e:
+        logger.exception(f"Error listing directory {target}: {e}")
+        raise HTTPException(status_code=500, detail="Error listing directory")
+
+    return {
+        "path": str(target),
+        "entries": entries
     }
 
 @app.get("/api/repos", dependencies=[Depends(verify_token)])
@@ -107,6 +175,10 @@ def create_job(request: JobRequest):
     req_hub = state.hub
     if request.hub:
          req_hub = validate_hub_path(request.hub)
+
+    # Apply default merges dir if not specified
+    if not request.merges_dir and state.merges_dir:
+        request.merges_dir = str(state.merges_dir)
 
     # Validate repo names early (API must be strict)
     if request.repos:
