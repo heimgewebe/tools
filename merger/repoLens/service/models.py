@@ -33,6 +33,7 @@ class Job(BaseModel):
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
     request: JobRequest
+    hub_resolved: Optional[str] = None
     logs: List[str] = []
     artifact_ids: List[str] = []
     error: Optional[str] = None

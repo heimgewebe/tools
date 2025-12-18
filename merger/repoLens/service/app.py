@@ -7,11 +7,12 @@ from pathlib import Path
 import asyncio
 import json
 import time
+import ipaddress
 
 from .models import JobRequest, Job, Artifact
 from .jobstore import JobStore
 from .runner import JobRunner
-from .security import verify_token, get_security_config, validate_hub_path
+from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name
 
 try:
     from merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
@@ -21,16 +22,17 @@ except ImportError:
 
 app = FastAPI(title="repoLens Service", version="1.0.0")
 
-# CORS
-# Tighten CORS: If token is used, we can be stricter.
-# But for local tool, usually we want to allow localhost access.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # Still useful for local dev, but Security layer protects actions
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def _cors_origins_for_host(host: str):
+    # Strict if not loopback
+    try:
+        ip = ipaddress.ip_address(host)
+        is_loopback = ip.is_loopback
+    except ValueError:
+        is_loopback = (host == "localhost")
+    if is_loopback:
+        return ["http://127.0.0.1", "http://localhost", "http://127.0.0.1:*", "http://localhost:*"]
+    # Non-loopback: do not allow arbitrary web pages to call this API
+    return []
 
 # Global State
 class ServiceState:
@@ -40,7 +42,7 @@ class ServiceState:
 
 state = ServiceState()
 
-def init_service(hub_path: Path, token: Optional[str] = None):
+def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1"):
     state.hub = hub_path
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
@@ -51,6 +53,16 @@ def init_service(hub_path: Path, token: Optional[str] = None):
     # Allowlist the Hub
     sec.add_allowlist_root(hub_path)
     # Also allow current dir if different? No, start with Hub.
+
+    # Apply CORS based on host
+    origins = _cors_origins_for_host(host)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
 
 @app.get("/api/health")
 def health():
@@ -80,11 +92,12 @@ def create_job(request: JobRequest):
     if request.hub:
          req_hub = validate_hub_path(request.hub)
 
-    # Also implicit security check: find_repos logic usually stays within hub,
-    # but verify paths in job runner?
-    # The Runner will use the Hub. If Hub is validated, we are good.
+    # Validate repo names early (API must be strict)
+    if request.repos:
+        request.repos = [validate_repo_name(r) for r in request.repos]
 
     job = Job.create(request)
+    job.hub_resolved = str(req_hub)
     state.job_store.add_job(job)
     state.runner.submit_job(job.id)
     return job
@@ -123,18 +136,27 @@ def stream_logs(job_id: str):
     async def log_generator():
         last_idx = 0
         while True:
-            # Refresh job
-            current_job = state.job_store.get_job(job_id)
-            if not current_job:
-                break
+            # Read logs from file
+            # Optimized to read full file then slice. In production, seek() would be better.
+            logs = state.job_store.read_log_lines(job_id)
 
-            logs = current_job.logs
             if len(logs) > last_idx:
                 for line in logs[last_idx:]:
                     yield f"data: {line}\n\n"
                 last_idx = len(logs)
 
+            # Check status for completion
+            current_job = state.job_store.get_job(job_id)
+            if not current_job:
+                break
+
             if current_job.status in ["succeeded", "failed", "canceled"]:
+                # Ensure we sent everything
+                logs = state.job_store.read_log_lines(job_id)
+                if len(logs) > last_idx:
+                    for line in logs[last_idx:]:
+                        yield f"data: {line}\n\n"
+
                 yield "event: end\ndata: end\n\n"
                 break
 

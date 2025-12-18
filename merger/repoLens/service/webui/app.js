@@ -108,24 +108,22 @@ async function loadArtifacts() {
             const repos = art.repos.length > 3 ? `${art.repos.slice(0,3).join(', ')} +${art.repos.length-3}` : art.repos.join(', ');
 
             let links = [];
-            const token = getToken();
-            const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
 
             // Handle known keys explicitly, then others
             // Primary JSON
             if (art.paths.json) {
-                links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=json${tokenParam}" target="_blank" class="text-green-400 hover:underline">JSON</a>`);
+                links.push(`<button data-dl="${API_BASE}/artifacts/${art.id}/download?key=json" data-name="${art.paths.json}" class="text-green-400 hover:underline">JSON</button>`);
             }
             // Canonical MD
             if (art.paths.md) {
-                links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=md${tokenParam}" target="_blank" class="text-blue-400 hover:underline">Markdown</a>`);
+                links.push(`<button data-dl="${API_BASE}/artifacts/${art.id}/download?key=md" data-name="${art.paths.md}" class="text-blue-400 hover:underline">Markdown</button>`);
             }
             // Other parts
             for (const [key, val] of Object.entries(art.paths)) {
                 if (key !== 'json' && key !== 'md' && key !== 'canonical_md' && key !== 'index_json') {
                     // Try to be smart about parts
                     if (key.startsWith('md_part')) {
-                         links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=${key}${tokenParam}" target="_blank" class="text-gray-400 hover:underline text-xs">Part ${key.split('_').pop()}</a>`);
+                         links.push(`<button data-dl="${API_BASE}/artifacts/${art.id}/download?key=${key}" data-name="${val}" class="text-gray-400 hover:underline text-xs">Part ${key.split('_').pop()}</button>`);
                     }
                 }
             }
@@ -146,6 +144,19 @@ async function loadArtifacts() {
     } catch (e) {
         list.innerHTML = '<div class="text-red-500">Error loading artifacts.</div>';
     }
+
+    // Wire download buttons
+    list.querySelectorAll('button[data-dl]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            try {
+                const url = btn.getAttribute('data-dl');
+                const name = btn.getAttribute('data-name') || 'artifact';
+                await downloadWithAuth(url, name);
+            } catch (e) {
+                alert(e.message);
+            }
+        });
+    });
 }
 
 async function startJob(e) {
@@ -256,3 +267,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('jobForm').addEventListener('submit', startJob);
 });
+
+// Secure download via blob
+async function downloadArtifact(id, key) {
+    try {
+        const url = `${API_BASE}/artifacts/${id}/download?key=${key}`;
+        const res = await apiFetch(url);
+
+        if (!res.ok) {
+            alert("Download failed: " + res.statusText);
+            return;
+        }
+
+        const blob = await res.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+
+        // Try to get filename from header
+        const contentDisp = res.headers.get('Content-Disposition');
+        let filename = `artifact-${id}.${key === 'json' ? 'json' : 'md'}`;
+        if (contentDisp && contentDisp.indexOf('filename=') !== -1) {
+            filename = contentDisp.split('filename=')[1].replace(/['"]/g, '');
+        }
+
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+
+    } catch (e) {
+        alert("Download error: " + e.message);
+    }
+}

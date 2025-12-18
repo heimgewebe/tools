@@ -8,7 +8,8 @@ from typing import Optional, List
 
 from .models import Job, JobRequest, Artifact
 from .jobstore import JobStore
-from .security import get_security_config
+from .security import validate_source_dir
+
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
 # and merger/repoLens is usually in sys.path when running repolens.py.
@@ -43,8 +44,6 @@ except ImportError:
     )
 
 def _find_repos(hub: Path) -> List[str]:
-    # Validate hub path every time to prevent misuse
-    get_security_config().validate_path(hub)
     repos = []
     if not hub.exists():
         return []
@@ -95,25 +94,26 @@ class JobRunner:
         self.job_store.update_job(job)
 
         def log(msg: str):
-            # Refresh job from store to get latest logs if needed, but we are single writer mostly
-            # Actually for simple list append it's fine, but thread safety?
-            # JobStore handles saving.
-            # We add timestamp
             ts = datetime.utcnow().strftime("%H:%M:%S")
-            job.logs.append(f"[{ts}] {msg}")
-            self.job_store.update_job(job)
+            line = f"[{ts}] {msg}"
+            self.job_store.append_log_line(job.id, line)
+            # Keep a small in-memory tail for API convenience (optional)
+            job.logs.append(line)
+            if len(job.logs) > 200:
+                job.logs = job.logs[-200:]
+            # Save job state less aggressively: only on status changes or every N lines
+            # For simplicity, we update job here to keep 'logs' tail sync, but strictly we could skip it.
+            # self.job_store.update_job(job)
+            # To avoid excessive writes, we DON'T call update_job for every log line anymore.
+            pass
 
         try:
             req = job.request
 
-            # 1. Detect Hub
-            # We use the service's hub as base, but if request has override, try to use it?
-            # The plan said: hub = detect_hub_dir(SCRIPT_PATH, req.hub)
-            # SCRIPT_PATH needs to be safe.
-            script_path = Path(__file__).resolve()
-            # If JobStore has hub_path, prefer that as default
-            base_hub = str(self.job_store.hub_path) if self.job_store.hub_path else str(script_path.parent)
-            hub = detect_hub_dir(script_path, req.hub or base_hub)
+            # 1. Use resolved Hub from job
+            if not job.hub_resolved:
+                raise ValueError("Internal: hub_resolved missing on job")
+            hub = Path(job.hub_resolved)
             log(f"Using hub: {hub}")
 
             # 2. Determine Repos
@@ -130,7 +130,8 @@ class JobRunner:
             sources = []
             for name in repo_names:
                 p = hub / name
-                if p.is_dir():
+                if p.exists() and p.is_dir():
+                    validate_source_dir(p)
                     sources.append(p)
                 else:
                     log(f"Warning: Repo {name} not found at {p}")

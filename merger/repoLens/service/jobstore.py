@@ -16,6 +16,8 @@ class JobStore:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_file = self.storage_dir / "jobs.json"
         self.artifacts_file = self.storage_dir / "artifacts.json"
+        self.logs_dir = self.storage_dir / "logs"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
         self._jobs_cache: Dict[str, Job] = {}
@@ -66,6 +68,19 @@ class JobStore:
         with self._lock:
             self._jobs_cache[job.id] = job
             self._save_jobs()
+
+    def append_log_line(self, job_id: str, line: str):
+        with self._lock:
+            p = self.logs_dir / f"{job_id}.log"
+            with p.open("a", encoding="utf-8", errors="replace") as f:
+                f.write(line + "\n")
+
+    def read_log_lines(self, job_id: str) -> List[str]:
+        with self._lock:
+            p = self.logs_dir / f"{job_id}.log"
+            if not p.exists():
+                return []
+            return p.read_text(encoding="utf-8", errors="replace").splitlines()
 
     def get_job(self, job_id: str) -> Optional[Job]:
         with self._lock:

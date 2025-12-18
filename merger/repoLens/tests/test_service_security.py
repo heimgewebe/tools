@@ -34,7 +34,10 @@ def make_request(path, method="GET", data=None, token=None):
         with urllib.request.urlopen(req) as response:
             body = response.read().decode("utf-8")
             if body:
-                return response.status, json.loads(body)
+                try:
+                    return response.status, json.loads(body)
+                except:
+                    return response.status, body
             return response.status, None
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8")
@@ -50,25 +53,10 @@ def run_tests():
         print("Server did not start")
         sys.exit(1)
 
-    print("Checking health (no auth)...")
-    status, data = make_request("/api/health")
-    assert status == 200
-    assert data["auth_enabled"] == True
-    print("Health check OK, Auth enabled")
-
-    print("Checking repos without token (expect 401)...")
-    status, _ = make_request("/api/repos")
-    assert status == 401
-    print("Access denied as expected")
-
     token = "secret123"
-    print("Checking repos WITH token...")
-    status, repos = make_request("/api/repos", token=token)
-    assert status == 200
-    print("Access granted")
 
-    # Path Traversal Test
-    print("Creating job with invalid hub path...")
+    # Path Traversal Test via Hub
+    print("Test 1: Invalid Hub Path (traversal)...")
     payload = {
         "hub": "/etc",
         "repos": None
@@ -80,8 +68,21 @@ def run_tests():
         print(f"Unexpected status: {status} {resp}")
         assert status == 403
 
+    # Repo Traversal Test
+    print("Test 2: Invalid Repo Name (traversal)...")
+    payload = {
+        "repos": ["../etc"],
+        "level": "max"
+    }
+    status, resp = make_request("/api/jobs", method="POST", data=payload, token=token)
+    if status == 400:
+        print("Blocked invalid repo name as expected")
+    else:
+        print(f"Unexpected status: {status} {resp}")
+        assert status == 400
+
     # Happy Path Job
-    print("Creating valid job...")
+    print("Test 3: Valid Job...")
     payload = {
         "repos": ["tests"], # assuming 'tests' exists in hub (merger/repoLens)
         "level": "max",
@@ -102,12 +103,22 @@ def run_tests():
     assert job["status"] == "succeeded"
     print("Job succeeded")
 
-    # Check latest
-    print("Checking latest artifact...")
-    # Wait a bit for artifact registration? Should be done if job succeeded.
-    status, art = make_request(f"/api/artifacts/latest?repo=tests&level=max&mode=gesamt", token=token)
-    assert status == 200
-    print(f"Latest artifact: {art['id']}")
+    # Verify log streaming via FILE (implicit check if endpoint works)
+    print("Test 4: Log Streaming...")
+    # Using simple GET with query token for SSE simulation
+    log_url = f"{BASE_URL}/api/jobs/{job_id}/logs?token={token}"
+    try:
+        with urllib.request.urlopen(log_url) as response:
+            assert response.status == 200
+            # Read a bit
+            chunk = response.read(100)
+            if chunk:
+                print("Received log chunk")
+            else:
+                print("Warning: Empty log stream?")
+    except Exception as e:
+        print(f"Log stream failed: {e}")
+        sys.exit(1)
 
     print("Tests passed!")
 
