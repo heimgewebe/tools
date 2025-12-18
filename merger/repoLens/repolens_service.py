@@ -29,12 +29,23 @@ except ImportError:
     from .service.app import app, init_service
 
 
+def _is_loopback_host(host: str) -> bool:
+    h = (host or "").strip().lower()
+    return h in ("127.0.0.1", "localhost", "::1")
+
+
 def run(host: str, port: int, hub: str | None, token: str | None, open_browser: bool = False) -> None:
     hub_path = None
     if hub:
         hub_path = Path(hub).expanduser().resolve()
         if not hub_path.exists():
             raise SystemExit(f"[repolens] hub path does not exist: {hub_path}")
+        if not hub_path.is_dir():
+            raise SystemExit(f"[repolens] hub path is not a directory: {hub_path}")
+
+    # Safety: Enforce token for non-loopback hosts
+    if not _is_loopback_host(host) and not token:
+        raise SystemExit("[repolens] refusing to bind non-loopback host without token. Set --token or REPOLENS_TOKEN.")
 
     init_service(hub_path=hub_path, token=token)
 
@@ -49,8 +60,15 @@ def run(host: str, port: int, hub: str | None, token: str | None, open_browser: 
     print(f"[repolens] serving on {url}")
     if hub_path:
         print(f"[repolens] hub: {hub_path}")
+        # Diagnostic: Check for git repos to detect "wrong folder" issues early
+        try:
+            repos = [p for p in hub_path.iterdir() if p.is_dir() and (p / ".git").exists()]
+            print(f"[repolens] hub repos (git): {len(repos)}")
+        except Exception as e:
+            print(f"[repolens] hub scan warning: {e}")
     else:
         print("[repolens] hub: (not set)  -> set --hub or REPOLENS_HUB")
+
     if token:
         print("[repolens] token: (set)")
     else:
