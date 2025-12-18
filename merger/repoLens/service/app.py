@@ -83,6 +83,60 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_headers=["Authorization", "Content-Type"],
         )
 
+@app.get("/api/fs", dependencies=[Depends(verify_token)])
+def api_fs(path: str = "/"):
+    """
+    List files and directories in the given path, relative to the Hub.
+    Jailed to the Hub directory.
+    """
+    hub = state.hub
+    if hub is None:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    # Resolve path relative to hub
+    # Treat "/" or "" as root of hub
+    raw_path = (path or "").strip()
+
+    # Safety against absolute paths passed by UI that might be system absolute
+    if raw_path.startswith("/"):
+        raw_path = raw_path.lstrip("/")
+
+    candidate = (hub / raw_path).resolve()
+    hub_resolved = hub.resolve()
+
+    # Check jail
+    # is_relative_to is available in Python 3.9+
+    # Manual check:
+    if hub_resolved not in candidate.parents and candidate != hub_resolved:
+         # Double check if user meant to browse inside hub
+         raise HTTPException(status_code=403, detail="Path escapes hub")
+
+    if not candidate.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    if not candidate.is_dir():
+        raise HTTPException(status_code=400, detail="Not a directory")
+
+    dirs = []
+    files = []
+
+    try:
+        for child in sorted(candidate.iterdir(), key=lambda x: x.name.lower()):
+            name = child.name
+            if child.is_dir():
+                dirs.append(name)
+            else:
+                files.append(name)
+    except OSError as e:
+        logger.error(f"Error listing {candidate}: {e}")
+        raise HTTPException(status_code=500, detail="Error listing directory")
+
+    return {
+        "path": path,
+        "abs": str(candidate),
+        "dirs": dirs,
+        "files": files,
+    }
+
 @app.get("/api/health")
 def health():
     return {
