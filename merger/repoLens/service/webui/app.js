@@ -4,6 +4,8 @@ const API_BASE = '/api';
 
 // Token handling
 const TOKEN_KEY = 'repolens_token';
+const SETS_KEY = 'repolens_sets';
+const CONFIG_KEY = 'repolens_config';
 
 // Available Extras
 const EXTRAS_OPTIONS = [
@@ -83,10 +85,16 @@ async function fetchRepos(hub) {
 
         repos.forEach(repo => {
             const div = document.createElement('div');
-            div.className = "flex items-center space-x-2";
+            div.className = "flex items-center space-x-2 p-1 hover:bg-gray-800 rounded cursor-pointer";
+            div.onclick = (e) => {
+                if (e.target.type !== 'checkbox') {
+                    const box = div.querySelector('input[type="checkbox"]');
+                    box.checked = !box.checked;
+                }
+            };
             div.innerHTML = `
                 <input type="checkbox" name="repos" value="${repo}" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
-                <span class="font-bold text-gray-300">${repo}</span>
+                <span class="font-bold text-gray-300 select-none">${repo}</span>
             `;
             list.appendChild(div);
         });
@@ -103,6 +111,122 @@ function selectAllRepos() {
     const allChecked = Array.from(boxes).every(b => b.checked);
     // Toggle
     boxes.forEach(b => b.checked = !allChecked);
+}
+
+// --- Sets Management ---
+
+function getSets() {
+    try {
+        return JSON.parse(localStorage.getItem(SETS_KEY) || '{}');
+    } catch { return {}; }
+}
+
+function saveSet() {
+    const name = document.getElementById('setName').value.trim();
+    if (!name) return alert("Please enter a name");
+
+    const selected = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
+    if (selected.length === 0) return alert("No repos selected");
+
+    const sets = getSets();
+    sets[name] = selected;
+    localStorage.setItem(SETS_KEY, JSON.stringify(sets));
+    document.getElementById('setName').value = '';
+    renderSets();
+}
+
+function deleteSet(name) {
+    if (!confirm(`Delete set "${name}"?`)) return;
+    const sets = getSets();
+    delete sets[name];
+    localStorage.setItem(SETS_KEY, JSON.stringify(sets));
+    renderSets();
+}
+
+function loadSet(name) {
+    const sets = getSets();
+    const repos = sets[name];
+    if (!repos) return;
+
+    const boxes = document.querySelectorAll('input[name="repos"]');
+    boxes.forEach(b => {
+        b.checked = repos.includes(b.value);
+    });
+}
+
+function renderSets() {
+    const div = document.getElementById('setsList');
+    const sets = getSets();
+    div.innerHTML = '';
+
+    Object.keys(sets).sort().forEach(name => {
+        const badge = document.createElement('div');
+        badge.className = "flex items-center bg-gray-700 hover:bg-gray-600 rounded px-2 py-1 text-xs cursor-pointer";
+        badge.onclick = () => loadSet(name);
+
+        const span = document.createElement('span');
+        span.innerText = name;
+        span.className = "mr-2 text-blue-300 font-bold";
+
+        const del = document.createElement('span');
+        del.innerHTML = '&times;';
+        del.className = "text-gray-400 hover:text-red-400 font-bold";
+        del.onclick = (e) => {
+            e.stopPropagation();
+            deleteSet(name);
+        };
+
+        badge.appendChild(span);
+        badge.appendChild(del);
+        div.appendChild(badge);
+    });
+}
+
+// --- Config Management ---
+
+function saveConfig() {
+    const config = {
+        profile: document.getElementById('profile').value,
+        mode: document.getElementById('mode').value,
+        splitSize: document.getElementById('splitSize').value,
+        maxBytes: document.getElementById('maxBytes').value,
+        planOnly: document.getElementById('planOnly').checked,
+        codeOnly: document.getElementById('codeOnly').checked,
+        pathFilter: document.getElementById('pathFilter').value,
+        extFilter: document.getElementById('extFilter').value,
+        extras: Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value)
+    };
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+
+    const btn = document.querySelector('button[onclick="saveConfig()"]');
+    const oldText = btn.innerText;
+    btn.innerText = "Saved!";
+    setTimeout(() => btn.innerText = oldText, 1000);
+}
+
+function restoreConfig() {
+    try {
+        const config = JSON.parse(localStorage.getItem(CONFIG_KEY));
+        if (!config) return;
+
+        if (config.profile) document.getElementById('profile').value = config.profile;
+        if (config.mode) document.getElementById('mode').value = config.mode;
+        if (config.splitSize) document.getElementById('splitSize').value = config.splitSize;
+        if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
+        if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
+        if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
+        if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
+        if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
+
+        // Extras need to be handled carefully as they are rendered async or statically
+        if (config.extras) {
+             const boxes = document.querySelectorAll('input[name="extras"]');
+             boxes.forEach(b => {
+                 b.checked = config.extras.includes(b.value);
+             });
+        }
+
+    } catch (e) { console.error("Error restoring config", e); }
 }
 
 function renderExtras() {
@@ -292,6 +416,8 @@ function streamLogs(jobId) {
 document.addEventListener('DOMContentLoaded', async () => {
     // Render extras immediately
     renderExtras();
+    renderSets();
+    restoreConfig();
 
     // Optional: accept token from URL once, then scrub it from the address bar.
     // Enables local wrapper to open UI already authenticated.
