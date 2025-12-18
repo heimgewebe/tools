@@ -17,13 +17,12 @@ class SecurityConfig:
     def add_allowlist_root(self, path: Path):
         self.allowlist_roots.append(path.resolve())
 
-    def validate_path(self, path: Path):
+    def validate_path(self, path: Path) -> Path:
         resolved = path.resolve()
-        # If no roots configured, allow nothing? Or allow everything?
+        # If no roots configured, deny all paths for safety
         # Requirement: "Default allowlist: nur hub und Subdirs"
         if not self.allowlist_roots:
-             # Fallback if no roots added yet (should be added at init)
-             return
+            raise HTTPException(status_code=403, detail="No allowlisted roots configured. Contact server admin.")
 
         is_allowed = False
         for root in self.allowlist_roots:
@@ -34,6 +33,7 @@ class SecurityConfig:
                 break
             except ValueError:
                 continue
+        return resolved
 
         if not is_allowed:
             raise HTTPException(status_code=403, detail=f"Path '{path}' is not allowed. Allowed roots: {[str(r) for r in self.allowlist_roots]}")
@@ -63,13 +63,13 @@ def verify_token(
 
 def validate_hub_path(path_str: str):
     p = Path(path_str)
-    get_security_config().validate_path(p)
-    # Also require a real directory
-    if not p.exists():
-        raise HTTPException(status_code=400, detail=f"Hub does not exist: {path_str}")
-    if not p.is_dir():
-        raise HTTPException(status_code=400, detail=f"Hub is not a directory: {path_str}")
-    return p
+    resolved_p = get_security_config().validate_path(p)
+    # Also require a real directory (use the canonical, validated path)
+    if not resolved_p.exists():
+        raise HTTPException(status_code=400, detail=f"Hub does not exist: {resolved_p}")
+    if not resolved_p.is_dir():
+        raise HTTPException(status_code=400, detail=f"Hub is not a directory: {resolved_p}")
+    return resolved_p
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
