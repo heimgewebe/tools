@@ -293,6 +293,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Render extras immediately
     renderExtras();
 
+    // Optional: accept token from URL once, then scrub it from the address bar.
+    // Enables local wrapper to open UI already authenticated.
+    try {
+        const url = new URL(window.location.href);
+        const urlToken = url.searchParams.get('token');
+        if (urlToken) {
+            document.getElementById('authToken').value = urlToken;
+            setToken(urlToken);
+            url.searchParams.delete('token');
+            window.history.replaceState({}, document.title, url.pathname + url.search);
+        }
+    } catch (e) {
+        /* non-fatal */
+    }
+
     // Restore token
     const savedToken = localStorage.getItem(TOKEN_KEY);
     if (savedToken) {
