@@ -186,7 +186,13 @@ Der repoLens v2 kennt vier optimierte Profile:
 
 ## Nutzung
 
-### CLI-Nutzung:
+### Grundregel: Welches Skript nehme ich?
+
+- **iPad/Pythonista:** `repolens.py` (Kanonisch für iOS)
+- **Desktop/Daemon:** `repolensd.py` (Startet die Web-UI)
+- **Kompatibilität:** `repolens_service.py` (Leitet an `repolensd.py` weiter)
+
+### CLI-Nutzung (iPad/Terminal):
 
 ```bash
 # Overview-Profil (Scannt aktuelles Verzeichnis oder nutzt --hub)
@@ -197,6 +203,13 @@ python3 repolens.py myrepo --level dev --mode pro-repo
 
 # Max-Profil mit Split (z. B. 20MB)
 python3 repolens.py myrepo --level max --split-size 20MB
+```
+
+### Desktop Web-UI Starten
+
+```bash
+# Startet den Server (repolensd)
+python3 repolensd.py --hub ~/repos --host 127.0.0.1 --port 8787 --open
 ```
 
 Hinweis: `--split-size` **und** `--max-bytes` akzeptieren menschenlesbare Werte
