@@ -58,21 +58,16 @@ def run(host: str, port: int, hub: str | None, token: str | None, open_browser: 
             pass
 
     print(f"[repolens] serving on {url}", flush=True)
+    print(f"[repolens] hub: {hub_path if hub_path else '(not set)'}", flush=True)
+    print(f"[repolens] token: {'(set)' if token else '(not set)'}", flush=True)
+
     if hub_path:
-        print(f"[repolens] hub: {hub_path}")
         # Diagnostic: Check for git repos to detect "wrong folder" issues early
         try:
             repos = [p for p in hub_path.iterdir() if p.is_dir() and (p / ".git").exists()]
-            print(f"[repolens] hub repos (git): {len(repos)}")
+            print(f"[repolens] hub repos (git): {len(repos)}", flush=True)
         except Exception as e:
-            print(f"[repolens] hub scan warning: {e}")
-    else:
-        print("[repolens] hub: (not set)  -> set --hub or REPOLENS_HUB")
-
-    if token:
-        print("[repolens] token: (set)")
-    else:
-        print("[repolens] token: (not set) -> set REPOLENS_TOKEN")
+            print(f"[repolens] hub scan warning: {e}", flush=True)
 
     uvicorn.run(app, host=host, port=port, log_level="info")
 

@@ -1805,13 +1805,13 @@ def main_cli():
         try:
             # Lazy import to avoid dependencies on iOS
             try:
-                from repolens_service import run_server
+                from repolensd import run_server
             except ImportError:
                 # Handle package-relative import if needed
                 # Note: This is tricky when running as script.
                 # Attempt to adjust sys.path if module not found.
                 sys.path.append(str(SCRIPT_DIR))
-                from repolens_service import run_server
+                from repolensd import run_server
 
             run_server(hub, args.host, args.port, args.open, args.token)
             return

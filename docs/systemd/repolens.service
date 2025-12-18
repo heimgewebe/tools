@@ -1,0 +1,17 @@
+[Unit]
+Description=RepoLens Web UI (repolensd)
+After=network.target
+
+[Service]
+Type=simple
+Environment=REPOLENS_HUB=/home/alex/repos
+Environment=REPOLENS_HOST=127.0.0.1
+Environment=REPOLENS_PORT=8787
+Environment=REPOLENS_TOKEN=heimgewebe-local
+WorkingDirectory=/home/alex/repos/tools/merger/repoLens
+ExecStart=/usr/bin/python3 /home/alex/repos/tools/merger/repoLens/repolensd.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
