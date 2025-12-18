@@ -628,9 +628,9 @@ def parse_args(argv):
         help="Nur den Plan-Teil des Berichts erzeugen (kein Manifest, keine Inhalte).",
     )
     parser.add_argument(
-        "--no-delete",
+        "--delete",
         action="store_true",
-        help="Quellordner nach dem Merge NICHT löschen.",
+        help="Quellordner nach dem Merge löschen (Standard: NEIN).",
     )
     return parser.parse_args(argv)
 
@@ -680,14 +680,15 @@ def discover_sources(base_dir, paths):
     return sources
 
 
-def safe_delete_source(src, base_dir, merges_dir, no_delete):
+def safe_delete_source(src, base_dir, merges_dir, delete):
     """
     Löscht eine Quelle nur, wenn:
+    - delete=True gesetzt ist (Standard: False)
     - sie im gleichen Ordner wie das Script liegt (parent == base_dir) UND
     - sie nicht der merges-Ordner ist.
     """
-    if no_delete:
-        print("Löschen deaktiviert (--no-delete): {0}".format(src))
+    if not delete:
+        print("Löschen deaktiviert (Standard): {0}".format(src))
         return
 
     try:
@@ -768,7 +769,7 @@ def main(argv=None):
 
         # Quellordner löschen (falls im gleichen Ordner wie das Script)
         for src in sources:
-            safe_delete_source(src, base_dir, merges_dir, args.no_delete)
+            safe_delete_source(src, base_dir, merges_dir, args.delete)
 
         if args.plan_only:
             print("Hinweis: Es wurde nur der Plan-Teil erzeugt (--plan-only).")
