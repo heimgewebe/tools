@@ -27,3 +27,7 @@ merges/
 # RepoLens
 merger/repoLens/merges/
 **/.repolens-hub-path.txt
+
+# Local logs
+*.log
+repolensd.log
