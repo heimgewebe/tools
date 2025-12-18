@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from .models import Job, JobRequest, Artifact
 from .jobstore import JobStore
-
+from .security import get_security_config
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
 # and merger/repoLens is usually in sys.path when running repolens.py.
@@ -43,6 +43,8 @@ except ImportError:
     )
 
 def _find_repos(hub: Path) -> List[str]:
+    # Validate hub path every time to prevent misuse
+    get_security_config().validate_path(hub)
     repos = []
     if not hub.exists():
         return []
