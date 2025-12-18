@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import Optional
-from fastapi import Header, HTTPException, Depends
+from fastapi import Header, HTTPException, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 security_scheme = HTTPBearer(auto_error=False)
@@ -42,16 +42,23 @@ _security_config = SecurityConfig()
 def get_security_config() -> SecurityConfig:
     return _security_config
 
-def verify_token(creds: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)):
+def verify_token(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
+    token: Optional[str] = Query(None) # Allow query param for SSE
+):
     config = get_security_config()
     if not config.token:
         return # Auth disabled
 
-    if not creds:
-        raise HTTPException(status_code=401, detail="Missing authentication token")
+    # Check header first
+    if creds and creds.credentials == config.token:
+        return
 
-    if creds.credentials != config.token:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    # Check query param (for SSE or simple links)
+    if token and token == config.token:
+        return
+
+    raise HTTPException(status_code=401, detail="Missing or invalid authentication token")
 
 def validate_hub_path(path_str: str):
     p = Path(path_str)

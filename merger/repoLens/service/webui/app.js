@@ -2,11 +2,41 @@
 
 const API_BASE = '/api';
 
+// Token handling
+const TOKEN_KEY = 'repolens_token';
+
+function getToken() {
+    return document.getElementById('authToken').value || localStorage.getItem(TOKEN_KEY) || '';
+}
+
+function setToken(token) {
+    if (token) {
+        localStorage.setItem(TOKEN_KEY, token);
+    } else {
+        localStorage.removeItem(TOKEN_KEY);
+    }
+}
+
+// Wrapper for fetch with auth
+async function apiFetch(url, options = {}) {
+    const token = getToken();
+    const headers = options.headers || {};
+
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    options.headers = headers;
+    return fetch(url, options);
+}
+
 async function fetchHealth() {
     try {
-        const res = await fetch(`${API_BASE}/health`);
+        // Health check endpoint is open, but we use it to check connectivity
+        const res = await apiFetch(`${API_BASE}/health`);
         const data = await res.json();
-        document.getElementById('status').innerText = `v${data.version} • Hub: ${data.hub}`;
+        const authStatus = data.auth_enabled ? '🔒 Auth' : '🔓 Open';
+        document.getElementById('status').innerText = `v${data.version} • ${authStatus} • Hub: ${data.hub}`;
         document.getElementById('hubPath').value = data.hub;
         return data.hub;
     } catch (e) {
@@ -20,7 +50,11 @@ async function fetchRepos(hub) {
     list.innerHTML = '<div class="text-gray-500 italic">Loading repos...</div>';
 
     try {
-        const res = await fetch(`${API_BASE}/repos`);
+        const res = await apiFetch(`${API_BASE}/repos`);
+        if (res.status === 401 || res.status === 403) {
+             list.innerHTML = '<div class="text-red-400">Access Denied (Check Token)</div>';
+             return;
+        }
         const repos = await res.json();
 
         list.innerHTML = '';
@@ -53,7 +87,11 @@ async function loadArtifacts() {
     const list = document.getElementById('artifactList');
     list.innerHTML = '<div class="text-gray-500 italic">Loading...</div>';
     try {
-        const res = await fetch(`${API_BASE}/artifacts`);
+        const res = await apiFetch(`${API_BASE}/artifacts`);
+        if (res.status === 401) {
+             list.innerHTML = '<div class="text-red-400">Auth Required</div>';
+             return;
+        }
         const arts = await res.json();
 
         list.innerHTML = '';
@@ -70,21 +108,24 @@ async function loadArtifacts() {
             const repos = art.repos.length > 3 ? `${art.repos.slice(0,3).join(', ')} +${art.repos.length-3}` : art.repos.join(', ');
 
             let links = [];
+            const token = getToken();
+            const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+
             // Handle known keys explicitly, then others
             // Primary JSON
             if (art.paths.json) {
-                links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=json" target="_blank" class="text-green-400 hover:underline">JSON</a>`);
+                links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=json${tokenParam}" target="_blank" class="text-green-400 hover:underline">JSON</a>`);
             }
             // Canonical MD
             if (art.paths.md) {
-                links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=md" target="_blank" class="text-blue-400 hover:underline">Markdown</a>`);
+                links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=md${tokenParam}" target="_blank" class="text-blue-400 hover:underline">Markdown</a>`);
             }
             // Other parts
             for (const [key, val] of Object.entries(art.paths)) {
                 if (key !== 'json' && key !== 'md' && key !== 'canonical_md' && key !== 'index_json') {
                     // Try to be smart about parts
                     if (key.startsWith('md_part')) {
-                         links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=${key}" target="_blank" class="text-gray-400 hover:underline text-xs">Part ${key.split('_').pop()}</a>`);
+                         links.push(`<a href="${API_BASE}/artifacts/${art.id}/download?key=${key}${tokenParam}" target="_blank" class="text-gray-400 hover:underline text-xs">Part ${key.split('_').pop()}</a>`);
                     }
                 }
             }
@@ -135,11 +176,20 @@ async function startJob(e) {
     };
 
     try {
-        const res = await fetch(`${API_BASE}/jobs`, {
+        const res = await apiFetch(`${API_BASE}/jobs`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
         });
+
+        if (res.status === 401) {
+            throw new Error("Unauthorized. Please check your token.");
+        }
+
+        if (!res.ok) {
+            throw new Error(`HTTP Error ${res.status}`);
+        }
+
         const job = await res.json();
 
         btn.disabled = false;
@@ -159,7 +209,9 @@ function streamLogs(jobId) {
     const pre = document.getElementById('logs');
     pre.innerText = `Connecting to logs for job ${jobId}...\n`;
 
-    const es = new EventSource(`${API_BASE}/jobs/${jobId}/logs`);
+    const token = getToken();
+    const url = `${API_BASE}/jobs/${jobId}/logs` + (token ? `?token=${encodeURIComponent(token)}` : '');
+    const es = new EventSource(url);
 
     es.onmessage = (event) => {
         if (event.data === 'end') {
@@ -180,6 +232,22 @@ function streamLogs(jobId) {
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
+    // Restore token
+    const savedToken = localStorage.getItem(TOKEN_KEY);
+    if (savedToken) {
+        document.getElementById('authToken').value = savedToken;
+    }
+
+    // Listen for token changes
+    document.getElementById('authToken').addEventListener('input', (e) => {
+        setToken(e.target.value);
+        // Retry loading data
+        loadArtifacts();
+        fetchHealth().then(hub => {
+            if (hub) fetchRepos(hub);
+        });
+    });
+
     const hub = await fetchHealth();
     if (hub) {
         fetchRepos(hub);

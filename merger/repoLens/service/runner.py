@@ -25,6 +25,7 @@ try:
         MergeArtifacts,
         SKIP_ROOTS,
         MERGES_DIR_NAME,
+    parse_human_size,
     )
 except ImportError:
     # Fallback to relative import if running as package
@@ -38,6 +39,7 @@ except ImportError:
         MergeArtifacts,
         SKIP_ROOTS,
         MERGES_DIR_NAME,
+        parse_human_size,
     )
 
 def _find_repos(hub: Path) -> List[str]:
@@ -55,22 +57,6 @@ def _find_repos(hub: Path) -> List[str]:
             continue
         repos.append(child.name)
     return repos
-
-# Helper to parse human size (duplicated from repolens.py to stay independent)
-def _parse_human_size(text: str) -> int:
-    text = str(text).upper().strip()
-    if not text: return 0
-    if text.isdigit(): return int(text)
-
-    units = {"K": 1024, "M": 1024**2, "G": 1024**3}
-    for u, m in units.items():
-        if text.endswith(u) or text.endswith(u+"B"):
-            val = text.rstrip(u+"B").rstrip(u)
-            try:
-                return int(float(val) * m)
-            except ValueError:
-                return 0
-    return 0
 
 def _parse_extras_csv(extras_csv: str) -> ExtrasConfig:
     config = ExtrasConfig()
@@ -151,7 +137,7 @@ class JobRunner:
                 raise ValueError("No valid repository sources found.")
 
             # 3. Scan Repos
-            max_bytes = _parse_human_size(req.max_bytes or "0")
+            max_bytes = parse_human_size(req.max_bytes or "0")
             ext_list = _normalize_ext_list(",".join(req.extensions)) if req.extensions else None
             path_filter = req.path_filter
 
@@ -171,7 +157,13 @@ class JobRunner:
             log("Generating reports...")
             merges_dir = get_merges_dir(hub)
 
-            split_size = _parse_human_size(req.split_size or "25MB")
+            # Re-check cancel status before write (expensive operation)
+            job = self.job_store.get_job(job_id)
+            if job.status == "canceled":
+                log("Job canceled before write.")
+                return
+
+            split_size = parse_human_size(req.split_size or "25MB")
             extras = _parse_extras_csv(req.extras)
             if req.json_sidecar:
                 extras.json_sidecar = True

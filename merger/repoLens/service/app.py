@@ -151,14 +151,38 @@ def list_artifacts(repo: Optional[str] = None):
 
 @app.get("/api/artifacts/latest", dependencies=[Depends(verify_token)])
 def get_latest_artifact(repo: str, level: str = "max", mode: str = "gesamt"):
-    # "Heimgewebe-Hebel"
+    # "Heimgewebe-Hebel" - Return the single latest matching artifact
     arts = state.job_store.get_all_artifacts()
+    matches = []
+
     for a in arts:
-        # Check params
-        if a.params.level == level and a.params.mode == mode:
-            if repo in a.repos or (not a.repos and not a.params.repos): # Handle "all" logic
-                return a
-    raise HTTPException(status_code=404, detail="No matching artifact found")
+        # Filter by params
+        if a.params.level != level:
+            continue
+        if a.params.mode != mode:
+            continue
+
+        # Filter by repo
+        # If artifact covers specific repos, 'repo' must be in that list.
+        # If artifact covers all (empty list/None), it counts as a match for any repo query?
+        # Or does 'latest?repo=X' imply "Snapshot of X"?
+        # Usually "Snapshot of X" means X is in the list.
+        if a.repos:
+            if repo in a.repos:
+                matches.append(a)
+        else:
+            # Artifact is for ALL repos.
+            # Does this count as "latest artifact for repo X"?
+            # Yes, if X is in the hub. We assume it is.
+            matches.append(a)
+
+    if not matches:
+        raise HTTPException(status_code=404, detail="No matching artifact found")
+
+    # Sort by created_at desc (lexicographical ISO string sort works)
+    # The JobStore already returns sorted list (desc), but to be safe/explicit:
+    latest = max(matches, key=lambda x: x.created_at)
+    return latest
 
 @app.get("/api/artifacts/{id}", dependencies=[Depends(verify_token)])
 def get_artifact(id: str):
