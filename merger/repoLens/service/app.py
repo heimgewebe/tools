@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 import asyncio
 import json
@@ -86,59 +86,98 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_headers=["Authorization", "Content-Type", "x-repolens-token"],
         )
 
-@app.get("/api/fs", dependencies=[Depends(verify_token)])
-def api_fs(path: str = "/"):
+def _resolve_in_allowed_roots(raw: str, hub: Optional[Path], merges_dir: Optional[Path]) -> Path:
     """
-    List files and directories in the given path, relative to the Hub.
-    Jailed to the Hub directory.
+    Resolve `raw` to an absolute path and ensure it stays within allowed roots.
+    Allowed roots: hub (if set) and merges_dir (if set).
+    If `raw` is relative and hub exists, it is resolved relative to hub for backward compatibility.
     """
-    hub = state.hub
-    if hub is None:
-        raise HTTPException(status_code=400, detail="Hub not configured")
+    raw = (raw or "").strip()
+    if "\x00" in raw:
+        raise HTTPException(status_code=400, detail="Invalid path request")
 
-    # Resolve path relative to hub
-    # Treat "/" or "" as root of hub
-    raw_path = (path or "").strip()
+    if raw in ("", "/"):
+        # default: hub root if available, else merges_dir, else error
+        if hub:
+            return hub.resolve()
+        if merges_dir:
+            return merges_dir.resolve()
+        raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
 
-    # Safety against absolute paths passed by UI that might be system absolute
-    if raw_path.startswith("/"):
-        raw_path = raw_path.lstrip("/")
+    hub_r = hub.resolve() if hub else None
+    merges_r = merges_dir.resolve() if merges_dir else None
+    roots = [p for p in [hub_r, merges_r] if p is not None]
+    if not roots:
+        raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
 
-    candidate = (hub / raw_path).resolve()
-    hub_resolved = hub.resolve()
+    p = Path(raw)
 
-    # Check jail
-    # is_relative_to is available in Python 3.9+
-    # Manual check:
-    if hub_resolved not in candidate.parents and candidate != hub_resolved:
-         # Double check if user meant to browse inside hub
-         raise HTTPException(status_code=403, detail="Path escapes hub")
+    # Helper: resolve safely by binding to a known root
+    def _bind_under_root(root: Path, rel: Path) -> Path:
+        # reject traversal in rel explicitly
+        if rel.is_absolute() or ".." in rel.parts:
+            raise HTTPException(status_code=400, detail="Invalid path request")
+        return (root / rel).resolve()
 
+    # Absolute path: accept ONLY if it is already under one of the allowed roots.
+    # We convert it into a relative path to that root, then re-bind (root/rel).
+    if p.is_absolute():
+        for r in roots:
+            try:
+                rel = p.relative_to(r)
+                candidate = _bind_under_root(r, rel)
+                break
+            except ValueError:
+                continue
+        else:
+            raise HTTPException(status_code=403, detail="Path escapes allowed roots")
+    else:
+        # Relative: resolve within hub (legacy)
+        if hub_r is None:
+            raise HTTPException(status_code=400, detail="Relative path requires hub")
+        candidate = _bind_under_root(hub_r, p)
+
+    # jail check: must be within at least one allowed root
+    def _inside(root: Path, cand: Path) -> bool:
+        return cand == root or root in cand.parents
+
+    if not any(_inside(r, candidate) for r in roots):
+        raise HTTPException(status_code=403, detail="Path escapes allowed roots")
+
+    return candidate
+
+def _list_dir(candidate: Path) -> Dict[str, Any]:
     if not candidate.exists():
         raise HTTPException(status_code=404, detail="Path not found")
     if not candidate.is_dir():
         raise HTTPException(status_code=400, detail="Not a directory")
 
-    dirs = []
-    files = []
+    dirs: List[str] = []
+    files: List[str] = []
+    entries: List[Dict[str, str]] = []
 
     try:
         for child in sorted(candidate.iterdir(), key=lambda x: x.name.lower()):
-            name = child.name
             if child.is_dir():
-                dirs.append(name)
+                dirs.append(child.name)
+                entries.append({"name": child.name, "type": "dir"})
             else:
-                files.append(name)
+                files.append(child.name)
+                entries.append({"name": child.name, "type": "file"})
     except OSError as e:
         logger.error(f"Error listing {candidate}: {e}")
         raise HTTPException(status_code=500, detail="Error listing directory")
 
-    return {
-        "path": path,
-        "abs": str(candidate),
-        "dirs": dirs,
-        "files": files,
-    }
+    return {"abs": str(candidate), "dirs": dirs, "files": files, "entries": entries}
+
+@app.get("/api/fs", dependencies=[Depends(verify_token)])
+@app.get("/api/fs/list", dependencies=[Depends(verify_token)])
+def api_fs_list(path: str = "/"):
+    hub = state.hub
+    merges_dir = getattr(state, "merges_dir", None)
+    candidate = _resolve_in_allowed_roots(path, hub=hub, merges_dir=merges_dir)
+    payload = _list_dir(candidate)
+    return {"path": path, **payload}
 
 @app.get("/api/health")
 def health():
@@ -149,114 +188,6 @@ def health():
         "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
         "running_jobs": len(state.runner.futures) if state.runner else 0
-    }
-
-@app.get("/api/fs/list", dependencies=[Depends(verify_token)])
-def list_fs(path: Optional[str] = None):
-    """
-    List directories in the given path.
-    Defaults to Hub Root (or User Home if Hub not set).
-    Restricted to state.hub or FS_ROOT for security.
-    Strictly forbids absolute paths in 'path' argument (must be relative).
-    """
-    # Determine the root for relative resolution
-    # User requirement: "Default root: state.hub"
-    root = state.hub if state.hub else Path.home().resolve()
-
-    try:
-        target = resolve_relative_path(root, path)
-    except HTTPException as e:
-        logger.warning(f"Access denied in list_fs: {path} (Error: {e.detail})")
-        # Re-raise generic 403 or the specific error
-        raise e
-    except Exception as e:
-        logger.exception(f"Unexpected error resolving path {path}: {e}")
-        raise HTTPException(status_code=400, detail="Invalid path request")
-
-    if not target.exists() or not target.is_dir():
-         raise HTTPException(status_code=404, detail="Directory not found")
-
-    entries = []
-
-    # Add parent entry only if we are not at Root
-    # We define 'Root' as the base we started from (state.hub), preventing going up beyond it?
-    # Security requirement: "Defaults to User Home if path is None... Restricted to FS_ROOT"
-    # User update: "Default root: state.hub... absolute paths verbieten"
-    # So '..' should be allowed ONLY if it stays within allowed root?
-    # Actually, `resolve_relative_path` checks against `root` (state.hub).
-    # So `..` that goes outside `state.hub` will raise 403.
-    # But UI needs to know if it CAN go up.
-
-    # We'll allow listing '..' if target != root.
-    if target != root:
-        # Calculate relative path of parent
-        try:
-            parent_rel = target.parent.relative_to(root)
-            # If parent is root, relative_to returns ".", but we prefer empty string or "." depending on how client handles it.
-            # Client sends 'path' back. resolve_relative_path(root, ".") works.
-            entries.append({
-                "name": "..",
-                "path": str(parent_rel),
-                "is_dir": True
-            })
-        except ValueError:
-            # Should not happen if target is inside root and target != root
-            pass
-
-    # Note on 'path' in response:
-    # If client sends relative path, we should probably return relative paths for navigation.
-    # But existing UI might expect full paths?
-    # User said: "absolute paths verbieten".
-    # So we should return relative paths in "entries".
-
-    try:
-        for item in sorted(target.iterdir(), key=lambda x: x.name.lower()):
-            if item.name.startswith("."):
-                continue
-            if item.is_dir():
-                 # Calculate relative path for the item to be used in next request
-                 try:
-                    rel_path = item.relative_to(root)
-                    entries.append({
-                        "name": item.name,
-                        "path": str(rel_path),
-                        "is_dir": True
-                    })
-                 except ValueError:
-                    # Should not happen if item is child of target which is child of root
-                    continue
-
-    except Exception as e:
-        logger.exception(f"Error listing directory {target}: {e}")
-        raise HTTPException(status_code=500, detail="Error listing directory")
-
-    return {
-        "path": str(target.relative_to(root)) if target != root else "",
-        "entries": entries,
-        "root": str(root) # informative
-    }
-
-    try:
-        # Sort directories first, then files (though we only list dirs likely? No, list folders for picking)
-        # The user wants "Folder Picker". We can filter for is_dir().
-        # We list everything but UI might filter. Let's list directories primarily.
-
-        for item in sorted(target.iterdir(), key=lambda x: x.name.lower()):
-            if item.name.startswith("."):
-                continue
-            if item.is_dir():
-                 entries.append({
-                     "name": item.name,
-                     "path": str(item),
-                     "is_dir": True
-                 })
-    except Exception as e:
-        logger.exception(f"Error listing directory {target}: {e}")
-        raise HTTPException(status_code=500, detail="Error listing directory")
-
-    return {
-        "path": str(target),
-        "entries": entries
     }
 
 @app.get("/api/repos", dependencies=[Depends(verify_token)])
