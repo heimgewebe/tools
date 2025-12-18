@@ -9,11 +9,14 @@ import json
 import time
 import ipaddress
 import logging
+import re
+from datetime import datetime
 
-from .models import JobRequest, Job, Artifact
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
-from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name
+from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
+from .atlas import AtlasScanner, render_atlas_md
 
 try:
     from merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
@@ -152,44 +155,86 @@ def health():
 def list_fs(path: Optional[str] = None):
     """
     List directories in the given path.
-    Defaults to User Home if path is None.
-    Restricted to FS_ROOT (System Root) for security.
+    Defaults to Hub Root (or User Home if Hub not set).
+    Restricted to state.hub or FS_ROOT for security.
+    Strictly forbids absolute paths in 'path' argument (must be relative).
     """
-    target = Path.home().resolve()
+    # Determine the root for relative resolution
+    # User requirement: "Default root: state.hub"
+    root = state.hub if state.hub else Path.home().resolve()
 
-    if path:
-        p = Path(path)
-        # Normalize and resolve
-        try:
-            if p.is_absolute():
-                 # If absolute, verify it's inside FS_ROOT
-                 resolved = p.resolve()
-                 resolved.relative_to(FS_ROOT)
-                 target = resolved
-            else:
-                 # If relative, join with FS_ROOT and verify
-                 resolved = (FS_ROOT / p).resolve()
-                 resolved.relative_to(FS_ROOT)
-                 target = resolved
-        except (ValueError, OSError, RuntimeError):
-             # Path traversal or outside root
-             logger.warning(f"Access denied to path: {path}")
-             raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")
+    try:
+        target = resolve_relative_path(root, path)
+    except HTTPException as e:
+        logger.warning(f"Access denied in list_fs: {path} (Error: {e.detail})")
+        # Re-raise generic 403 or the specific error
+        raise e
+    except Exception as e:
+        logger.exception(f"Unexpected error resolving path {path}: {e}")
+        raise HTTPException(status_code=400, detail="Invalid path request")
 
     if not target.exists() or not target.is_dir():
-         # Instead of leaking 404 details, we might just default to root or error?
-         # User expects to list a folder. If it doesn't exist, 404 is appropriate.
          raise HTTPException(status_code=404, detail="Directory not found")
 
     entries = []
 
-    # Add parent entry only if we are not at FS_ROOT
-    if target != FS_ROOT:
-        entries.append({
-            "name": "..",
-            "path": str(target.parent),
-            "is_dir": True
-        })
+    # Add parent entry only if we are not at Root
+    # We define 'Root' as the base we started from (state.hub), preventing going up beyond it?
+    # Security requirement: "Defaults to User Home if path is None... Restricted to FS_ROOT"
+    # User update: "Default root: state.hub... absolute paths verbieten"
+    # So '..' should be allowed ONLY if it stays within allowed root?
+    # Actually, `resolve_relative_path` checks against `root` (state.hub).
+    # So `..` that goes outside `state.hub` will raise 403.
+    # But UI needs to know if it CAN go up.
+
+    # We'll allow listing '..' if target != root.
+    if target != root:
+        # Calculate relative path of parent
+        try:
+            parent_rel = target.parent.relative_to(root)
+            # If parent is root, relative_to returns ".", but we prefer empty string or "." depending on how client handles it.
+            # Client sends 'path' back. resolve_relative_path(root, ".") works.
+            entries.append({
+                "name": "..",
+                "path": str(parent_rel),
+                "is_dir": True
+            })
+        except ValueError:
+            # Should not happen if target is inside root and target != root
+            pass
+
+    # Note on 'path' in response:
+    # If client sends relative path, we should probably return relative paths for navigation.
+    # But existing UI might expect full paths?
+    # User said: "absolute paths verbieten".
+    # So we should return relative paths in "entries".
+
+    try:
+        for item in sorted(target.iterdir(), key=lambda x: x.name.lower()):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                 # Calculate relative path for the item to be used in next request
+                 try:
+                    rel_path = item.relative_to(root)
+                    entries.append({
+                        "name": item.name,
+                        "path": str(rel_path),
+                        "is_dir": True
+                    })
+                 except ValueError:
+                    # Should not happen if item is child of target which is child of root
+                    continue
+
+    except Exception as e:
+        logger.exception(f"Error listing directory {target}: {e}")
+        raise HTTPException(status_code=500, detail="Error listing directory")
+
+    return {
+        "path": str(target.relative_to(root)) if target != root else "",
+        "entries": entries,
+        "root": str(root) # informative
+    }
 
     try:
         # Sort directories first, then files (though we only list dirs likely? No, list folders for picking)
@@ -386,6 +431,212 @@ def download_artifact(id: str, key: str = "md"):
         raise HTTPException(status_code=404, detail="File on disk missing")
 
     return FileResponse(file_path, filename=filename)
+
+# Atlas API
+
+@app.post("/api/atlas", response_model=AtlasArtifact, dependencies=[Depends(verify_token)])
+async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks):
+    # Determine root to scan
+    hub = state.hub
+    if not hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    # Resolve scan root
+    try:
+        scan_root = resolve_relative_path(hub, request.root)
+    except HTTPException as e:
+         raise e
+
+    # Generate ID
+    scan_id = f"atlas-{int(time.time())}"
+
+    # Define output paths
+    merges_dir = state.merges_dir or get_merges_dir(hub)
+    if not merges_dir.exists():
+        merges_dir.mkdir(parents=True, exist_ok=True)
+
+    json_filename = f"{scan_id}.json"
+    md_filename = f"{scan_id}.md"
+
+    # Helper to run scan and save
+    def run_scan_and_save():
+        try:
+            scanner = AtlasScanner(
+                root=scan_root,
+                max_depth=request.max_depth,
+                max_entries=request.max_entries,
+                exclude_globs=request.exclude_globs
+            )
+            result = scanner.scan()
+
+            # Save JSON
+            with open(merges_dir / json_filename, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2)
+
+            # Render and Save MD
+            md_content = render_atlas_md(result)
+            with open(merges_dir / md_filename, "w", encoding="utf-8") as f:
+                f.write(md_content)
+
+            logger.info(f"Atlas scan completed: {scan_id}")
+
+        except Exception as e:
+            logger.exception(f"Atlas scan failed: {e}")
+            # Could save an error file?
+
+    background_tasks.add_task(run_scan_and_save)
+
+    # Return "pending" artifact response immediately (optimistic)
+    # Or should we store it in a store?
+    # For now, we return the paths where it WILL be.
+    return AtlasArtifact(
+        id=scan_id,
+        created_at=datetime.utcnow().isoformat(),
+        hub=str(hub),
+        root_scanned=str(scan_root),
+        paths={"json": json_filename, "md": md_filename},
+        stats={} # Empty initially
+    )
+
+@app.get("/api/atlas/latest", dependencies=[Depends(verify_token)])
+def get_latest_atlas():
+    merges_dir = state.merges_dir
+    if not merges_dir and state.hub:
+        merges_dir = get_merges_dir(state.hub)
+
+    if not merges_dir or not merges_dir.exists():
+        raise HTTPException(status_code=404, detail="No atlas artifacts found (no merges dir)")
+
+    # Find atlas files
+    # Pattern: atlas-{timestamp}.json
+    files = list(merges_dir.glob("atlas-*.json"))
+    if not files:
+         raise HTTPException(status_code=404, detail="No atlas artifacts found")
+
+    # Sort by name (timestamp) desc
+    latest_file = sorted(files, key=lambda f: f.name, reverse=True)[0]
+
+    # Load content for stats?
+    try:
+        with open(latest_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            stats = data.get("stats", {})
+            scan_root = data.get("root", "?")
+    except Exception:
+        stats = {}
+        scan_root = "?"
+
+    scan_id = latest_file.stem # atlas-123456
+
+    return AtlasArtifact(
+        id=scan_id,
+        created_at=datetime.fromtimestamp(latest_file.stat().st_mtime).isoformat(),
+        hub=str(state.hub),
+        root_scanned=scan_root,
+        paths={"json": latest_file.name, "md": latest_file.with_suffix(".md").name},
+        stats=stats
+    )
+
+@app.get("/api/atlas/{id}/download", dependencies=[Depends(verify_token)])
+def download_atlas(id: str, key: str = "md"):
+    # Hard allowlist: atlas ids are generated as "atlas-<unix_ts>"
+    if not re.fullmatch(r"atlas-\d+", (id or "").strip()):
+        raise HTTPException(status_code=400, detail="Invalid atlas id format")
+
+    if key not in ("json", "md"):
+        raise HTTPException(status_code=400, detail="Invalid key. Use 'json' or 'md'.")
+
+    if not state.hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    merges_dir = (state.merges_dir or get_merges_dir(state.hub)).resolve()
+    if not merges_dir.exists():
+        raise HTTPException(status_code=404, detail="Merges directory not found")
+
+    # IMPORTANT: do NOT build a path from user input.
+    # Enumerate allowed files and then select by id.
+    candidates = {}
+    for p in merges_dir.glob(f"atlas-*.{key}"):
+        try:
+            rp = p.resolve()
+            rp.relative_to(merges_dir)  # containment even under symlinks
+        except Exception:
+            continue
+        candidates[p.stem] = rp
+
+    file_path = candidates.get(id)
+    if not file_path:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Final belt-and-suspenders containment check
+    try:
+        file_path.relative_to(merges_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return FileResponse(file_path, filename=file_path.name)
+
+@app.post("/api/export/webmaschine", dependencies=[Depends(verify_token)])
+def export_webmaschine():
+    """
+    Prepares an export directory for 'webmaschine'.
+    """
+    hub = state.hub
+    if not hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    export_root = hub.parent / "exports" / "webmaschine" # Place next to hub or inside?
+    # User said: "Erzeugt Verzeichnis exports/webmaschine/"
+    # Where? Usually relative to where repolens is running or the repo root?
+    # Or inside the Hub? "hub/exports"?
+    # "innerhalb des Repos" context suggests inside the tooling repo?
+    # But repolensd runs on the user's machine on a "Hub".
+    # Let's put it in `merges_dir/../exports/webmaschine` to be near output?
+    # Or just `hub/exports`?
+    # Let's try `hub/exports/webmaschine` if hub is writable.
+
+    target_dir = hub / "exports" / "webmaschine"
+
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "atlas").mkdir(exist_ok=True)
+        (target_dir / "repos").mkdir(exist_ok=True)
+
+        # 1. Copy latest Atlas
+        # Reuse get_latest_atlas logic
+        try:
+            latest = get_latest_atlas()
+            merges_dir = state.merges_dir or get_merges_dir(hub)
+
+            import shutil
+            shutil.copy2(merges_dir / latest.paths["json"], target_dir / "atlas" / "latest.json")
+            shutil.copy2(merges_dir / latest.paths["md"], target_dir / "atlas" / "latest.md")
+        except HTTPException:
+            logger.warning("No atlas found to export")
+
+        # 2. Export Repos Index
+        # We can just dump _find_repos result
+        from .runner import _find_repos
+        repos = _find_repos(hub)
+        with open(target_dir / "repos" / "index.json", "w", encoding="utf-8") as f:
+            json.dump(repos, f, indent=2)
+
+        # 3. README
+        readme_content = """# Webmaschine Export
+
+This directory contains the latest atlas and repository index from RepoLens.
+
+## Update
+Run `POST /api/export/webmaschine` to update these files.
+"""
+        with open(target_dir / "README.md", "w", encoding="utf-8") as f:
+            f.write(readme_content)
+
+        return {"status": "ok", "path": str(target_dir)}
+
+    except Exception as e:
+        logger.exception(f"Export failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
 
 # Serve static UI
 # We assume webui folder is next to this file
