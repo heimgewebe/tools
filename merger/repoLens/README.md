@@ -190,7 +190,6 @@ Der repoLens v2 kennt vier optimierte Profile:
 
 - **iPad/Pythonista:** `repolens.py` (Kanonisch für iOS)
 - **Desktop/Daemon:** `repolensd.py` (Startet die Web-UI)
-- **Kompatibilität:** `repolens_service.py` (Leitet an `repolensd.py` weiter)
 
 ### CLI-Nutzung (iPad/Terminal):
 
