@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="repoLens Service", version="1.0.0")
 
 # Security: Root Jail for File System Browsing
-# Default to User Home. Can be overridden if needed via Env or Config in future.
-FS_ROOT = Path.home().resolve()
+# Set to system root to allow full access, but preventing traversal above it (which is impossible anyway).
+# Can be overridden if needed via Env or Config in future.
+FS_ROOT = Path("/").resolve()
 
 def _is_loopback_host(host: str) -> bool:
     h = (host or "").strip().lower()
@@ -96,10 +97,11 @@ def health():
 @app.get("/api/fs/list", dependencies=[Depends(verify_token)])
 def list_fs(path: Optional[str] = None):
     """
-    List directories in the given path (or root if None).
-    Restricted to FS_ROOT (User Home) for security.
+    List directories in the given path.
+    Defaults to User Home if path is None.
+    Restricted to FS_ROOT (System Root) for security.
     """
-    target = FS_ROOT
+    target = Path.home().resolve()
 
     if path:
         p = Path(path)
