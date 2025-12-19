@@ -11,6 +11,7 @@ const ATLAS_CONFIG_KEY = 'rlens_atlas_config';
 // Picker state
 let currentPickerTarget = null;
 let currentPickerPath = null;
+let currentPickerToken = null; // For token-based navigation
 
 // Available Extras
 const EXTRAS_OPTIONS = [
@@ -289,50 +290,96 @@ function renderExtras() {
 
 async function openPicker(targetId) {
     currentPickerTarget = targetId;
-    const currentVal = document.getElementById(targetId).value;
-
     document.getElementById('pickerModal').classList.remove('hidden');
-    await loadPickerPath(currentVal || '');
+    await loadPickerRoots();
 }
 
 function closePicker() {
     document.getElementById('pickerModal').classList.add('hidden');
     currentPickerTarget = null;
     currentPickerPath = null;
+    currentPickerToken = null;
 }
 
-async function loadPickerPath(path) {
+async function loadPickerRoots() {
+    const list = document.getElementById('pickerList');
+    const pathDisplay = document.getElementById('pickerCurrentPath');
+    pathDisplay.value = "Select Root";
+    list.innerHTML = '<div class="text-gray-500 italic">Loading roots...</div>';
+
+    try {
+        const res = await apiFetch(`${API_BASE}/fs/roots`);
+        if (!res.ok) throw new Error("Fetch roots failed");
+        const data = await res.json();
+
+        list.innerHTML = '';
+        data.roots.forEach(r => {
+            const div = document.createElement('div');
+            div.className = "flex items-center cursor-pointer hover:bg-gray-700 p-1 rounded";
+            div.onclick = () => loadPickerToken(r.token);
+
+            let label = r.id.toUpperCase();
+            let desc = r.path;
+
+            div.innerHTML = `<span class="mr-2">🏠</span> <span class="font-bold text-blue-300 mr-2">${label}</span> <span class="text-gray-500 text-xs truncate">${desc}</span>`;
+            list.appendChild(div);
+        });
+    } catch (e) {
+        list.innerHTML = `<div class="text-red-400">Error: ${e.message}</div>`;
+    }
+}
+
+async function loadPickerToken(token) {
     const list = document.getElementById('pickerList');
     const pathDisplay = document.getElementById('pickerCurrentPath');
     list.innerHTML = '<div class="text-gray-500 italic">Loading...</div>';
 
     try {
-        let url = `${API_BASE}/fs/list`;
-        if (path) url += `?path=${encodeURIComponent(path)}`;
-
+        // Use token navigation
+        const url = `${API_BASE}/fs/list?token=${encodeURIComponent(token)}`;
         const res = await apiFetch(url);
+
+        if (res.status === 403) throw new Error("Access Denied (Path restricted)");
         if (!res.ok) throw new Error("Fetch failed");
 
         const data = await res.json();
 
-        if (data.error) {
-            list.innerHTML = `<div class="text-red-400">Error: ${data.error}</div>`;
-            return;
-        }
+        // Update state
+        currentPickerPath = data.abs;
+        currentPickerToken = token;
+        pathDisplay.value = data.abs;
 
-        currentPickerPath = data.path;
-        pathDisplay.value = data.path;
         list.innerHTML = '';
+
+        // Add "Up" button if parent_token exists
+        if (data.parent_token) {
+            const upDiv = document.createElement('div');
+            upDiv.className = "flex items-center cursor-pointer hover:bg-gray-700 p-1 rounded mb-1 border-b border-gray-700";
+            upDiv.onclick = () => loadPickerToken(data.parent_token);
+            upDiv.innerHTML = `<span class="mr-2">⬆️</span> <span>..</span>`;
+            list.appendChild(upDiv);
+        } else {
+            // "Up" to Roots list
+            const upDiv = document.createElement('div');
+            upDiv.className = "flex items-center cursor-pointer hover:bg-gray-700 p-1 rounded mb-1 border-b border-gray-700";
+            upDiv.onclick = () => loadPickerRoots();
+            upDiv.innerHTML = `<span class="mr-2">🏠</span> <span>Roots</span>`;
+            list.appendChild(upDiv);
+        }
 
         data.entries.forEach(entry => {
             const div = document.createElement('div');
             div.className = "flex items-center cursor-pointer hover:bg-gray-700 p-1 rounded";
-            div.onclick = () => loadPickerPath(entry.path);
 
-            let icon = '📁';
-            if (entry.name === '..') icon = '⬆️';
-
-            div.innerHTML = `<span class="mr-2">${icon}</span> <span>${entry.name}</span>`;
+            if (entry.type === 'dir') {
+                // Directory: Click to navigate
+                div.onclick = () => loadPickerToken(entry.token);
+                div.innerHTML = `<span class="mr-2">📁</span> <span>${entry.name}</span>`;
+            } else {
+                // File: Non-clickable in folder picker mode (or select?)
+                div.className += " text-gray-500 cursor-default";
+                div.innerHTML = `<span class="mr-2">📄</span> <span>${entry.name}</span>`;
+            }
             list.appendChild(div);
         });
 

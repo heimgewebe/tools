@@ -17,7 +17,7 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
 from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
-from .fs_resolver import resolve_fs_path, list_allowed_roots
+from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token
 from .atlas import AtlasScanner, render_atlas_md
 
 try:
@@ -104,13 +104,13 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
 
     dirs: List[str] = []
     files: List[str] = []
-    entries: List[Dict[str, str]] = []
+    entries: List[Dict[str, Any]] = []
 
     try:
         for child in sorted(candidate.iterdir(), key=lambda x: x.name.lower()):
             if child.is_dir():
                 dirs.append(child.name)
-                entries.append({"name": child.name, "type": "dir"})
+                entries.append({"name": child.name, "type": "dir", "token": issue_fs_token(child.resolve())})
             else:
                 files.append(child.name)
                 entries.append({"name": child.name, "type": "file"})
@@ -124,24 +124,39 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
 def api_fs_roots():
     """
     Return a stable list of allowed roots for the picker & agents.
-    The client should prefer (root_id + rel_path) navigation.
+    The client should prefer token navigation.
     """
     roots = list_allowed_roots(state.hub, getattr(state, "merges_dir", None))
-    return {"roots": roots}
+    # Add tokens for each root
+    out = []
+    for r in roots:
+        p = Path(r["path"]).resolve()
+        out.append({**r, "token": issue_fs_token(p)})
+    return {"roots": out}
 
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
 @app.get("/api/fs/list", dependencies=[Depends(verify_token)])
-def api_fs_list(root: str, rel: str = ""):
+def api_fs_list(token: Optional[str] = None, root: Optional[str] = None, rel: Optional[str] = None):
     """
     FS listing endpoint.
-    Required: ?root=<root_id>
-    Optional: &rel=<relative_path>
+    Canonical: ?token=<opaque>
+    Transitional: ?root=<root_id>&rel=   (base only; subpaths require tokens)
     """
     hub = state.hub
     merges_dir = getattr(state, "merges_dir", None)
-    candidate = resolve_fs_path(hub=hub, merges_dir=merges_dir, root_id=root, rel_path=rel)
+    candidate = resolve_fs_path(hub=hub, merges_dir=merges_dir, root_id=root, rel_path=rel, token=token)
     payload = _list_dir(candidate)
-    return {"root": root, "rel": rel, **payload}
+    # Add parent token for upward navigation if possible
+    try:
+        if candidate.parent and candidate.parent != candidate: # Ensure not at system root parent loop
+             # We issue a token for parent. Validation happens on use.
+             # If parent is outside allowed roots, it will be generated but will fail with 403 on use.
+             # Ideally we check validation here to avoid showing a broken "Up" button,
+             # but issue_fs_token is cheap.
+             payload["parent_token"] = issue_fs_token(candidate.parent)
+    except Exception:
+        pass
+    return {"root": root, "rel": rel, "token": token, **payload}
 
 @app.get("/api/health")
 def health():
