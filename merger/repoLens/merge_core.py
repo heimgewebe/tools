@@ -378,6 +378,8 @@ class RepoHealth:
     unknown_tags: List[str]
     warnings: List[str]
     recommendations: List[str]
+    meta_sync_status: str = "unknown"  # "ok"|"warn"|"unknown"
+    meta_sync: Optional[Dict[str, Any]] = None
 
 
 class HealthCollector:
@@ -402,6 +404,49 @@ class HealthCollector:
                     candidates.append((depth, rp, Path(ap)))
         candidates.sort(key=lambda t: (t[0], t[1]))
         return [p for _, __, p in candidates]
+
+    def _read_sync_report(self, repo_root: Optional[Path]) -> Optional[Dict[str, Any]]:
+        """Reads .gewebe/out/sync.report.json if available."""
+        if not repo_root:
+            return None
+        try:
+            p = repo_root / ".gewebe/out/sync.report.json"
+            if p.exists():
+                return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return None
+
+    def _eval_sync_status(self, report: Optional[Dict[str, Any]]) -> str:
+        """Evaluates meta sync status: ok|warn|unknown."""
+        if not report:
+            return "unknown"
+
+        # Safe access to fields
+        summary = report.get("summary", {})
+        mode = report.get("mode", "unknown")
+
+        err_count = summary.get("error", 0)
+        blocked_count = summary.get("blocked", 0)
+        add_count = summary.get("add", 0)
+        update_count = summary.get("update", 0)
+
+        if err_count > 0:
+            return "warn"
+
+        if mode == "dry_run":
+             # Pending changes in dry_run are a warning (not synced yet)
+             if add_count > 0 or update_count > 0 or blocked_count > 0:
+                 return "warn"
+             return "ok" # Clean dry run means sync is up to date
+
+        if mode == "apply":
+            if blocked_count > 0:
+                return "warn"
+            # If applied successfully (error=0, blocked=0), status is ok.
+            return "ok"
+
+        return "unknown"
 
     def _read_wgx_profile_expected(self, files: List["FileInfo"]) -> Optional[bool]:
         """
@@ -431,6 +476,24 @@ class HealthCollector:
 
     def analyze_repo(self, root_label: str, files: List["FileInfo"]) -> RepoHealth:
         """Analyze health of a single repository."""
+        # Try to determine repo root from first file's absolute path
+        repo_root: Optional[Path] = None
+        if files:
+            # files[0].abs_path is /path/to/repo/file
+            # files[0].rel_path is file
+            # repo_root is abs_path - rel_path parts
+            try:
+                # Naive reconstruction: take abs path of first file, walk up by len(rel_path.parts)
+                # This works if abs_path is populated.
+                f0 = files[0]
+                if f0.abs_path:
+                    # e.g. /a/b/c/d/file.txt, rel=d/file.txt -> parts=(d, file.txt) -> count=2. parent*2 -> /a/b/c
+                    # Wait, pathlib .parents is 0-indexed.
+                    # .parents[len(rel_path.parts)-1] should be the root.
+                    repo_root = f0.abs_path.parents[len(f0.rel_path.parts)-1]
+            except Exception:
+                pass
+
         # Count files per category
         category_counts: Dict[str, int] = {}
         for fi in files:
@@ -533,6 +596,14 @@ class HealthCollector:
         if unknown_tags:
             warnings.append(f"Unknown tags: {', '.join(unknown_tags)}")
 
+        # Meta Sync Check
+        meta_sync = self._read_sync_report(repo_root)
+        meta_sync_status = self._eval_sync_status(meta_sync)
+
+        if meta_sync_status == "warn":
+             warnings.append("Meta Sync Issues (see details)")
+             # We assume recommendation is handled by sync tool report
+
         # Determine overall status
         if len(warnings) >= 4:
             status = "critical"
@@ -557,6 +628,8 @@ class HealthCollector:
             unknown_tags=unknown_tags,
             warnings=warnings,
             recommendations=recommendations,
+            meta_sync_status=meta_sync_status,
+            meta_sync=meta_sync,
         )
 
         # Optional enrichment (keeps compatibility if RepoHealth doesn't define it)
@@ -635,6 +708,16 @@ class HealthCollector:
             indicators.append(f"Contracts: {'yes' if health.has_contracts else 'no'}")
             indicators.append(f"AI Context: {'yes' if health.has_ai_context else 'no'}")
             lines.append(f"- **Indicators:** {', '.join(indicators)}")
+
+            # Meta Sync
+            if health.meta_sync:
+                ms = health.meta_sync
+                summ = ms.get("summary", {})
+                mode = ms.get("mode", "?")
+                sync_detail = f"mode={mode} add={summ.get('add',0)} upd={summ.get('update',0)} blk={summ.get('blocked',0)} err={summ.get('error',0)}"
+                lines.append(f"- **Meta Sync:** {health.meta_sync_status} ({sync_detail})")
+            else:
+                 lines.append(f"- **Meta Sync:** unknown")
 
             # Feindynamik-Scanner (Risiken)
             risks = []

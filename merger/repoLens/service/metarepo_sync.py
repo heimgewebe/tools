@@ -1,0 +1,277 @@
+# -*- coding: utf-8 -*-
+
+"""
+metarepo_sync.py – Synchronization engine for metarepo-managed files.
+Implements strict manifest-based sync with managed markers.
+"""
+
+import os
+import sys
+import json
+import hashlib
+import datetime
+import shutil
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Tuple
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+
+SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
+MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
+MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
+
+
+def compute_file_hash(path: Path) -> str:
+    """Compute SHA256 hash of a file."""
+    if not path.exists():
+        return ""
+    sha256 = hashlib.sha256()
+    try:
+        with path.open("rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    except OSError:
+        return "ERROR"
+
+
+def has_managed_marker(path: Path, marker: str) -> bool:
+    """
+    Check if the first 5 lines of the file contain the managed marker.
+    """
+    if not path.exists() or not path.is_file():
+        return False
+
+    try:
+        # Read only the beginning of the file
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            for _ in range(5):
+                line = f.readline()
+                if not line:
+                    break
+                if marker in line:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def safe_join(root: Path, relpath: str) -> Optional[Path]:
+    """
+    Safely join root and relpath, ensuring the result is within root.
+    Returns None if path traversal detected.
+    """
+    try:
+        # Normalize inputs
+        root = root.resolve()
+        path = (root / relpath).resolve()
+
+        # Check containment
+        path.relative_to(root)
+        return path
+    except (ValueError, RuntimeError, OSError):
+        return None
+
+
+def load_manifest(metarepo_path: Path) -> Optional[Dict[str, Any]]:
+    """Load the sync manifest from metarepo."""
+    if yaml is None:
+        return None
+
+    manifest_file = metarepo_path / MANIFEST_REL_PATH
+    if not manifest_file.exists():
+        return None
+
+    try:
+        with manifest_file.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return None
+
+
+def _should_process_entry(entry: Dict[str, Any], targets: Optional[List[str]]) -> bool:
+    """Filter entries based on target list (id prefix match)."""
+    if not targets:
+        return True
+
+    eid = entry.get("id", "")
+    for t in targets:
+        if eid.startswith(t):
+            return True
+    return False
+
+
+def sync_repo(
+    repo_root: Path,
+    metarepo_root: Path,
+    manifest: Dict[str, Any],
+    mode: str,
+    target_filter: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Sync a single repository against the manifest.
+    """
+
+    repo_name = repo_root.name
+    managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
+
+    report = {
+        "version": 1,
+        "source": "metarepo",
+        "mode": mode,
+        "generated_at": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "metarepo_path": str(metarepo_root),
+        "manifest_path": str(metarepo_root / MANIFEST_REL_PATH),
+        "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0},
+        "details": []
+    }
+
+    entries = manifest.get("entries", [])
+
+    for entry in entries:
+        if not _should_process_entry(entry, target_filter):
+            continue
+
+        entry_id = entry.get("id", "unknown")
+        src_rel = entry.get("source")
+        target_rels = entry.get("targets", [])
+        sync_mode = entry.get("mode", "copy")  # copy, copy_if_missing
+
+        src_path = safe_join(metarepo_root, src_rel)
+        if not src_path or not src_path.exists():
+            report["details"].append({
+                "id": entry_id,
+                "status": "error",
+                "message": f"Source not found: {src_rel}"
+            })
+            report["summary"]["error"] += 1
+            continue
+
+        src_hash = compute_file_hash(src_path)
+
+        for tgt_rel in target_rels:
+            tgt_path = safe_join(repo_root, tgt_rel)
+            if not tgt_path:
+                report["details"].append({
+                    "id": entry_id,
+                    "target": tgt_rel,
+                    "status": "error",
+                    "message": "Invalid target path (traversal)"
+                })
+                report["summary"]["error"] += 1
+                continue
+
+            # Determine Action
+            action = "skip"
+            reason = ""
+
+            if not tgt_path.exists():
+                action = "add"
+            else:
+                # File exists
+                tgt_hash = compute_file_hash(tgt_path)
+                if tgt_hash == src_hash:
+                    action = "skip"
+                    reason = "identical"
+                else:
+                    if sync_mode == "copy_if_missing":
+                        action = "skip"
+                        reason = "exists_preserve"
+                    elif sync_mode == "copy":
+                        # Check marker
+                        if has_managed_marker(tgt_path, managed_marker):
+                            action = "update"
+                        else:
+                            action = "blocked"
+                            reason = "missing_marker"
+                    else:
+                        action = "skip"
+                        reason = f"unknown_mode_{sync_mode}"
+
+            # Execute (if apply)
+            if mode == "apply" and action in ("add", "update"):
+                try:
+                    tgt_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, tgt_path)
+                except Exception as e:
+                    action = "error"
+                    reason = str(e)
+
+            # Update stats
+            report["summary"][action] += 1
+
+            report["details"].append({
+                "id": entry_id,
+                "target": tgt_rel,
+                "action": action,
+                "reason": reason
+            })
+
+    # Write report to repo
+    if mode in ("dry_run", "apply"):
+        try:
+            out_file = repo_root / SYNC_REPORT_REL_PATH
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            with out_file.open("w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2)
+        except Exception:
+            # Failed to write report - log but don't crash main flow?
+            # We can mark it in the return dict
+            pass
+
+    return report
+
+
+def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Orchestrate the sync from metarepo to all other repos in the hub.
+    Returns an aggregated report.
+    """
+    if not hub_path or not hub_path.exists():
+        return {"error": "Invalid hub path"}
+
+    metarepo_root = hub_path / "metarepo"
+    if not metarepo_root.exists():
+        return {"error": "metarepo not found in hub"}
+
+    manifest = load_manifest(metarepo_root)
+    if not manifest:
+        return {"error": "Manifest not found or invalid (sync/metarepo-sync.yml)"}
+
+    results = {}
+    aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
+
+    # Iterate over repos in hub
+    for item in hub_path.iterdir():
+        if not item.is_dir():
+            continue
+        if item.name.startswith("."):
+            continue
+        if item.name == "metarepo":
+            continue
+
+        # Check if it looks like a repo (has .git or .ai-context or similar)?
+        # For now, treat every directory as a potential repo.
+
+        repo_report = sync_repo(item, metarepo_root, manifest, mode, targets)
+        results[item.name] = repo_report
+
+        # Aggregate
+        for k in aggregated_summary:
+            aggregated_summary[k] += repo_report["summary"].get(k, 0)
+
+    return {
+        "status": "ok",
+        "mode": mode,
+        "manifest_version": manifest.get("version"),
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "aggregate_summary": aggregated_summary,
+        "repos": results
+    }

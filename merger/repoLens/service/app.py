@@ -19,6 +19,7 @@ from .runner import JobRunner
 from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
 from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from .atlas import AtlasScanner, render_atlas_md
+from .metarepo_sync import sync_from_metarepo
 
 try:
     from merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
@@ -433,6 +434,26 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
         paths={"json": json_filename, "md": md_filename},
         stats={} # Empty initially
     )
+
+@app.post("/api/sync/metarepo", dependencies=[Depends(verify_token)])
+def api_sync_metarepo(payload: Dict[str, Any]):
+    """
+    Trigger a metarepo synchronization (Manifest -> Fleet).
+    Payload: { "mode": "dry_run"|"apply", "targets": ["wgx", "ci", ...] }
+    """
+    mode = payload.get("mode", "dry_run")
+    targets = payload.get("targets")
+
+    hub_path = state.hub
+    if not hub_path:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    try:
+        report = sync_from_metarepo(hub_path=hub_path, mode=mode, targets=targets)
+        return report
+    except Exception as e:
+        logger.exception(f"Sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/atlas/latest", dependencies=[Depends(verify_token)])
 def get_latest_atlas():
