@@ -13,13 +13,6 @@ def resolve_fs_path(raw: str, hub: Optional[Path], merges_dir: Optional[Path]) -
     if "\x00" in raw:
         raise HTTPException(status_code=400, detail="Invalid path request")
 
-    # Add Hub and Merges Dir if available
-    roots: List[Path] = []
-    if hub:
-        roots.append(hub.resolve())
-    if merges_dir:
-        roots.append(merges_dir.resolve())
-
     # Add SecurityConfig allowed roots (which might include system root /)
     sec_config = get_security_config()
 

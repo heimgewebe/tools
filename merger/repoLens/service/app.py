@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+import os
 import asyncio
 import json
 import time
@@ -64,8 +65,15 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     sec.set_token(token)
     # Allowlist the Hub
     sec.add_allowlist_root(hub_path)
-    # Allow System Root (User requirement: folder picker starts at root)
-    sec.add_allowlist_root(Path("/"))
+    # Allowlist Merges Dir if separate
+    if merges_dir:
+        sec.add_allowlist_root(merges_dir)
+
+    # DANGEROUS CAPABILITY:
+    # Allows rLens to browse the entire filesystem ("/") via API.
+    # Must be explicitly enabled.
+    if os.getenv("RLENS_ALLOW_FS_ROOT", "0") == "1":
+        sec.add_allowlist_root(Path("/"))
 
     # Apply CORS based on host
     # Prevent middleware duplication (if init called multiple times in tests)
