@@ -1,67 +1,72 @@
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import HTTPException
 from .security import get_security_config
 
-def resolve_fs_path(raw: str, hub: Optional[Path], merges_dir: Optional[Path]) -> Path:
+def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[Dict[str, Any]]:
+    sec = get_security_config()
+    roots: List[Dict[str, Any]] = []
+    # stable ids for clients/agents
+    if hub:
+        roots.append({"id": "hub", "path": str(hub.resolve())})
+    if merges_dir:
+        # Avoid duplicate if merges_dir is same as hub or inside?
+        # For simplicity, just list it. Client can handle UI.
+        roots.append({"id": "merges", "path": str(merges_dir.resolve())})
+    # system root only if explicitly allowlisted
+    try:
+        sec.validate_path(Path("/"))
+        roots.append({"id": "system", "path": "/"})
+    except HTTPException:
+        pass
+    return roots
+
+def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: str, rel_path: str) -> Path:
     """
-    Resolve `raw` to an absolute path and ensure it stays within allowed roots.
-    Allowed roots: hub (if set), merges_dir (if set), and any roots in SecurityConfig.
-    If `raw` is relative and hub exists, it is resolved relative to hub for backward compatibility.
+    Resolve a filesystem request into an allowed absolute Path.
+    Strictly uses (root_id + rel_path) to keep the security model explicit and scanner-friendly.
     """
-    raw = (raw or "").strip()
-    if "\x00" in raw:
+    sec = get_security_config()
+
+    if not root_id:
+        raise HTTPException(status_code=400, detail="Missing root_id")
+
+    # map root_id -> base path
+    root_map: Dict[str, Optional[Path]] = {
+        "hub": hub,
+        "merges": merges_dir,
+        "system": Path("/"),
+    }
+
+    base = root_map.get(root_id)
+    if base is None:
+        raise HTTPException(status_code=400, detail="Unknown root id")
+
+    # ensure base itself is allowed (system only if allowlisted via env-gated init_service)
+    # validate_path will raise 403 if not allowed
+    base_resolved = sec.validate_path(base.resolve())
+
+    rel = (rel_path or "").strip()
+    if "\x00" in rel:
         raise HTTPException(status_code=400, detail="Invalid path request")
 
-    # Add SecurityConfig allowed roots (which might include system root /)
-    sec_config = get_security_config()
+    # Root request for this base
+    if rel in ("", ".", "/"):
+        return base_resolved
 
-    if raw in ("", "/"):
-        # Special case: root request
-        # If "/" is allowed (system root allowed), return "/"
-        system_root = Path("/").resolve()
-        try:
-            sec_config.validate_path(system_root)
-            return system_root
-        except HTTPException:
-            pass # / not allowed
+    # Strict relative path only
+    rel_p = Path(rel)
+    if rel_p.is_absolute() or ".." in rel_p.parts:
+        raise HTTPException(status_code=400, detail="Invalid path request (traversal or absolute)")
 
-        # Fallback logic: prefer Hub
-        if hub: return hub.resolve()
+    # Bind under base and containment-check after normalization
+    combined = (base_resolved / rel_p)
+    resolved_path = combined.resolve()
 
-        # Fallback to first allowed root if available
-        if sec_config.allowlist_roots:
-            return sec_config.allowlist_roots[0]
+    try:
+        resolved_path.relative_to(base_resolved)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path escapes allowed root")
 
-        raise HTTPException(status_code=400, detail="No allowed roots configured")
-
-    p = Path(raw)
-
-    # Helper: resolve safely by binding to a known root
-    def _bind_under_root(root: Path, rel: Path) -> Path:
-        if rel.is_absolute() or ".." in rel.parts:
-            raise HTTPException(status_code=400, detail="Invalid path request")
-
-        combined = root / rel
-        resolved_root = root.resolve()
-        resolved_path = combined.resolve()
-
-        try:
-            resolved_path.relative_to(resolved_root)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Path escapes allowed root")
-
-        return resolved_path
-
-    # Absolute path: delegate validation to SecurityConfig
-    if p.is_absolute():
-        return sec_config.validate_path(p)
-    else:
-        # Relative: resolve within hub (legacy default) or fail if no Hub
-        if hub:
-            candidate = _bind_under_root(hub.resolve(), p)
-            # Final check: ensure the resolved path is actually allowed
-            # (e.g., if hub itself is not in allowed roots, which shouldn't happen but good for safety)
-            return sec_config.validate_path(candidate)
-        else:
-            raise HTTPException(status_code=400, detail="Relative path requires Hub configuration")
+    # Final policy validation (allowlist roots, symlink policy, etc.)
+    return sec.validate_path(resolved_path)

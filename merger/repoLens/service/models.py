@@ -19,7 +19,8 @@ class JobRequest(BaseModel):
     json_sidecar: bool = True  # Default true for service
 
 class AtlasRequest(BaseModel):
-    root: Optional[str] = None  # Relative to Hub. Default: Hub root.
+    root: Optional[str] = None  # Legacy root id or path? Deprecated in favor of root_id + rel_path if needed.
+    # Currently app.py uses root as root_id.
     max_depth: int = 6
     max_entries: int = 200000
     exclude_globs: Optional[List[str]] = None

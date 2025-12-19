@@ -17,7 +17,7 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
 from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
-from .fs_resolver import resolve_fs_path
+from .fs_resolver import resolve_fs_path, list_allowed_roots
 from .atlas import AtlasScanner, render_atlas_md
 
 try:
@@ -120,14 +120,28 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
 
     return {"abs": str(candidate), "dirs": dirs, "files": files, "entries": entries}
 
+@app.get("/api/fs/roots", dependencies=[Depends(verify_token)])
+def api_fs_roots():
+    """
+    Return a stable list of allowed roots for the picker & agents.
+    The client should prefer (root_id + rel_path) navigation.
+    """
+    roots = list_allowed_roots(state.hub, getattr(state, "merges_dir", None))
+    return {"roots": roots}
+
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
 @app.get("/api/fs/list", dependencies=[Depends(verify_token)])
-def api_fs_list(path: str = "/"):
+def api_fs_list(root: str, rel: str = ""):
+    """
+    FS listing endpoint.
+    Required: ?root=<root_id>
+    Optional: &rel=<relative_path>
+    """
     hub = state.hub
     merges_dir = getattr(state, "merges_dir", None)
-    candidate = resolve_fs_path(path, hub=hub, merges_dir=merges_dir)
+    candidate = resolve_fs_path(hub=hub, merges_dir=merges_dir, root_id=root, rel_path=rel)
     payload = _list_dir(candidate)
-    return {"path": path, **payload}
+    return {"root": root, "rel": rel, **payload}
 
 @app.get("/api/health")
 def health():
@@ -324,8 +338,12 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     # Resolve scan root
     try:
-        # Use FS Resolver to allow arbitrary paths if allowed by security
-        scan_root = resolve_fs_path(request.root, hub=hub, merges_dir=state.merges_dir)
+        # Default to "hub" if root is not provided
+        root_id = request.root or "hub"
+        # Since AtlasRequest only has 'root', we use it as root_id and scan the entire root.
+        # If granular scanning is needed, AtlasRequest needs updating.
+        # For now, this preserves default behavior (scan hub) and allows scanning system root if passed as "system".
+        scan_root = resolve_fs_path(hub=hub, merges_dir=state.merges_dir, root_id=root_id, rel_path="")
     except HTTPException as e:
          raise e
 
