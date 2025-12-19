@@ -16,6 +16,7 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
 from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
+from .fs_resolver import resolve_fs_path
 from .atlas import AtlasScanner, render_atlas_md
 
 try:
@@ -63,7 +64,8 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     sec.set_token(token)
     # Allowlist the Hub
     sec.add_allowlist_root(hub_path)
-    # Also allow current dir if different? No, start with Hub.
+    # Allow System Root (User requirement: folder picker starts at root)
+    sec.add_allowlist_root(Path("/"))
 
     # Apply CORS based on host
     # Prevent middleware duplication (if init called multiple times in tests)
@@ -85,66 +87,6 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_methods=["GET", "POST"],
             allow_headers=["Authorization", "Content-Type", "x-rlens-token"],
         )
-
-def _resolve_in_allowed_roots(raw: str, hub: Optional[Path], merges_dir: Optional[Path]) -> Path:
-    """
-    Resolve `raw` to an absolute path and ensure it stays within allowed roots.
-    Allowed roots: hub (if set) and merges_dir (if set).
-    If `raw` is relative and hub exists, it is resolved relative to hub for backward compatibility.
-    """
-    raw = (raw or "").strip()
-    if "\x00" in raw:
-        raise HTTPException(status_code=400, detail="Invalid path request")
-
-    if raw in ("", "/"):
-        # default: hub root if available, else merges_dir, else error
-        if hub:
-            return hub.resolve()
-        if merges_dir:
-            return merges_dir.resolve()
-        raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
-
-    hub_r = hub.resolve() if hub else None
-    merges_r = merges_dir.resolve() if merges_dir else None
-    roots = [p for p in [hub_r, merges_r] if p is not None]
-    if not roots:
-        raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
-
-    p = Path(raw)
-
-    # Helper: resolve safely by binding to a known root
-    def _bind_under_root(root: Path, rel: Path) -> Path:
-        # reject traversal in rel explicitly
-        if rel.is_absolute() or ".." in rel.parts:
-            raise HTTPException(status_code=400, detail="Invalid path request")
-        return (root / rel).resolve()
-
-    # Absolute path: accept ONLY if it is already under one of the allowed roots.
-    # We convert it into a relative path to that root, then re-bind (root/rel).
-    if p.is_absolute():
-        for r in roots:
-            try:
-                rel = p.relative_to(r)
-                candidate = _bind_under_root(r, rel)
-                break
-            except ValueError:
-                continue
-        else:
-            raise HTTPException(status_code=403, detail="Path escapes allowed roots")
-    else:
-        # Relative: resolve within hub (legacy)
-        if hub_r is None:
-            raise HTTPException(status_code=400, detail="Relative path requires hub")
-        candidate = _bind_under_root(hub_r, p)
-
-    # jail check: must be within at least one allowed root
-    def _inside(root: Path, cand: Path) -> bool:
-        return cand == root or root in cand.parents
-
-    if not any(_inside(r, candidate) for r in roots):
-        raise HTTPException(status_code=403, detail="Path escapes allowed roots")
-
-    return candidate
 
 def _list_dir(candidate: Path) -> Dict[str, Any]:
     if not candidate.exists():
@@ -175,7 +117,7 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
 def api_fs_list(path: str = "/"):
     hub = state.hub
     merges_dir = getattr(state, "merges_dir", None)
-    candidate = _resolve_in_allowed_roots(path, hub=hub, merges_dir=merges_dir)
+    candidate = resolve_fs_path(path, hub=hub, merges_dir=merges_dir)
     payload = _list_dir(candidate)
     return {"path": path, **payload}
 
@@ -374,7 +316,8 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     # Resolve scan root
     try:
-        scan_root = resolve_relative_path(hub, request.root)
+        # Use FS Resolver to allow arbitrary paths if allowed by security
+        scan_root = resolve_fs_path(request.root, hub=hub, merges_dir=state.merges_dir)
     except HTTPException as e:
          raise e
 
