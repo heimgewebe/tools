@@ -102,11 +102,17 @@ def resolve_relative_path(root: Path, requested: Optional[str]) -> Path:
     if not requested or requested.strip() == "":
         return root.resolve()
 
-    # Block absolute paths explicitly (user requirement)
-    if Path(requested).is_absolute():
-        raise HTTPException(status_code=403, detail="Absolute paths are not allowed. Please use path relative to root.")
-
     try:
+        req_path = Path(requested)
+        # Block absolute paths explicitly? NO, user requirement changed.
+        # But we must validate if it is allowed.
+        if req_path.is_absolute():
+            # Check against allowlist
+            # Note: This changes the semantics of "relative path".
+            # But the primary use case (Atlas) passes "root" as hub, but user might want outside hub.
+            # We defer to SecurityConfig.
+            return get_security_config().validate_path(req_path)
+
         # Resolve and ensure it is inside root
         candidate = (root / requested).resolve()
         candidate.relative_to(root.resolve())

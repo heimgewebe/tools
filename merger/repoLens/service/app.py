@@ -4,6 +4,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+import os
 import asyncio
 import json
 import time
@@ -16,6 +17,7 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
 from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
+from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from .atlas import AtlasScanner, render_atlas_md
 
 try:
@@ -63,7 +65,15 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     sec.set_token(token)
     # Allowlist the Hub
     sec.add_allowlist_root(hub_path)
-    # Also allow current dir if different? No, start with Hub.
+    # Allowlist Merges Dir if separate
+    if merges_dir:
+        sec.add_allowlist_root(merges_dir)
+
+    # DANGEROUS CAPABILITY:
+    # Allows rLens to browse the entire filesystem ("/") via API.
+    # Must be explicitly enabled.
+    if os.getenv("RLENS_ALLOW_FS_ROOT", "0") == "1":
+        sec.add_allowlist_root(Path("/"))
 
     # Apply CORS based on host
     # Prevent middleware duplication (if init called multiple times in tests)
@@ -86,98 +96,71 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_headers=["Authorization", "Content-Type", "x-rlens-token"],
         )
 
-def _resolve_in_allowed_roots(raw: str, hub: Optional[Path], merges_dir: Optional[Path]) -> Path:
-    """
-    Resolve `raw` to an absolute path and ensure it stays within allowed roots.
-    Allowed roots: hub (if set) and merges_dir (if set).
-    If `raw` is relative and hub exists, it is resolved relative to hub for backward compatibility.
-    """
-    raw = (raw or "").strip()
-    if "\x00" in raw:
-        raise HTTPException(status_code=400, detail="Invalid path request")
-
-    if raw in ("", "/"):
-        # default: hub root if available, else merges_dir, else error
-        if hub:
-            return hub.resolve()
-        if merges_dir:
-            return merges_dir.resolve()
-        raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
-
-    hub_r = hub.resolve() if hub else None
-    merges_r = merges_dir.resolve() if merges_dir else None
-    roots = [p for p in [hub_r, merges_r] if p is not None]
-    if not roots:
-        raise HTTPException(status_code=400, detail="No roots configured (hub/merges)")
-
-    p = Path(raw)
-
-    # Helper: resolve safely by binding to a known root
-    def _bind_under_root(root: Path, rel: Path) -> Path:
-        # reject traversal in rel explicitly
-        if rel.is_absolute() or ".." in rel.parts:
-            raise HTTPException(status_code=400, detail="Invalid path request")
-        return (root / rel).resolve()
-
-    # Absolute path: accept ONLY if it is already under one of the allowed roots.
-    # We convert it into a relative path to that root, then re-bind (root/rel).
-    if p.is_absolute():
-        for r in roots:
-            try:
-                rel = p.relative_to(r)
-                candidate = _bind_under_root(r, rel)
-                break
-            except ValueError:
-                continue
-        else:
-            raise HTTPException(status_code=403, detail="Path escapes allowed roots")
-    else:
-        # Relative: resolve within hub (legacy)
-        if hub_r is None:
-            raise HTTPException(status_code=400, detail="Relative path requires hub")
-        candidate = _bind_under_root(hub_r, p)
-
-    # jail check: must be within at least one allowed root
-    def _inside(root: Path, cand: Path) -> bool:
-        return cand == root or root in cand.parents
-
-    if not any(_inside(r, candidate) for r in roots):
-        raise HTTPException(status_code=403, detail="Path escapes allowed roots")
-
-    return candidate
-
 def _list_dir(candidate: Path) -> Dict[str, Any]:
-    if not candidate.exists():
+    # Defense-in-depth: always re-validate before touching the filesystem.
+    sec = get_security_config()
+    resolved = sec.validate_path(candidate)
+
+    if not resolved.exists():
         raise HTTPException(status_code=404, detail="Path not found")
-    if not candidate.is_dir():
+    if not resolved.is_dir():
         raise HTTPException(status_code=400, detail="Not a directory")
 
     dirs: List[str] = []
     files: List[str] = []
-    entries: List[Dict[str, str]] = []
+    entries: List[Dict[str, Any]] = []
 
     try:
-        for child in sorted(candidate.iterdir(), key=lambda x: x.name.lower()):
+        for child in sorted(resolved.iterdir(), key=lambda x: x.name.lower()):
             if child.is_dir():
                 dirs.append(child.name)
-                entries.append({"name": child.name, "type": "dir"})
+                entries.append({"name": child.name, "type": "dir", "token": issue_fs_token(child.resolve())})
             else:
                 files.append(child.name)
                 entries.append({"name": child.name, "type": "file"})
     except OSError as e:
-        logger.error(f"Error listing {candidate}: {e}")
+        logger.error(f"Error listing {resolved}: {e}")
         raise HTTPException(status_code=500, detail="Error listing directory")
 
-    return {"abs": str(candidate), "dirs": dirs, "files": files, "entries": entries}
+    return {"abs": str(resolved), "dirs": dirs, "files": files, "entries": entries}
+
+@app.get("/api/fs/roots", dependencies=[Depends(verify_token)])
+def api_fs_roots():
+    """
+    Return a stable list of allowed roots for the picker & agents.
+    The client should prefer token navigation.
+    """
+    roots = list_allowed_roots(state.hub, getattr(state, "merges_dir", None))
+    # Add tokens for each root
+    out = []
+    for r in roots:
+        p = Path(r["path"]).resolve()
+        out.append({**r, "token": issue_fs_token(p)})
+    return {"roots": out}
 
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
 @app.get("/api/fs/list", dependencies=[Depends(verify_token)])
-def api_fs_list(path: str = "/"):
+def api_fs_list(token: Optional[str] = None, root: Optional[str] = None, rel: Optional[str] = None):
+    """
+    FS listing endpoint.
+    Canonical: ?token=<opaque>
+    Transitional: ?root=<root_id>&rel=   (base only; subpaths require tokens)
+    """
     hub = state.hub
     merges_dir = getattr(state, "merges_dir", None)
-    candidate = _resolve_in_allowed_roots(path, hub=hub, merges_dir=merges_dir)
-    payload = _list_dir(candidate)
-    return {"path": path, **payload}
+    trusted = resolve_fs_path(hub=hub, merges_dir=merges_dir, root_id=root, rel_path=rel, token=token)
+    payload = _list_dir(trusted.path)
+    # Add parent token for upward navigation if possible
+    try:
+        # Only offer parent if parent itself is allowed (avoid broken Up + reduce taint)
+        sec = get_security_config()
+        p = trusted.path
+        if p.parent and p.parent != p:
+            parent_resolved = sec.validate_path(p.parent)
+            payload["parent_token"] = issue_fs_token(parent_resolved)
+    except Exception:
+        pass
+    return {"root": root, "rel": rel, "token": token, **payload}
 
 @app.get("/api/health")
 def health():
@@ -374,7 +357,29 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     # Resolve scan root
     try:
-        scan_root = resolve_relative_path(hub, request.root)
+        # Canonical: token-based root selection (no user path expressions)
+        if request.root_token:
+            trusted = resolve_fs_path(
+                hub=hub,
+                merges_dir=state.merges_dir,
+                token=request.root_token,
+            )
+            scan_root = trusted.path
+        else:
+            # Transitional: root_id only (known ids)
+            root_id = request.root_id or "hub"
+            if root_id not in ("hub", "merges", "system"):
+                # Strict rejection of raw paths for Atlas to satisfy CodeQL
+                raise HTTPException(status_code=400, detail="Invalid Atlas root_id or missing token")
+
+            trusted = resolve_fs_path(
+                hub=hub,
+                merges_dir=state.merges_dir,
+                root_id=root_id,
+                rel_path="",
+            )
+            scan_root = trusted.path
+
     except HTTPException as e:
          raise e
 
