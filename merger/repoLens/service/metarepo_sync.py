@@ -11,18 +11,19 @@ import json
 import hashlib
 import datetime
 import shutil
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
+# YAML is mandatory for this service feature
+import yaml
 
 
 SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
 MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
 MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
+
+logger = logging.getLogger(__name__)
 
 
 def compute_file_hash(path: Path) -> str:
@@ -67,24 +68,49 @@ def safe_join(root: Path, relpath: str) -> Optional[Path]:
     """
     Safely join root and relpath, ensuring the result is within root.
     Returns None if path traversal detected.
-    """
-    try:
-        # Normalize inputs
-        root = root.resolve()
-        path = (root / relpath).resolve()
 
-        # Check containment
-        path.relative_to(root)
-        return path
+    Strict rules:
+    - No absolute paths
+    - No null bytes
+    - No '..' segments
+    - Must verify containment after resolve
+    """
+    if not isinstance(relpath, str):
+        return None
+
+    # 1. explicit check for absolute path or null byte
+    if os.path.isabs(relpath) or "\0" in relpath:
+        return None
+
+    # 2. Check for ".." in parts (naive string check first for speed/safety)
+    # We assume POSIX style paths in manifest (slash separated)
+    if ".." in relpath.split("/"):
+        return None
+
+    try:
+        # Resolve root to have a canonical base
+        root = root.resolve()
+
+        # Join
+        candidate = root / relpath
+
+        # Resolve candidate
+        resolved = candidate.resolve()
+
+        # Final containment check
+        # Python < 3.9 compat: use relative_to inside try/except
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            return None
+
+        return resolved
     except (ValueError, RuntimeError, OSError):
         return None
 
 
 def load_manifest(metarepo_path: Path) -> Optional[Dict[str, Any]]:
     """Load the sync manifest from metarepo."""
-    if yaml is None:
-        return None
-
     manifest_file = metarepo_path / MANIFEST_REL_PATH
     if not manifest_file.exists():
         return None
@@ -144,12 +170,14 @@ def sync_repo(
         target_rels = entry.get("targets", [])
         sync_mode = entry.get("mode", "copy")  # copy, copy_if_missing
 
+        # Source must be safe and exist
         src_path = safe_join(metarepo_root, src_rel)
         if not src_path or not src_path.exists():
             report["details"].append({
                 "id": entry_id,
-                "status": "error",
-                "message": f"Source not found: {src_rel}"
+                "target": src_rel, # somewhat ambiguous but helps debug
+                "action": "ERROR",
+                "reason": f"Source not found: {src_rel}"
             })
             report["summary"]["error"] += 1
             continue
@@ -162,50 +190,66 @@ def sync_repo(
                 report["details"].append({
                     "id": entry_id,
                     "target": tgt_rel,
-                    "status": "error",
-                    "message": "Invalid target path (traversal)"
+                    "action": "ERROR",
+                    "reason": "Invalid target path (traversal)"
                 })
                 report["summary"]["error"] += 1
                 continue
 
             # Determine Action
-            action = "skip"
+            action = "SKIP"
             reason = ""
 
             if not tgt_path.exists():
-                action = "add"
+                action = "ADD"
             else:
                 # File exists
                 tgt_hash = compute_file_hash(tgt_path)
                 if tgt_hash == src_hash:
-                    action = "skip"
+                    action = "SKIP"
                     reason = "identical"
                 else:
                     if sync_mode == "copy_if_missing":
-                        action = "skip"
+                        action = "SKIP"
                         reason = "exists_preserve"
                     elif sync_mode == "copy":
                         # Check marker
                         if has_managed_marker(tgt_path, managed_marker):
-                            action = "update"
+                            action = "UPDATE"
                         else:
-                            action = "blocked"
+                            action = "BLOCKED"
                             reason = "missing_marker"
                     else:
-                        action = "skip"
+                        action = "SKIP"
                         reason = f"unknown_mode_{sync_mode}"
 
             # Execute (if apply)
-            if mode == "apply" and action in ("add", "update"):
+            if mode == "apply" and action in ("ADD", "UPDATE"):
                 try:
+                    # Backup logic for UPDATE
+                    if action == "UPDATE":
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                        backup_path = tgt_path.with_suffix(tgt_path.suffix + f".bak.{timestamp}")
+                        try:
+                            shutil.copy2(tgt_path, backup_path)
+                        except Exception as e:
+                            # Log warning but proceed? Or fail?
+                            # Usually safer to fail update if backup fails.
+                            raise RuntimeError(f"Backup failed: {e}")
+
                     tgt_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src_path, tgt_path)
                 except Exception as e:
-                    action = "error"
+                    action = "ERROR"
                     reason = str(e)
 
-            # Update stats
-            report["summary"][action] += 1
+            # Update stats (keys stay lowercase per request, values uppercase)
+            key = action.lower()
+            if key in report["summary"]:
+                report["summary"][key] += 1
+            else:
+                # Should not happen if schema is strictly followed
+                report["summary"]["error"] += 1
 
             report["details"].append({
                 "id": entry_id,
@@ -215,6 +259,7 @@ def sync_repo(
             })
 
     # Write report to repo
+    # Always write report, even if empty (as per requirement 4)
     if mode in ("dry_run", "apply"):
         try:
             out_file = repo_root / SYNC_REPORT_REL_PATH
@@ -222,8 +267,6 @@ def sync_repo(
             with out_file.open("w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2)
         except Exception:
-            # Failed to write report - log but don't crash main flow?
-            # We can mark it in the return dict
             pass
 
     return report
@@ -235,15 +278,15 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     Returns an aggregated report.
     """
     if not hub_path or not hub_path.exists():
-        return {"error": "Invalid hub path"}
+        return {"status": "error", "message": "Invalid hub path"}
 
     metarepo_root = hub_path / "metarepo"
     if not metarepo_root.exists():
-        return {"error": "metarepo not found in hub"}
+        return {"status": "error", "message": "metarepo not found in hub"}
 
     manifest = load_manifest(metarepo_root)
     if not manifest:
-        return {"error": "Manifest not found or invalid (sync/metarepo-sync.yml)"}
+        return {"status": "error", "message": "Manifest not found or invalid (sync/metarepo-sync.yml)"}
 
     results = {}
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
@@ -257,8 +300,13 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
         if item.name == "metarepo":
             continue
 
-        # Check if it looks like a repo (has .git or .ai-context or similar)?
-        # For now, treat every directory as a potential repo.
+        # Repo Detection Rule: .git/ or .ai-context.yml
+        # Only process if at least one exists.
+        has_git = (item / ".git").exists()
+        has_ai_context = (item / ".ai-context.yml").exists()
+
+        if not (has_git or has_ai_context):
+            continue
 
         repo_report = sync_repo(item, metarepo_root, manifest, mode, targets)
         results[item.name] = repo_report

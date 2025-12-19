@@ -479,18 +479,18 @@ class HealthCollector:
         # Try to determine repo root from first file's absolute path
         repo_root: Optional[Path] = None
         if files:
-            # files[0].abs_path is /path/to/repo/file
-            # files[0].rel_path is file
-            # repo_root is abs_path - rel_path parts
             try:
-                # Naive reconstruction: take abs path of first file, walk up by len(rel_path.parts)
-                # This works if abs_path is populated.
+                # Robust reconstruction: take abs path of first file, walk up by len(rel_path.parts) - 1
                 f0 = files[0]
-                if f0.abs_path:
-                    # e.g. /a/b/c/d/file.txt, rel=d/file.txt -> parts=(d, file.txt) -> count=2. parent*2 -> /a/b/c
-                    # Wait, pathlib .parents is 0-indexed.
-                    # .parents[len(rel_path.parts)-1] should be the root.
-                    repo_root = f0.abs_path.parents[len(f0.rel_path.parts)-1]
+                if f0.abs_path and f0.rel_path:
+                    # e.g. /a/b/c/d/file.txt, rel=d/file.txt -> len(parts)=2.
+                    # parents[0] = /a/b/c/d
+                    # parents[1] = /a/b/c <-- repo root
+                    # Index should be len(f0.rel_path.parts) - 1
+                    # Ensure index is within bounds of parents
+                    idx = len(f0.rel_path.parts) - 1
+                    if idx < len(f0.abs_path.parents):
+                        repo_root = f0.abs_path.parents[idx]
             except Exception:
                 pass
 
