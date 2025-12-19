@@ -19,8 +19,15 @@ class JobRequest(BaseModel):
     json_sidecar: bool = True  # Default true for service
 
 class AtlasRequest(BaseModel):
-    root: Optional[str] = None  # Legacy root id or path? Deprecated in favor of root_id + rel_path if needed.
-    # Currently app.py uses root as root_id.
+    # Canonical: token from FS picker (opaque, HMAC-signed by server).
+    # This avoids user-controlled path expressions and satisfies CodeQL.
+    root_token: Optional[str] = None
+
+    # Transitional: allow selecting a known root id ("hub" | "merges" | "system").
+    # NOTE: Do NOT accept arbitrary paths here; use root_token instead.
+    root_id: Optional[str] = None
+
+    root: Optional[str] = None  # Deprecated.
     max_depth: int = 6
     max_entries: int = 200000
     exclude_globs: Optional[List[str]] = None

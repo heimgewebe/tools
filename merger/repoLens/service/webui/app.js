@@ -301,6 +301,28 @@ function closePicker() {
     currentPickerToken = null;
 }
 
+function applyPickerSelection() {
+    if (!currentPickerTarget) return;
+
+    // Store token (opaque) in data attribute if target supports it (e.g. Atlas),
+    // or value if appropriate.
+    // For Atlas, we need to send the token.
+    // For Hub (Legacy/JobRequest), we typically send the path string.
+    // BUT: The goal is to satisfy CodeQL. Hub config is less dynamic.
+    // Let's adopt a hybrid approach:
+    // 1. Set visible value to path (for user confirmation/display)
+    // 2. Set 'data-token' attribute on the input to the token.
+    // Consumers (startAtlasJob) will check for data-token.
+
+    const el = document.getElementById(currentPickerTarget);
+    if (el) {
+        el.value = currentPickerPath || '';
+        el.dataset.token = currentPickerToken || '';
+    }
+
+    closePicker();
+}
+
 async function loadPickerRoots() {
     const list = document.getElementById('pickerList');
     const pathDisplay = document.getElementById('pickerCurrentPath');
@@ -349,7 +371,13 @@ async function loadPickerToken(token) {
         currentPickerToken = token;
         pathDisplay.value = data.abs;
 
-        list.innerHTML = '';
+        // Add "Use This Folder" button at the top
+        list.innerHTML = `
+            <div class="p-2 border-b border-gray-700 flex justify-between items-center bg-gray-800 sticky top-0">
+                <span class="text-xs text-gray-400 font-mono truncate mr-2">${data.abs}</span>
+                <button onclick="applyPickerSelection()" class="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-xs font-bold">Use This Folder</button>
+            </div>
+        `;
 
         // Add "Up" button if parent_token exists
         if (data.parent_token) {
@@ -658,9 +686,13 @@ async function startAtlasJob(e) {
     btn.disabled = true;
     btn.innerText = "Scanning...";
 
-    // Save Atlas Config
+    const rootInput = document.getElementById('atlasRoot');
+    const rootPath = rootInput.value;
+    const rootToken = rootInput.dataset.token; // Use token if available from picker
+
+    // Save Atlas Config (path only for display restoration)
     const config = {
-        root: document.getElementById('atlasRoot').value,
+        root: rootPath,
         depth: document.getElementById('atlasDepth').value,
         limit: document.getElementById('atlasLimit').value,
         excludes: document.getElementById('atlasExcludes').value
@@ -668,7 +700,13 @@ async function startAtlasJob(e) {
     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(config));
 
     const payload = {
-        root: config.root,
+        // Prefer token for canonical CodeQL-safe request
+        root_token: rootToken || null,
+        // Fallback: if no token (manual entry?), try sending root_id if it matches known IDs.
+        // If it's a raw path manually typed, the backend will reject it (Hard Cut).
+        // The user must use the picker or type a valid root_id ("hub").
+        root_id: (['hub', 'merges', 'system'].includes(rootPath)) ? rootPath : null,
+
         max_depth: parseInt(config.depth),
         max_entries: parseInt(config.limit),
         exclude_globs: config.excludes.split(',').map(s => s.trim())

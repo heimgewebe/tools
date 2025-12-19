@@ -357,35 +357,28 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     # Resolve scan root
     try:
-        if not request.root:
-            # Default to Hub
-            scan_root = resolve_fs_path(hub=hub, merges_dir=state.merges_dir, root_id="hub", rel_path="")
-        elif request.root in ("hub", "merges", "system"):
-            # Known Root ID
-            scan_root = resolve_fs_path(hub=hub, merges_dir=state.merges_dir, root_id=request.root, rel_path="")
+        # Canonical: token-based root selection (no user path expressions)
+        if request.root_token:
+            trusted = resolve_fs_path(
+                hub=hub,
+                merges_dir=state.merges_dir,
+                token=request.root_token,
+            )
+            scan_root = trusted.path
         else:
-            # Assume absolute path from UI picker
-            # Validate directly against security config (bypassing token strictness for Atlas job submission)
-            # This allows the UI to send the absolute path it picked.
-            # Security is maintained because validate_path enforces allowlists.
-            try:
-                p = Path(request.root)
-                # Ensure we have a security config instance
-                sec = get_security_config()
-                # If path is absolute, validate it. If relative, reject/bind to hub?
-                # Picker returns absolute paths.
-                if not p.is_absolute():
-                     # Fallback: treat as relative to hub?
-                     scan_root = sec.validate_path((hub / p).resolve())
-                else:
-                     scan_root = sec.validate_path(p.resolve())
-            except Exception:
-                 # If validation fails, maybe it was an invalid root ID?
-                 raise HTTPException(status_code=400, detail=f"Invalid Atlas root: {request.root}")
+            # Transitional: root_id only (known ids)
+            root_id = request.root_id or "hub"
+            if root_id not in ("hub", "merges", "system"):
+                # Strict rejection of raw paths for Atlas to satisfy CodeQL
+                raise HTTPException(status_code=400, detail="Invalid Atlas root_id or missing token")
 
-        # Unwrap TrustedPath if needed (resolve_fs_path returns TrustedPath now)
-        if isinstance(scan_root, TrustedPath):
-            scan_root = scan_root.path
+            trusted = resolve_fs_path(
+                hub=hub,
+                merges_dir=state.merges_dir,
+                root_id=root_id,
+                rel_path="",
+            )
+            scan_root = trusted.path
 
     except HTTPException as e:
          raise e
