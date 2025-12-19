@@ -1,116 +1,110 @@
 #!/usr/bin/env python3
 """
-rLens Service Entry Point (formerly repolensd)
+rLens Service Entry Point (Canonical)
 
-Usage:
-  export RLENS_TOKEN=heimgewebe-local
-  python3 service/rlens.py --hub /home/alex/repos --host 127.0.0.1 --port 8787 --open
-
-This script exists to:
-- Provide a stable CLI to start the web UI.
-- Bind hub path + auth token into the service state at startup.
+Strictly acts as a launcher for the app defined in service/app.py.
+Enforces configuration validity and security constraints before startup.
 """
-
-from __future__ import annotations
-
-import argparse
 import os
 import sys
-import webbrowser
+import argparse
+import ipaddress
 from pathlib import Path
-
 import uvicorn
 
-# Ensure we can import 'service' package
-# Since this script is in service/rlens.py, we need parent dir in sys.path
-# to allow 'from service.app import ...' and internal service imports to work.
+# Ensure correct path for imports if run as script
 SCRIPT_DIR = Path(__file__).resolve().parent
-PARENT_DIR = SCRIPT_DIR.parent
-if str(PARENT_DIR) not in sys.path:
-    sys.path.insert(0, str(PARENT_DIR))
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    # We expect 'service' to be a package inside 'merger/repoLens' (REPO_ROOT)
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
     from service.app import app, init_service
 except ImportError:
-    # Fallback/Safety
-    sys.path.append(str(PARENT_DIR))
+    # Fallback if the script is run from a different CWD context
+    sys.path.append(str(REPO_ROOT))
     from service.app import app, init_service
 
 
 def _is_loopback_host(host: str) -> bool:
     h = (host or "").strip().lower()
-    return h in ("127.0.0.1", "localhost", "::1")
+    if h in ("127.0.0.1", "localhost", "::1"):
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except Exception:
+        return False
 
 
-def run(host: str, port: int, hub: str | None, token: str | None, open_browser: bool = False, merges: str | None = None) -> None:
-    hub_path = None
-    if hub:
-        hub_path = Path(hub).expanduser().resolve()
-        if not hub_path.exists():
-            raise SystemExit(f"[rlens] hub path does not exist: {hub_path}")
-        if not hub_path.is_dir():
-            raise SystemExit(f"[rlens] hub path is not a directory: {hub_path}")
+def main():
+    parser = argparse.ArgumentParser(prog="rlens")
+    parser.add_argument("--host", default=os.environ.get("RLENS_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("RLENS_PORT", "8787")))
+    parser.add_argument("--hub", default=os.environ.get("RLENS_HUB"), help="Path to the Hub directory (Required)")
+    parser.add_argument("--merges", default=os.environ.get("RLENS_MERGES"), help="Path to output directory")
+    parser.add_argument("--token", default=os.environ.get("RLENS_TOKEN"), help="Auth token (Required for non-loopback)")
+    parser.add_argument("--open", action="store_true", help="ignored (legacy)")
 
+    args = parser.parse_args()
+
+    # 1. Validate Hub Path
+    if not args.hub:
+         print("[rlens] Error: Missing hub path. Set --hub or RLENS_HUB.", file=sys.stderr)
+         sys.exit(1)
+
+    try:
+        hub_path = Path(args.hub).expanduser().resolve()
+    except Exception as e:
+        print(f"[rlens] Error: Invalid hub path syntax: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not hub_path.exists():
+        print(f"[rlens] Error: Hub path does not exist: {hub_path}", file=sys.stderr)
+        sys.exit(1)
+    if not hub_path.is_dir():
+        print(f"[rlens] Error: Hub path is not a directory: {hub_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # 2. Validate/Create Merges Path
     merges_path = None
-    if merges:
-        merges_path = Path(merges).expanduser().resolve()
-        if not merges_path.exists():
-            try:
-                merges_path.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                raise SystemExit(f"[rlens] output/merges path could not be created: {merges_path} ({e})")
-
-    # Safety: Enforce token for non-loopback hosts
-    if not _is_loopback_host(host) and not token:
-        raise SystemExit("[rlens] refusing to bind non-loopback host without token. Set --token or RLENS_TOKEN.")
-
-    init_service(hub_path=hub_path, token=token, merges_dir=merges_path)
-
-    url = f"http://{host}:{port}"
-    if open_browser:
+    if args.merges:
         try:
-            webbrowser.open(url, new=2)
-        except Exception:
-            # non-fatal
-            pass
+            merges_path = Path(args.merges).expanduser().resolve()
+            merges_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"[rlens] Error: Could not create merges directory '{args.merges}': {e}", file=sys.stderr)
+            sys.exit(1)
 
-    print(f"[rlens] serving on {url}", flush=True)
-    print(f"[rlens] hub: {hub_path if hub_path else '(not set)'}", flush=True)
+    # 3. Security Check: Token Requirement
+    token = args.token
+    if not _is_loopback_host(args.host) and not token:
+        print(f"[rlens] Security Error: Refusing to bind to non-loopback host '{args.host}' without a token.", file=sys.stderr)
+        print("[rlens] Hint: Set --token or RLENS_TOKEN.", file=sys.stderr)
+        sys.exit(1)
+
+    # 4. Initialize Service
+    init_service(
+        hub_path=hub_path,
+        token=token,
+        host=args.host,
+        merges_dir=merges_path
+    )
+
+    # 5. Startup Logging
+    print(f"[rlens] serving on http://{args.host}:{args.port}", flush=True)
+    print(f"[rlens] hub: {hub_path}", flush=True)
     print(f"[rlens] output: {merges_path if merges_path else '(default: hub/merges)'}", flush=True)
     print(f"[rlens] token: {'(set)' if token else '(not set)'}", flush=True)
+    if args.open:
+        print("[rlens] note: --open flag is deprecated and ignored.", flush=True)
 
-    if hub_path:
-        # Diagnostic: Check for git repos to detect "wrong folder" issues early
-        try:
-            repos = [p for p in hub_path.iterdir() if p.is_dir() and (p / ".git").exists()]
-            print(f"[rlens] hub repos (git): {len(repos)}", flush=True)
-        except Exception as e:
-            print(f"[rlens] hub scan warning: {e}", flush=True)
-
-    uvicorn.run(app, host=host, port=port, log_level="info")
-
-
-def _parse_args(argv: list[str]) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog="rlens.py")
-    p.add_argument("--host", default=os.environ.get("RLENS_HOST", "127.0.0.1"))
-    p.add_argument("--port", type=int, default=int(os.environ.get("RLENS_PORT", "8787")))
-    p.add_argument("--hub", "--input", dest="hub", default=os.environ.get("RLENS_HUB"), help="Input Hub Directory")
-    p.add_argument("--merges", "--output", dest="merges", default=os.environ.get("RLENS_MERGES"), help="Output Directory for Reports")
-    p.add_argument("--token", default=os.environ.get("RLENS_TOKEN"))
-    p.add_argument("--open", action="store_true", help="open browser after start")
-    return p.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    ns = _parse_args(sys.argv[1:] if argv is None else argv)
-    run(host=ns.host, port=ns.port, hub=ns.hub, token=ns.token, open_browser=ns.open, merges=ns.merges)
-    return 0
-
-
-# Adapter for repolens.py compatibility (if needed, but imports need update)
-def run_server(hub_path: Path, host: str, port: int, open_browser: bool = False, token: str = None):
-    run(host=host, port=port, hub=str(hub_path) if hub_path else None, token=token, open_browser=open_browser)
-
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+    )
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
