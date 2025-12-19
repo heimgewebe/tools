@@ -39,10 +39,19 @@ def resolve_fs_path(raw: str, hub: Optional[Path], merges_dir: Optional[Path]) -
 
     # Helper: resolve safely by binding to a known root
     def _bind_under_root(root: Path, rel: Path) -> Path:
-        # reject traversal in rel explicitly
         if rel.is_absolute() or ".." in rel.parts:
             raise HTTPException(status_code=400, detail="Invalid path request")
-        return (root / rel).resolve()
+
+        combined = root / rel
+        resolved_root = root.resolve()
+        resolved_path = combined.resolve()
+
+        try:
+            resolved_path.relative_to(resolved_root)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Path escapes allowed root")
+
+        return resolved_path
 
     # Absolute path: delegate validation to SecurityConfig
     if p.is_absolute():
