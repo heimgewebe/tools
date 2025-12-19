@@ -16,9 +16,9 @@ from typing import Iterable, List, Dict, Optional, Tuple, Any, Iterator, NamedTu
 from dataclasses import dataclass
 
 try:
-    import yaml
-except ImportError:
-    pass
+    import yaml  # PyYAML
+except Exception:  # pragma: no cover
+    yaml = None
 
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -372,6 +372,7 @@ class RepoHealth:
     has_ci_workflows: bool
     has_contracts: bool
     has_ai_context: bool
+    wgx_profile_expected: Optional[bool]  # True/False if declared, else None
     unknown_category_ratio: float
     unknown_categories: List[str]
     unknown_tags: List[str]
@@ -384,6 +385,49 @@ class HealthCollector:
 
     def __init__(self) -> None:
         self._repo_health: Dict[str, RepoHealth] = {}
+
+    def _pick_ai_context_paths(self, files: List["FileInfo"]) -> List[Path]:
+        """
+        Return candidate .ai-context.yml paths, preferring repo-root (shortest rel_path).
+        Deterministic ordering prevents 'first file wins' randomness.
+        """
+        candidates: List[Tuple[int, str, Path]] = []
+        for f in files:
+            rp = str(getattr(f, "rel_path", ""))
+            name = getattr(getattr(f, "rel_path", None), "name", "")
+            if name == ".ai-context.yml" or rp.endswith("/.ai-context.yml") or rp.endswith(".ai-context.yml"):
+                ap = getattr(f, "abs_path", None)
+                if ap:
+                    depth = rp.count("/")  # root file tends to have smallest depth
+                    candidates.append((depth, rp, Path(ap)))
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        return [p for _, __, p in candidates]
+
+    def _read_wgx_profile_expected(self, files: List["FileInfo"]) -> Optional[bool]:
+        """
+        Reads `heimgewebe.wgx.profile_expected` from the first available *.ai-context.yml.
+        Returns:
+          - True/False if explicitly set
+          - None if not present / unreadable
+        """
+        candidates = self._pick_ai_context_paths(files)
+        for p in candidates:
+            try:
+                if yaml is None:
+                    # No YAML parser available: do not crash, keep unknown.
+                    return None
+                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+                v = (
+                    data.get("heimgewebe", {})
+                        .get("wgx", {})
+                        .get("profile_expected", None)
+                )
+                if isinstance(v, bool):
+                    return v
+            except Exception:
+                # If parsing fails, we keep it unknown rather than inventing truth.
+                continue
+        return None
 
     def analyze_repo(self, root_label: str, files: List["FileInfo"]) -> RepoHealth:
         """Analyze health of a single repository."""
@@ -399,6 +443,7 @@ class HealthCollector:
             ".wgx" in f.rel_path.parts and str(f.rel_path).endswith("profile.yml")
             for f in files
         )
+        wgx_profile_expected = self._read_wgx_profile_expected(files)
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
         # 4. Contracts (heuristic extended: contracts/ OR **/*.schema.json)
         def is_contract(f):
@@ -453,9 +498,22 @@ class HealthCollector:
             warnings.append("No README.md found")
             recommendations.append("Add README.md for better AI/human navigation")
 
-        if not has_wgx_profile:
+        # WGX profile policy:
+        # - If explicitly NOT expected -> do not warn.
+        # - If expected or unknown -> warn (unknown gets a softer recommendation to declare intent).
+        if not has_wgx_profile and wgx_profile_expected is not False:
             warnings.append("No .wgx/profile.yml found")
-            recommendations.append("Create .wgx/profile.yml for Fleet conformance")
+            if wgx_profile_expected is True:
+                recommendations.append("Create .wgx/profile.yml for Fleet conformance")
+            else:
+                if yaml is None:
+                    recommendations.append(
+                        "Either create .wgx/profile.yml or ensure PyYAML is installed so .ai-context.yml policy can be read"
+                    )
+                else:
+                    recommendations.append(
+                        "Either create .wgx/profile.yml or set heimgewebe.wgx.profile_expected=false in .ai-context.yml"
+                    )
 
         if not has_ci_workflows:
             warnings.append("No CI workflows found")
@@ -493,6 +551,7 @@ class HealthCollector:
             has_ci_workflows=has_ci_workflows,
             has_contracts=has_contracts,
             has_ai_context=has_ai_context,
+            wgx_profile_expected=wgx_profile_expected,
             unknown_category_ratio=unknown_category_ratio,
             unknown_categories=unknown_categories,
             unknown_tags=unknown_tags,
@@ -527,7 +586,11 @@ class HealthCollector:
         total_repos = len(self._repo_health)
         no_ci = sum(1 for h in self._repo_health.values() if not h.has_ci_workflows)
         no_contracts = sum(1 for h in self._repo_health.values() if not h.has_contracts)
-        no_wgx = sum(1 for h in self._repo_health.values() if not h.has_wgx_profile)
+        # Only count missing WGX profile as a "problem" if expected is True or unknown.
+        no_wgx = sum(
+            1 for h in self._repo_health.values()
+            if (not h.has_wgx_profile) and (h.wgx_profile_expected is not False)
+        )
 
         if no_ci > 0 or no_contracts > 0 or no_wgx > 0:
             lines.append("### ⚔ Repo Feindynamiken (Global Risks)")
@@ -562,6 +625,12 @@ class HealthCollector:
             indicators = []
             indicators.append(f"README: {'yes' if health.has_readme else 'no'}")
             indicators.append(f"WGX Profile: {'yes' if health.has_wgx_profile else 'no'}")
+            if health.wgx_profile_expected is True:
+                indicators.append("WGX Expected: yes")
+            elif health.wgx_profile_expected is False:
+                indicators.append("WGX Expected: no")
+            else:
+                indicators.append("WGX Expected: unknown")
             indicators.append(f"CI: {'yes' if health.has_ci_workflows else 'no'}")
             indicators.append(f"Contracts: {'yes' if health.has_contracts else 'no'}")
             indicators.append(f"AI Context: {'yes' if health.has_ai_context else 'no'}")
