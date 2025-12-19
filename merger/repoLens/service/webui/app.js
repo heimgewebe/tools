@@ -91,8 +91,12 @@ async function fetchRepos(hub) {
         }
 
         const res = await apiFetch(url);
-        if (res.status === 401 || res.status === 403) {
+        if (res.status === 401) {
              list.innerHTML = '<div class="text-red-400">Access Denied (Check Token)</div>';
+             return;
+        }
+        if (res.status === 403) {
+             list.innerHTML = '<div class="text-red-400">Hub path restricted</div>';
              return;
         }
 

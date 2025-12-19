@@ -52,7 +52,7 @@ def _token_secret() -> bytes:
         raise HTTPException(status_code=500, detail="FS token secret not configured")
     return s.encode("utf-8")
 
-def issue_fs_token(abs_path: Path, ttl_seconds: int = 3600) -> str:
+def issue_fs_token(abs_path: Path, ttl_seconds: int = 1200) -> str:
     """
     Create an HMAC-signed token that encodes an absolute path.
     The server will re-validate the decoded path against SecurityConfig at use-time.

@@ -76,11 +76,20 @@ def main():
             print(f"[rlens] Error: Could not create merges directory '{args.merges}': {e}", file=sys.stderr)
             sys.exit(1)
 
-    # 3. Security Check: Token Requirement
+    # 3. Security Checks
+
+    # Check 1: Token Requirement for non-loopback
     token = args.token
     if not _is_loopback_host(args.host) and not token:
         print(f"[rlens] Security Error: Refusing to bind to non-loopback host '{args.host}' without a token.", file=sys.stderr)
         print("[rlens] Hint: Set --token or RLENS_TOKEN.", file=sys.stderr)
+        sys.exit(1)
+
+    # Check 2: Root FS Capability vs Loopback
+    allow_fs_root = os.environ.get("RLENS_ALLOW_FS_ROOT", "0") == "1"
+    if allow_fs_root and not _is_loopback_host(args.host):
+        print(f"[rlens] Security Error: RLENS_ALLOW_FS_ROOT=1 requires loopback host (localhost/127.0.0.1).", file=sys.stderr)
+        print(f"[rlens] Current host: {args.host}", file=sys.stderr)
         sys.exit(1)
 
     # 4. Initialize Service
