@@ -17,7 +17,7 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
 from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_relative_path
-from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token
+from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from .atlas import AtlasScanner, render_atlas_md
 
 try:
@@ -97,9 +97,13 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
         )
 
 def _list_dir(candidate: Path) -> Dict[str, Any]:
-    if not candidate.exists():
+    # Defense-in-depth: always re-validate before touching the filesystem.
+    sec = get_security_config()
+    resolved = sec.validate_path(candidate)
+
+    if not resolved.exists():
         raise HTTPException(status_code=404, detail="Path not found")
-    if not candidate.is_dir():
+    if not resolved.is_dir():
         raise HTTPException(status_code=400, detail="Not a directory")
 
     dirs: List[str] = []
@@ -107,7 +111,7 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
     entries: List[Dict[str, Any]] = []
 
     try:
-        for child in sorted(candidate.iterdir(), key=lambda x: x.name.lower()):
+        for child in sorted(resolved.iterdir(), key=lambda x: x.name.lower()):
             if child.is_dir():
                 dirs.append(child.name)
                 entries.append({"name": child.name, "type": "dir", "token": issue_fs_token(child.resolve())})
@@ -115,10 +119,10 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
                 files.append(child.name)
                 entries.append({"name": child.name, "type": "file"})
     except OSError as e:
-        logger.error(f"Error listing {candidate}: {e}")
+        logger.error(f"Error listing {resolved}: {e}")
         raise HTTPException(status_code=500, detail="Error listing directory")
 
-    return {"abs": str(candidate), "dirs": dirs, "files": files, "entries": entries}
+    return {"abs": str(resolved), "dirs": dirs, "files": files, "entries": entries}
 
 @app.get("/api/fs/roots", dependencies=[Depends(verify_token)])
 def api_fs_roots():
@@ -144,16 +148,16 @@ def api_fs_list(token: Optional[str] = None, root: Optional[str] = None, rel: Op
     """
     hub = state.hub
     merges_dir = getattr(state, "merges_dir", None)
-    candidate = resolve_fs_path(hub=hub, merges_dir=merges_dir, root_id=root, rel_path=rel, token=token)
-    payload = _list_dir(candidate)
+    trusted = resolve_fs_path(hub=hub, merges_dir=merges_dir, root_id=root, rel_path=rel, token=token)
+    payload = _list_dir(trusted.path)
     # Add parent token for upward navigation if possible
     try:
-        if candidate.parent and candidate.parent != candidate: # Ensure not at system root parent loop
-             # We issue a token for parent. Validation happens on use.
-             # If parent is outside allowed roots, it will be generated but will fail with 403 on use.
-             # Ideally we check validation here to avoid showing a broken "Up" button,
-             # but issue_fs_token is cheap.
-             payload["parent_token"] = issue_fs_token(candidate.parent)
+        # Only offer parent if parent itself is allowed (avoid broken Up + reduce taint)
+        sec = get_security_config()
+        p = trusted.path
+        if p.parent and p.parent != p:
+            parent_resolved = sec.validate_path(p.parent)
+            payload["parent_token"] = issue_fs_token(parent_resolved)
     except Exception:
         pass
     return {"root": root, "rel": rel, "token": token, **payload}
@@ -353,12 +357,36 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     # Resolve scan root
     try:
-        # Default to "hub" if root is not provided
-        root_id = request.root or "hub"
-        # Since AtlasRequest only has 'root', we use it as root_id and scan the entire root.
-        # If granular scanning is needed, AtlasRequest needs updating.
-        # For now, this preserves default behavior (scan hub) and allows scanning system root if passed as "system".
-        scan_root = resolve_fs_path(hub=hub, merges_dir=state.merges_dir, root_id=root_id, rel_path="")
+        if not request.root:
+            # Default to Hub
+            scan_root = resolve_fs_path(hub=hub, merges_dir=state.merges_dir, root_id="hub", rel_path="")
+        elif request.root in ("hub", "merges", "system"):
+            # Known Root ID
+            scan_root = resolve_fs_path(hub=hub, merges_dir=state.merges_dir, root_id=request.root, rel_path="")
+        else:
+            # Assume absolute path from UI picker
+            # Validate directly against security config (bypassing token strictness for Atlas job submission)
+            # This allows the UI to send the absolute path it picked.
+            # Security is maintained because validate_path enforces allowlists.
+            try:
+                p = Path(request.root)
+                # Ensure we have a security config instance
+                sec = get_security_config()
+                # If path is absolute, validate it. If relative, reject/bind to hub?
+                # Picker returns absolute paths.
+                if not p.is_absolute():
+                     # Fallback: treat as relative to hub?
+                     scan_root = sec.validate_path((hub / p).resolve())
+                else:
+                     scan_root = sec.validate_path(p.resolve())
+            except Exception:
+                 # If validation fails, maybe it was an invalid root ID?
+                 raise HTTPException(status_code=400, detail=f"Invalid Atlas root: {request.root}")
+
+        # Unwrap TrustedPath if needed (resolve_fs_path returns TrustedPath now)
+        if isinstance(scan_root, TrustedPath):
+            scan_root = scan_root.path
+
     except HTTPException as e:
          raise e
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from fastapi import HTTPException
+from dataclasses import dataclass
 from .security import get_security_config
 import os
 import time
@@ -8,6 +9,14 @@ import json
 import base64
 import hmac
 import hashlib
+
+@dataclass(frozen=True)
+class TrustedPath:
+    """
+    Marker type: Path has been validated by SecurityConfig.validate_path.
+    Use this to make the trust boundary explicit and to reduce CodeQL taint noise.
+    """
+    path: Path
 
 def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[Dict[str, Any]]:
     sec = get_security_config()
@@ -93,7 +102,7 @@ def resolve_fs_token(token: str) -> Path:
     # validate_path must enforce allowlisted roots (hub/merges/system opt-in)
     return sec.validate_path(p)
 
-def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Optional[str] = None, rel_path: Optional[str] = None, token: Optional[str] = None) -> Path:
+def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Optional[str] = None, rel_path: Optional[str] = None, token: Optional[str] = None) -> TrustedPath:
     """
     Resolve a filesystem request into an allowed absolute Path.
     Canonical mode: token-based navigation (no user path segments).
@@ -103,7 +112,7 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
 
     # Canonical: token
     if token is not None:
-        return resolve_fs_token(token)
+        return TrustedPath(resolve_fs_token(token))
 
     # Preferred protocol: root_id + rel_path (Legacy/Transitional)
     if root_id is not None:
@@ -125,7 +134,7 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         # Minimal behavior: treat empty rel as base.
         rel = (rel_path or "").strip()
         if rel in ("", ".", "/"):
-            return base_resolved
+            return TrustedPath(base_resolved)
 
         # If user tries to navigate subpaths without token, block it to enforce token usage
         raise HTTPException(status_code=400, detail="Use token navigation for subpaths")
