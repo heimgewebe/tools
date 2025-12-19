@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Iterable, List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
 
-import yaml
+try:
+    import yaml  # PyYAML
+except Exception:  # pragma: no cover
+    yaml = None
 
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -383,6 +386,23 @@ class HealthCollector:
     def __init__(self) -> None:
         self._repo_health: Dict[str, RepoHealth] = {}
 
+    def _pick_ai_context_paths(self, files: List["FileInfo"]) -> List[Path]:
+        """
+        Return candidate .ai-context.yml paths, preferring repo-root (shortest rel_path).
+        Deterministic ordering prevents 'first file wins' randomness.
+        """
+        candidates: List[Tuple[int, str, Path]] = []
+        for f in files:
+            rp = str(getattr(f, "rel_path", ""))
+            name = getattr(getattr(f, "rel_path", None), "name", "")
+            if name == ".ai-context.yml" or rp.endswith("/.ai-context.yml") or rp.endswith(".ai-context.yml"):
+                ap = getattr(f, "abs_path", None)
+                if ap:
+                    depth = rp.count("/")  # root file tends to have smallest depth
+                    candidates.append((depth, rp, Path(ap)))
+        candidates.sort(key=lambda t: (t[0], t[1]))
+        return [p for _, __, p in candidates]
+
     def _read_wgx_profile_expected(self, files: List["FileInfo"]) -> Optional[bool]:
         """
         Reads `heimgewebe.wgx.profile_expected` from the first available *.ai-context.yml.
@@ -390,16 +410,12 @@ class HealthCollector:
           - True/False if explicitly set
           - None if not present / unreadable
         """
-        candidates = []
-        for f in files:
-            rp = str(getattr(f, "rel_path", ""))
-            name = getattr(getattr(f, "rel_path", None), "name", "")
-            if name == ".ai-context.yml" or rp.endswith(".ai-context.yml"):
-                ap = getattr(f, "abs_path", None)
-                if ap:
-                    candidates.append(Path(ap))
+        candidates = self._pick_ai_context_paths(files)
         for p in candidates:
             try:
+                if yaml is None:
+                    # No YAML parser available: do not crash, keep unknown.
+                    return None
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
                 v = (
                     data.get("heimgewebe", {})
@@ -490,9 +506,14 @@ class HealthCollector:
             if wgx_profile_expected is True:
                 recommendations.append("Create .wgx/profile.yml for Fleet conformance")
             else:
-                recommendations.append(
-                    "Either create .wgx/profile.yml or set heimgewebe.wgx.profile_expected=false in .ai-context.yml"
-                )
+                if yaml is None:
+                    recommendations.append(
+                        "Either create .wgx/profile.yml or ensure PyYAML is installed so .ai-context.yml policy can be read"
+                    )
+                else:
+                    recommendations.append(
+                        "Either create .wgx/profile.yml or set heimgewebe.wgx.profile_expected=false in .ai-context.yml"
+                    )
 
         if not has_ci_workflows:
             warnings.append("No CI workflows found")
