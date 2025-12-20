@@ -94,6 +94,46 @@ def validate_source_dir(path: Path) -> Path:
         raise HTTPException(status_code=400, detail=f"Invalid repo path: {path}")
     return path
 
+def resolve_secure_path(root: Path, relpath: str) -> Path:
+    """
+    Safely join root and relpath, ensuring the result is within root.
+    Raises ValueError if path traversal or other violations detected.
+
+    Strict rules:
+    - No absolute paths
+    - No null bytes
+    - No '..' segments (naive check)
+    - Must verify containment after resolve
+    """
+    if not isinstance(relpath, str):
+        raise ValueError("relpath must be a string")
+
+    # 1. explicit check for absolute path or null byte
+    if os.path.isabs(relpath) or "\0" in relpath:
+        raise ValueError("Absolute paths and null bytes are forbidden")
+
+    # 2. Check for ".." in parts (naive string check first for speed/safety)
+    if ".." in relpath.split("/"):
+        raise ValueError("Directory traversal ('..') is forbidden")
+
+    try:
+        # Resolve root to have a canonical base
+        root_abs = root.resolve()
+
+        # Join
+        candidate = root_abs / relpath
+
+        # Resolve candidate
+        resolved = candidate.resolve()
+
+        # Final containment check
+        # Python < 3.9 compat: use relative_to inside try/except
+        resolved.relative_to(root_abs)
+
+        return resolved
+    except (ValueError, RuntimeError, OSError) as e:
+        raise ValueError(f"Path resolution failed or outside root: {e}")
+
 def resolve_relative_path(root: Path, requested: Optional[str]) -> Path:
     """
     Safely resolves a requested path relative to a root.
@@ -102,21 +142,15 @@ def resolve_relative_path(root: Path, requested: Optional[str]) -> Path:
     if not requested or requested.strip() == "":
         return root.resolve()
 
-    try:
-        req_path = Path(requested)
-        # Block absolute paths explicitly? NO, user requirement changed.
-        # But we must validate if it is allowed.
-        if req_path.is_absolute():
-            # Check against allowlist
-            # Note: This changes the semantics of "relative path".
-            # But the primary use case (Atlas) passes "root" as hub, but user might want outside hub.
-            # We defer to SecurityConfig.
-            return get_security_config().validate_path(req_path)
+    # If user provides an absolute path, we check strict allowlist
+    # This is a legacy behavior for Atlas, but risky.
+    # We should prefer token navigation.
+    # However, if it looks absolute, we check security config.
+    if os.path.isabs(requested):
+        return get_security_config().validate_path(Path(requested))
 
-        # Resolve and ensure it is inside root
-        candidate = (root / requested).resolve()
-        candidate.relative_to(root.resolve())
-        return candidate
-    except (ValueError, OSError, RuntimeError):
+    try:
+        return resolve_secure_path(root, requested)
+    except ValueError:
         # Path traversal or outside root
         raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")

@@ -478,6 +478,8 @@ class HealthCollector:
         """Analyze health of a single repository."""
         # Try to determine repo root from first file's absolute path
         repo_root: Optional[Path] = None
+
+        # 1. Try reconstruction from files (robust fallback)
         if files:
             try:
                 # Robust reconstruction: take abs path of first file, walk up by len(rel_path.parts) - 1
@@ -493,6 +495,13 @@ class HealthCollector:
                         repo_root = f0.abs_path.parents[idx]
             except Exception:
                 pass
+
+        # 2. Heuristic improvement: if we have a known hub, check if hub/root_label is the root
+        # Note: 'files' might be filtered, but usually scan_repo sets root_label = dir.name
+        # We can verify if repo_root matches root_label
+        if repo_root and repo_root.name != root_label:
+             # Discrepancy? Keep repo_root from file path as truth, or log warning.
+             pass
 
         # Count files per category
         category_counts: Dict[str, int] = {}
