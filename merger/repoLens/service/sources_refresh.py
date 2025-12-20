@@ -2,6 +2,7 @@ import json
 import logging
 import subprocess
 import re
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
@@ -15,6 +16,20 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "fleet.snapshot.v1"
 TTL_HOURS = 24
+
+
+def _relpath_safe(p: Path, base: Path) -> str:
+    """
+    Path.relative_to() without requiring Path.is_relative_to() (py<3.9 compatibility).
+    Falls back to string path if not relative.
+    """
+    try:
+        return str(p.relative_to(base))
+    except Exception:
+        return str(p)
+
+def _ts() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 def _get_commit(repo_path: Path) -> str:
     """Get current git commit hash of the repo."""
@@ -150,7 +165,7 @@ def refresh(hub_path: Path):
 
     metarepo_path = hub_path / "metarepo"
 
-    ts = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    ts = _ts()
 
     # 1. Fleet Snapshot
     fleet_out = cache_dir / "fleet.snapshot.json"
@@ -191,7 +206,7 @@ def refresh(hub_path: Path):
                 "generated_at": ts,
                 "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                 "sources": {
-                    "metarepo": {"path": str(repos_yml.relative_to(hub_path)), "commit": metarepo_commit}
+                    "metarepo": {"path": _relpath_safe(repos_yml, hub_path), "commit": metarepo_commit}
                 },
                 "data": {"repos": data}
             }
@@ -209,7 +224,7 @@ def refresh(hub_path: Path):
                 "generated_at": ts,
                 "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                 "sources": {
-                    "metarepo": {"path": str(repo_matrix.relative_to(hub_path)) if repo_matrix.is_relative_to(hub_path) else "metarepo/docs/repo-matrix.md", "commit": metarepo_commit}
+                    "metarepo": {"path": _relpath_safe(repo_matrix, hub_path) if repo_matrix.is_relative_to(hub_path) else "metarepo/docs/repo-matrix.md", "commit": metarepo_commit}
                 },
                 "data": {},
                 "error": "Source file docs/repo-matrix.md not found in metarepo"
@@ -234,7 +249,7 @@ def refresh(hub_path: Path):
                     "generated_at": ts,
                     "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                     "sources": {
-                        "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
+                        "metarepo": {"path": _relpath_safe(repo_matrix, hub_path), "commit": metarepo_commit}
                     },
                     "data": {"repos": normed}
                 }
@@ -246,7 +261,7 @@ def refresh(hub_path: Path):
                     "generated_at": ts,
                     "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                     "sources": {
-                        "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
+                        "metarepo": {"path": _relpath_safe(repo_matrix, hub_path), "commit": metarepo_commit}
                     },
                     "data": {},
                     "error": "Failed to parse repo-matrix.md"
@@ -255,35 +270,20 @@ def refresh(hub_path: Path):
     with open(fleet_out, "w", encoding="utf-8") as f:
         json.dump(fleet_snapshot, f, indent=2)
 
-    # 2. Organism Index Snapshot
-    # Heuristic: check for docs/organism-index.md or similar.
-    # Since not explicitly defined, we check exact file.
-    # If missing, we report error as requested "sonst status=error".
 
+    # 2. Organism Index Snapshot (schema-conform minimal)
+    #
+    # Contract: contracts/organism/organism.index.snapshot.schema.json
+    # Required keys: schema_version, snapshot_id, generated_at, organisms[]
+    # We intentionally keep it minimal (organisms=[]) until a real authoritative source exists.
     org_index_out = cache_dir / "organism.index.snapshot.json"
-    org_source = metarepo_path / "docs" / "organism-index.md"
-
-    if org_source.exists():
-         # Placeholder parsing for now
-         org_snapshot = {
-            "status": "ok",
-            "generated_at": ts,
-             "sources": {
-                "metarepo": {"path": str(org_source.relative_to(hub_path)), "commit": metarepo_commit}
-            },
-            "data": {"available": True}
-         }
-    else:
-         org_snapshot = {
-            "status": "error",
-            "generated_at": ts,
-             "sources": {
-                "metarepo": {"path": "metarepo/docs/organism-index.md", "commit": metarepo_commit}
-            },
-            "data": {},
-            "error": "Source file docs/organism-index.md not found in metarepo"
-         }
-
+    org_snapshot = {
+        "schema_version": "organism.index.snapshot.v1",
+        "snapshot_id": str(uuid.uuid4()),
+        "generated_at": ts,
+        "source": "repoLens.sources_refresh",
+        "organisms": []
+    }
     with open(org_index_out, "w", encoding="utf-8") as f:
         json.dump(org_snapshot, f, indent=2)
 
@@ -291,6 +291,6 @@ def refresh(hub_path: Path):
         "status": "ok",
         "snapshots": {
             "fleet": fleet_snapshot.get("status"),
-            "organism_index": org_snapshot.get("status")
+            "organism_index": "ok"
         }
     }

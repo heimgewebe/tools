@@ -1,3 +1,4 @@
+from __future__ import annotations
 # -*- coding: utf-8 -*-
 
 """
@@ -389,6 +390,40 @@ class HealthCollector:
         self._repo_health: Dict[str, RepoHealth] = {}
         self.hub_path = hub_path
         self.fleet_snapshot = self._read_fleet_snapshot()
+        self.fleet_snapshot_outdated = self._is_fleet_snapshot_outdated(self.fleet_snapshot)
+        self.fleet_snapshot_outdated = self._is_fleet_snapshot_outdated(self.fleet_snapshot)
+
+    def _parse_dt(self, s: str) -> Optional[datetime.datetime]:
+        # Accept "Z" timestamps and full ISO
+        try:
+            if s.endswith("Z"):
+                return datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+            # fromisoformat handles offsets like +00:00
+            return datetime.datetime.fromisoformat(s)
+        except Exception:
+            return None
+
+    def _is_fleet_snapshot_outdated(self, snap: Optional[Dict[str, Any]]) -> bool:
+        if not snap or not isinstance(snap, dict):
+            return False
+        try:
+            validity = snap.get("validity") if isinstance(snap.get("validity"), dict) else {}
+            ttl_hours = validity.get("ttl_hours")
+            if not isinstance(ttl_hours, int) or ttl_hours < 1:
+                return False
+            gen = snap.get("generated_at")
+            if not isinstance(gen, str) or not gen.strip():
+                return False
+            dt = self._parse_dt(gen.strip())
+            if not dt:
+                return False
+            now = datetime.datetime.now(datetime.timezone.utc)
+            # normalize naive datetimes to UTC to avoid crashes
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            return (now - dt) > datetime.timedelta(hours=ttl_hours)
+        except Exception:
+            return False
 
     def _read_fleet_snapshot(self) -> Optional[Dict[str, Any]]:
         """Reads .gewebe/cache/fleet.snapshot.json if available."""
@@ -683,14 +718,17 @@ class HealthCollector:
             if (not h.has_wgx_profile) and (h.wgx_profile_expected is not False)
         )
 
-        # P4: Snapshot Warn Global
+        # Snapshot Warn Global: missing OR outdated
         snapshot_missing = not self.fleet_snapshot
+        snapshot_outdated = bool(self.fleet_snapshot_outdated)
 
-        if no_ci > 0 or no_contracts > 0 or no_wgx > 0 or snapshot_missing:
+        if no_ci > 0 or no_contracts > 0 or no_wgx > 0 or snapshot_missing or snapshot_outdated:
             lines.append("### ⚔ Repo Feindynamiken (Global Risks)")
             lines.append("")
             if snapshot_missing:
                 lines.append("- ⚠️ **Fleet Snapshot missing/outdated** – some policy checks skipped or inaccurate.")
+            elif snapshot_outdated:
+                lines.append("- ⚠️ **Fleet Snapshot outdated** – TTL exceeded; some policy checks skipped or inaccurate.")
             if no_ci > 0:
                 lines.append(f"- {no_ci} Repos ohne CI-Workflows")
             if no_contracts > 0:

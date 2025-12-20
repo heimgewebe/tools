@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -185,14 +185,29 @@ def api_diagnostics_rebuild():
         raise HTTPException(status_code=500, detail="Diagnostics rebuild failed")
 
 @app.post("/api/extras/refresh_all", dependencies=[Depends(verify_token)])
-def api_extras_refresh_all(payload: Dict[str, Any] = None):
-    # Payload can optionally contain "sync": true/false
+def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict)):
+    """
+    Orchestrates optional metarepo-sync + sources refresh + diagnostics rebuild.
+
+    SAFE DEFAULTS:
+      - no sync unless explicitly requested
+      - apply-sync only if payload.sync.mode == "apply"
+
+    Example:
+      { "sync": { "mode": "dry_run" } }
+      { "sync": { "mode": "apply" } }
+    """
     if not state.hub:
         raise HTTPException(status_code=400, detail="Hub not configured")
 
-    payload = payload or {}
-    # Default sync to False if not provided (safer/faster default)
-    should_sync = payload.get("sync", False)
+    sync_cfg = payload.get("sync") if isinstance(payload.get("sync"), dict) else None
+    sync_mode = (sync_cfg.get("mode") if sync_cfg else None) if isinstance(sync_cfg, dict) else None
+    should_sync = bool(sync_cfg)
+    if sync_mode not in (None, "dry_run", "apply"):
+        sync_mode = "dry_run"
+    # SAFE: treat missing mode as dry_run
+    if should_sync and sync_mode is None:
+        sync_mode = "dry_run"
 
     result = {
         "status": "ok",
@@ -201,7 +216,7 @@ def api_extras_refresh_all(payload: Dict[str, Any] = None):
         "diagnostics": {}
     }
 
-    # 1. Optional Sync
+            # 1. Optional Sync
     if should_sync:
         try:
             # We assume "dry_run" is NOT what we want for a "refresh" button, we want "apply".
@@ -210,7 +225,8 @@ def api_extras_refresh_all(payload: Dict[str, Any] = None):
             # But sync_from_metarepo modifies disk (Manifest -> Fleet).
             # Let s assume "apply" is desired if sync=True.
             # Also target list? Default to all? None = all.
-            sync_report = sync_from_metarepo(hub_path=state.hub, mode="apply", targets=None)
+            mode = "apply" if sync_mode == "apply" else "dry_run"
+            sync_report = sync_from_metarepo(hub_path=state.hub, mode=mode, targets=None)
 
             if sync_report.get("status") != "ok":
                 # Hard fail as requested
