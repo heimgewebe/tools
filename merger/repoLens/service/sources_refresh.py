@@ -4,7 +4,7 @@ import subprocess
 import re
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 
 try:
     import yaml
@@ -12,6 +12,9 @@ except ImportError:
     yaml = None
 
 logger = logging.getLogger(__name__)
+
+SCHEMA_VERSION = "fleet.snapshot.v1"
+TTL_HOURS = 24
 
 def _get_commit(repo_path: Path) -> str:
     """Get current git commit hash of the repo."""
@@ -108,6 +111,32 @@ def _parse_repo_matrix(md_path: Path) -> Dict[str, Any]:
 
     return data
 
+def _normalize_repo_entry(raw: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Normalize a single repo entry from metarepo/fleet/repos.yml into the canonical snapshot shape.
+    Supports:
+      - new nested keys: wgx: { profile_expected: bool|null }
+      - legacy dot key:  "wgx.profile_expected": bool|null
+    """
+    repo = raw.get("repo") or raw.get("name")
+    if not repo:
+        raise ValueError("fleet entry missing repo/name")
+
+    wgx_obj = raw.get("wgx") if isinstance(raw.get("wgx"), dict) else {}
+    if "profile_expected" not in wgx_obj and "wgx.profile_expected" in raw:
+        wgx_obj = { **wgx_obj, "profile_expected": raw.get("wgx.profile_expected") }
+
+    norm = {
+        "repo": repo,
+        "fleet_member": bool(raw.get("fleet_member")) if raw.get("fleet_member") is not None else None,
+        "role": raw.get("role", "unknown"),
+        "policy_tier": raw.get("policy_tier", "standard"),
+        "wgx": {
+            "profile_expected": wgx_obj.get("profile_expected", None)
+        }
+    }
+    return repo, norm
+
 def refresh(hub_path: Path):
     """
     Reads Metarepo sources and updates snapshots in .gewebe/cache/.
@@ -135,21 +164,29 @@ def refresh(hub_path: Path):
     if repos_yml.exists() and yaml is not None:
         try:
             raw_data = yaml.safe_load(repos_yml.read_text(encoding="utf-8"))
-            # Normalize structure:
-            # If dict: { "repo-a": { ... } } -> use as is
-            # If list: [ { "name": "repo-a", ... } ] -> convert to dict
-            data = {}
-            if isinstance(raw_data, dict):
-                data = raw_data
-            elif isinstance(raw_data, list):
+            data: Dict[str, Any] = {}
+            if isinstance(raw_data, list):
                 for item in raw_data:
-                    name = item.get("name") or item.get("repo")
-                    if name:
-                        data[name] = item
+                    if not isinstance(item, dict):
+                        continue
+                    repo, norm = _normalize_repo_entry(item)
+                    data[repo] = norm
+            elif isinstance(raw_data, dict):
+                # Accept dict-of-dicts, normalize values
+                for k, v in raw_data.items():
+                    if not isinstance(v, dict):
+                        continue
+                    # allow key to be repo name if missing inside
+                    v2 = dict(v)
+                    v2.setdefault("repo", k)
+                    repo, norm = _normalize_repo_entry(v2)
+                    data[repo] = norm
 
             fleet_snapshot = {
+                "schema_version": SCHEMA_VERSION,
                 "status": "ok",
                 "generated_at": ts,
+                "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                 "sources": {
                     "metarepo": {"path": str(repos_yml.relative_to(hub_path)), "commit": metarepo_commit}
                 },
@@ -164,8 +201,10 @@ def refresh(hub_path: Path):
     if not fleet_snapshot:
         if not repo_matrix.exists():
             fleet_snapshot = {
+                "schema_version": SCHEMA_VERSION,
                 "status": "error",
                 "generated_at": ts,
+                "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                 "sources": {
                     "metarepo": {"path": str(repo_matrix.relative_to(hub_path)) if repo_matrix.is_relative_to(hub_path) else "metarepo/docs/repo-matrix.md", "commit": metarepo_commit}
                 },
@@ -175,19 +214,33 @@ def refresh(hub_path: Path):
         else:
             try:
                 data = _parse_repo_matrix(repo_matrix)
+                # MD fallback yields profile_expected at top-level; normalize to nested
+                normed = {}
+                for repo, entry in data.items():
+                    normed[repo] = {
+                        "repo": repo,
+                        "fleet_member": None,
+                        "role": entry.get("role", "unknown"),
+                        "policy_tier": "standard",
+                        "wgx": { "profile_expected": entry.get("profile_expected", None) }
+                    }
                 fleet_snapshot = {
+                    "schema_version": SCHEMA_VERSION,
                     "status": "ok",
                     "generated_at": ts,
+                    "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                     "sources": {
                         "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
                     },
-                    "data": {"repos": data}
+                    "data": {"repos": normed}
                 }
             except Exception as e:
                 logger.exception("Failed to parse repo-matrix.md")
                 fleet_snapshot = {
+                    "schema_version": SCHEMA_VERSION,
                     "status": "error",
                     "generated_at": ts,
+                    "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                     "sources": {
                         "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
                     },

@@ -476,7 +476,8 @@ class HealthCollector:
             repos = self.fleet_snapshot.get("data", {}).get("repos", {})
             repo_data = repos.get(root_label)
             if repo_data:
-                return repo_data.get("profile_expected")
+                wgx = repo_data.get("wgx") if isinstance(repo_data.get("wgx"), dict) else {}
+                return wgx.get("profile_expected")
             # If repo not in snapshot, we assume unknown (None)
             return None
 

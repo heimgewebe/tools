@@ -6,6 +6,9 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
+SCHEMA_VERSION = "diagnostics.snapshot.v1"
+TTL_HOURS = 24
+
 def rebuild(hub_path: Path) -> Dict[str, Any]:
     """
     Rebuilds diagnostics snapshot based on fleet.snapshot.json expectations.
@@ -63,7 +66,7 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
         try:
             snap_ts = datetime.strptime(snapshot_ts_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
             now_ts = datetime.now(timezone.utc)
-            if now_ts - snap_ts > timedelta(hours=24):
+            if now_ts - snap_ts > timedelta(hours=TTL_HOURS):
                 snapshot_status_override = "warn"
         except ValueError:
             pass
@@ -86,8 +89,8 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
         checks = []
 
         # Profile Expectation
-        # "prüft lokal ... .wgx/profile.yml vorhanden, wenn snapshot sagt: profile_expected=true"
-        expected = meta.get("profile_expected")
+        wgx = meta.get("wgx") if isinstance(meta.get("wgx"), dict) else {}
+        expected = wgx.get("profile_expected")
         if expected is True:
             profile_path = repo_path / ".wgx" / "profile.yml"
             if not profile_path.exists():
@@ -122,11 +125,11 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
         pass
 
     diag = {
+        "schema_version": SCHEMA_VERSION,
         "status": diag_status,
         "generated_at": ts,
-        "source_snapshot_ts": fleet_data.get("generated_at"),
-        "summary": summary,
-        "issues_total": issues_total,
+        "source_snapshot": { "fleet_generated_at": fleet_data.get("generated_at") },
+        "summary": { **summary, "issues_total": issues_total },
         "data": results
     }
 
