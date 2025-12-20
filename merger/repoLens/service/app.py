@@ -20,6 +20,7 @@ from .security import verify_token, get_security_config, validate_hub_path, vali
 from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from .atlas import AtlasScanner, render_atlas_md
 from .metarepo_sync import sync_from_metarepo
+from . import sources_refresh, diagnostics_rebuild
 
 try:
     from merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
@@ -162,6 +163,26 @@ def api_fs_list(token: Optional[str] = None, root: Optional[str] = None, rel: Op
     except Exception:
         pass
     return {"root": root, "rel": rel, "token": token, **payload}
+
+@app.post("/api/sources/refresh", dependencies=[Depends(verify_token)])
+def api_sources_refresh():
+    if not state.hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+    try:
+        return sources_refresh.refresh(state.hub)
+    except Exception as e:
+        logger.exception("Sources refresh failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/diagnostics/rebuild", dependencies=[Depends(verify_token)])
+def api_diagnostics_rebuild():
+    if not state.hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+    try:
+        return diagnostics_rebuild.rebuild(state.hub)
+    except Exception as e:
+        logger.exception("Diagnostics rebuild failed")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/health")
 def health():

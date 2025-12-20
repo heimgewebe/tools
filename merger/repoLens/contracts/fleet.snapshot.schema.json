@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fleet Snapshot Schema",
+  "type": "object",
+  "required": [
+    "status",
+    "generated_at",
+    "sources",
+    "data"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "error"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sources": {
+      "type": "object",
+      "required": [
+        "metarepo"
+      ],
+      "properties": {
+        "metarepo": {
+          "type": "object",
+          "required": [
+            "path",
+            "commit"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            }
+          }
+        },
+        "contracts_mirror": {
+          "type": "object",
+          "required": [
+            "path",
+            "commit"
+          ],
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

@@ -388,6 +388,19 @@ class HealthCollector:
     def __init__(self, hub_path: Optional[Path] = None) -> None:
         self._repo_health: Dict[str, RepoHealth] = {}
         self.hub_path = hub_path
+        self.fleet_snapshot = self._read_fleet_snapshot()
+
+    def _read_fleet_snapshot(self) -> Optional[Dict[str, Any]]:
+        """Reads .gewebe/cache/fleet.snapshot.json if available."""
+        if not self.hub_path:
+            return None
+        try:
+            p = self.hub_path / ".gewebe/cache/fleet.snapshot.json"
+            if p.exists():
+                return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return None
 
     def _pick_ai_context_paths(self, files: List["FileInfo"]) -> List[Path]:
         """
@@ -454,30 +467,24 @@ class HealthCollector:
 
         return "unknown"
 
-    def _read_wgx_profile_expected(self, files: List["FileInfo"]) -> Optional[bool]:
+    def _read_wgx_profile_expected(self, files: List["FileInfo"], root_label: str) -> Optional[bool]:
         """
-        Reads `heimgewebe.wgx.profile_expected` from the first available *.ai-context.yml.
-        Returns:
-          - True/False if explicitly set
-          - None if not present / unreadable
+        Reads `profile_expected` from fleet snapshot (primary truth).
         """
-        candidates = self._pick_ai_context_paths(files)
-        for p in candidates:
-            try:
-                if yaml is None:
-                    # No YAML parser available: do not crash, keep unknown.
-                    return None
-                data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-                v = (
-                    data.get("heimgewebe", {})
-                        .get("wgx", {})
-                        .get("profile_expected", None)
-                )
-                if isinstance(v, bool):
-                    return v
-            except Exception:
-                # If parsing fails, we keep it unknown rather than inventing truth.
-                continue
+        # T5: Fleet-Erwartungen nur aus fleet.snapshot.json
+        if self.fleet_snapshot:
+            repos = self.fleet_snapshot.get("data", {}).get("repos", {})
+            repo_data = repos.get(root_label)
+            if repo_data:
+                return repo_data.get("profile_expected")
+            # If repo not in snapshot, we assume unknown (None)
+            return None
+
+        # Fallback to local (deprecated by T5 but safe to keep as secondary?
+        # T5 says "Fleet-Erwartungen ... NUR aus fleet.snapshot.json")
+        # So we should probably return None if snapshot missing, or maybe
+        # we check if we should strictly follow "NUR" (ONLY).
+        # "wenn Snapshot fehlt/älter: WARN ... statt CRITICAL." implies we know it's missing.
         return None
 
     def analyze_repo(self, root_label: str, files: List["FileInfo"]) -> RepoHealth:
@@ -520,7 +527,7 @@ class HealthCollector:
             ".wgx" in f.rel_path.parts and str(f.rel_path).endswith("profile.yml")
             for f in files
         )
-        wgx_profile_expected = self._read_wgx_profile_expected(files)
+        wgx_profile_expected = self._read_wgx_profile_expected(files, root_label)
         has_ci_workflows = any("ci" in (f.tags or []) for f in files)
         # 4. Contracts (heuristic extended: contracts/ OR **/*.schema.json)
         def is_contract(f):
@@ -575,22 +582,26 @@ class HealthCollector:
             warnings.append("No README.md found")
             recommendations.append("Add README.md for better AI/human navigation")
 
+        # Snapshot Status Warning (T5)
+        if not self.fleet_snapshot:
+            # Only warn once or per repo? Per repo is safer to ensure visibility.
+            warnings.append("Fleet snapshot missing/outdated")
+            # If snapshot missing, we cannot determine wgx_profile_expected.
+            # But we should NOT treat this as critical for the repo itself, just a warning.
+            pass
+
         # WGX profile policy:
         # - If explicitly NOT expected -> do not warn.
-        # - If expected or unknown -> warn (unknown gets a softer recommendation to declare intent).
-        if not has_wgx_profile and wgx_profile_expected is not False:
-            warnings.append("No .wgx/profile.yml found")
+        # - If expected -> warn.
+        # - If unknown (e.g. no snapshot) -> do NOT warn about profile itself, but we warned about snapshot.
+        if not has_wgx_profile:
             if wgx_profile_expected is True:
+                warnings.append("No .wgx/profile.yml found (expected by fleet snapshot)")
                 recommendations.append("Create .wgx/profile.yml for Fleet conformance")
-            else:
-                if yaml is None:
-                    recommendations.append(
-                        "Either create .wgx/profile.yml or ensure PyYAML is installed so .ai-context.yml policy can be read"
-                    )
-                else:
-                    recommendations.append(
-                        "Either create .wgx/profile.yml or set heimgewebe.wgx.profile_expected=false in .ai-context.yml"
-                    )
+            elif wgx_profile_expected is None:
+                # If unknown, we don't warn about missing profile, because we don't know if it is required.
+                # (Strict logic T3/T5).
+                pass
 
         if not has_ci_workflows:
             warnings.append("No CI workflows found")
