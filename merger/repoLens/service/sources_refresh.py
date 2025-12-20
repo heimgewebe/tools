@@ -224,7 +224,7 @@ def refresh(hub_path: Path):
                 "generated_at": ts,
                 "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
                 "sources": {
-                    "metarepo": {"path": _relpath_safe(repo_matrix, hub_path) if repo_matrix.is_relative_to(hub_path) else "metarepo/docs/repo-matrix.md", "commit": metarepo_commit}
+                    "metarepo": {"path": _relpath_safe(repo_matrix, hub_path), "commit": metarepo_commit}
                 },
                 "data": {},
                 "error": "Source file docs/repo-matrix.md not found in metarepo"
