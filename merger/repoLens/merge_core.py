@@ -422,6 +422,10 @@ class HealthCollector:
         if not report:
             return "unknown"
 
+        # Immediate error check (Patch 1)
+        if report.get("status") == "error":
+            return "warn"
+
         # Safe access to fields
         summary = report.get("summary", {})
         mode = report.get("mode", "unknown")
@@ -431,6 +435,7 @@ class HealthCollector:
         add_count = summary.get("add", 0)
         update_count = summary.get("update", 0)
 
+        # Summary error check
         if err_count > 0:
             return "warn"
 

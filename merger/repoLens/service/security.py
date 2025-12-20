@@ -142,15 +142,27 @@ def resolve_relative_path(root: Path, requested: Optional[str]) -> Path:
     if not requested or requested.strip() == "":
         return root.resolve()
 
-    # If user provides an absolute path, we check strict allowlist
-    # This is a legacy behavior for Atlas, but risky.
-    # We should prefer token navigation.
-    # However, if it looks absolute, we check security config.
-    if os.path.isabs(requested):
-        return get_security_config().validate_path(Path(requested))
-
     try:
         return resolve_secure_path(root, requested)
     except ValueError:
         # Path traversal or outside root
+        raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")
+
+def resolve_any_path(root: Path, requested: Optional[str]) -> Path:
+    """
+    Resolves either a relative path (via resolve_secure_path) OR
+    an absolute path (validated against Allowlist).
+    Use this only when legacy absolute path support is strictly required.
+    """
+    if not requested or requested.strip() == "":
+        return root.resolve()
+
+    # If user provides an absolute path, we check strict allowlist
+    if os.path.isabs(requested):
+        return get_security_config().validate_path(Path(requested))
+
+    # Otherwise treat as relative
+    try:
+        return resolve_secure_path(root, requested)
+    except ValueError:
         raise HTTPException(status_code=403, detail="Access denied: Path outside allowed root")

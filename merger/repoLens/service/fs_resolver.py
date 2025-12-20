@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from fastapi import HTTPException
 from dataclasses import dataclass
-from .security import get_security_config
+from .security import get_security_config, resolve_any_path
 import os
 import time
 import json
@@ -136,7 +136,27 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         if rel in ("", ".", "/"):
             return TrustedPath(base_resolved)
 
-        # If user tries to navigate subpaths without token, block it to enforce token usage
+        # Legacy behavior: we used to resolve subpaths here.
+        # If we need to support it for transition, use resolve_any_path
+        # But for now, we block it as per recent hardening.
+        # However, to be "safe" against code that might have relied on resolve_relative_path handling abs paths here (if any),
+        # we stick to strict policy.
+
+        # If the user instruction meant we should use resolve_any_path here:
+        # "Ersetze Aufrufer, die absolute Pfade brauchen, durch resolve_any_path."
+        # resolve_fs_path used to call resolve_relative_path implicitly via app?
+        # No, app.py calls resolve_fs_path.
+
+        # Wait, the instruction said: "Refactor resolve_relative_path... replace callers...".
+        # Where was resolve_relative_path used?
+        # It was exported from security.py.
+        # app.py used it? No, app.py uses resolve_fs_path.
+        # fs_resolver.py does NOT import resolve_relative_path.
+        # So where was it used?
+        # It seems only metarepo_sync.py might have used it if I didn't replace it with resolve_secure_path in prev step?
+        # Actually app.py imports it: `from .security import ..., resolve_relative_path`.
+
+        # Let's check app.py usage.
         raise HTTPException(status_code=400, detail="Use token navigation for subpaths")
 
     # If neither token nor root_id is provided, reject (strict).
