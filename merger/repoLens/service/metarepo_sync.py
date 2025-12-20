@@ -28,6 +28,47 @@ MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
 logger = logging.getLogger(__name__)
 
 
+def assert_report_shape(report: Dict[str, Any]) -> None:
+    """
+    Validates the report structure against minimal contract requirements.
+    Sets status="error" and increments summary["error"] if violated.
+    """
+    issues = []
+
+    # Check status presence
+    if "status" not in report:
+        issues.append("Missing 'status' field")
+
+    # Check summary keys
+    summary = report.get("summary", {})
+    required_keys = {"add", "update", "skip", "blocked", "error"}
+    if not isinstance(summary, dict) or not required_keys.issubset(summary.keys()):
+        issues.append(f"Invalid summary keys. Expected {required_keys}")
+
+    # Check details actions (uppercase enum)
+    valid_actions = {"ADD", "UPDATE", "SKIP", "BLOCKED", "ERROR"}
+    details = report.get("details", [])
+    if isinstance(details, list):
+        for idx, d in enumerate(details):
+            action = d.get("action")
+            if action not in valid_actions:
+                issues.append(f"Invalid action '{action}' at details[{idx}]")
+    else:
+        issues.append("Details is not a list")
+
+    if issues:
+        report["status"] = "error"
+        # Ensure summary exists to modify
+        if not isinstance(report.get("summary"), dict):
+            report["summary"] = {k: 0 for k in required_keys}
+
+        report["summary"]["error"] += len(issues)
+        # Log issues internally or attach to a debug field if needed
+        # For now, just logging
+        for i in issues:
+            logger.error(f"Report contract violation: {i}")
+
+
 def compute_file_hash(path: Path) -> str:
     """Compute SHA256 hash of a file."""
     if not path.exists():
@@ -53,12 +94,11 @@ def has_managed_marker(path: Path, marker: str) -> bool:
         return False
 
     try:
-        # Read only the beginning of the file
+        # Read beginning of file (up to 8KB or 20 lines) to find marker
         with path.open("r", encoding="utf-8", errors="ignore") as f:
-            for _ in range(5):
-                line = f.readline()
-                if not line:
-                    break
+            chunk = f.read(8192) # 8KB
+            lines = chunk.splitlines()[:20] # Check first 20 lines
+            for line in lines:
                 if marker in line:
                     return True
     except OSError:
@@ -80,13 +120,20 @@ def load_manifest(metarepo_path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _should_process_entry(entry: Dict[str, Any], targets: Optional[List[str]]) -> bool:
-    """Filter entries based on target list (id prefix match)."""
+    """
+    Filter entries based on target list.
+    Matches segments: 'wgx' matches 'wgx', 'wgx/foo', 'wgx:bar', but NOT 'wgx_extra'.
+    """
     if not targets:
         return True
 
     eid = entry.get("id", "")
     for t in targets:
-        if eid.startswith(t):
+        # Exact match
+        if eid == t:
+            return True
+        # Prefix match with separator
+        if eid.startswith(t + "/") or eid.startswith(t + ":"):
             return True
     return False
 
@@ -234,6 +281,9 @@ def sync_repo(
                 "action": action,
                 "reason": reason
             })
+
+    # Validate report shape before returning/writing
+    assert_report_shape(report)
 
     # Write report to repo
     # Always write report, even if empty (as per requirement 4)

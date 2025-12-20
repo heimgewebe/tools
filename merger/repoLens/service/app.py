@@ -442,7 +442,12 @@ def api_sync_metarepo(payload: Dict[str, Any]):
     Payload: { "mode": "dry_run"|"apply", "targets": ["wgx", "ci", ...] }
     """
     mode = payload.get("mode", "dry_run")
+    if mode not in ("dry_run", "apply"):
+        raise HTTPException(status_code=400, detail="Invalid mode. Must be 'dry_run' or 'apply'.")
+
     targets = payload.get("targets")
+    if targets is not None and not isinstance(targets, list):
+        raise HTTPException(status_code=400, detail="Targets must be a list of strings.")
 
     hub_path = state.hub
     if not hub_path:

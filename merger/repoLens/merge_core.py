@@ -385,8 +385,9 @@ class RepoHealth:
 class HealthCollector:
     """Collects health checks for repositories (Stage 1: Repo Doctor)."""
 
-    def __init__(self) -> None:
+    def __init__(self, hub_path: Optional[Path] = None) -> None:
         self._repo_health: Dict[str, RepoHealth] = {}
+        self.hub_path = hub_path
 
     def _pick_ai_context_paths(self, files: List["FileInfo"]) -> List[Path]:
         """
@@ -481,11 +482,17 @@ class HealthCollector:
 
     def analyze_repo(self, root_label: str, files: List["FileInfo"]) -> RepoHealth:
         """Analyze health of a single repository."""
-        # Try to determine repo root from first file's absolute path
+        # Try to determine repo root
         repo_root: Optional[Path] = None
 
-        # 1. Try reconstruction from files (robust fallback)
-        if files:
+        # Strategy A: Deterministic from Hub (Preferred)
+        if self.hub_path:
+            candidate = self.hub_path / root_label
+            if candidate.exists() and candidate.is_dir():
+                repo_root = candidate
+
+        # Strategy B: Reconstruction from files (Fallback)
+        if not repo_root and files:
             try:
                 # Robust reconstruction: take abs path of first file, walk up by len(rel_path.parts) - 1
                 f0 = files[0]
@@ -500,13 +507,6 @@ class HealthCollector:
                         repo_root = f0.abs_path.parents[idx]
             except Exception:
                 pass
-
-        # 2. Heuristic improvement: if we have a known hub, check if hub/root_label is the root
-        # Note: 'files' might be filtered, but usually scan_repo sets root_label = dir.name
-        # We can verify if repo_root matches root_label
-        if repo_root and repo_root.name != root_label:
-             # Discrepancy? Keep repo_root from file path as truth, or log warning.
-             pass
 
         # Count files per category
         category_counts: Dict[str, int] = {}
@@ -2599,7 +2599,16 @@ def iter_report_blocks(
     # Pre-Calculation for Health (needed for Meta Block)
     health_collector = None
     if extras.health:
-        health_collector = HealthCollector()
+        # Pass hub path if available (via sources)
+        # sources list typically contains the repo roots.
+        # But HealthCollector is initialized once for the merge.
+        # If this is a multi-repo merge, sources are diverse.
+        # Best effort: try to derive hub from first source.
+        derived_hub = None
+        if sources:
+            derived_hub = sources[0].parent
+
+        health_collector = HealthCollector(hub_path=derived_hub)
         # Analyze each repo
         for root in sorted(files_by_root.keys()):
             root_files = files_by_root[root]

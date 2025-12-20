@@ -31,3 +31,4 @@ merger/repoLens/merges/
 # Local logs
 *.log
 repolensd.log
+.gewebe/out/
