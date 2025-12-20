@@ -582,14 +582,6 @@ class HealthCollector:
             warnings.append("No README.md found")
             recommendations.append("Add README.md for better AI/human navigation")
 
-        # Snapshot Status Warning (T5)
-        if not self.fleet_snapshot:
-            # Only warn once or per repo? Per repo is safer to ensure visibility.
-            warnings.append("Fleet snapshot missing/outdated")
-            # If snapshot missing, we cannot determine wgx_profile_expected.
-            # But we should NOT treat this as critical for the repo itself, just a warning.
-            pass
-
         # WGX profile policy:
         # - If explicitly NOT expected -> do not warn.
         # - If expected -> warn.
@@ -690,9 +682,14 @@ class HealthCollector:
             if (not h.has_wgx_profile) and (h.wgx_profile_expected is not False)
         )
 
-        if no_ci > 0 or no_contracts > 0 or no_wgx > 0:
+        # P4: Snapshot Warn Global
+        snapshot_missing = not self.fleet_snapshot
+
+        if no_ci > 0 or no_contracts > 0 or no_wgx > 0 or snapshot_missing:
             lines.append("### ⚔ Repo Feindynamiken (Global Risks)")
             lines.append("")
+            if snapshot_missing:
+                lines.append("- ⚠️ **Fleet Snapshot missing/outdated** – some policy checks skipped or inaccurate.")
             if no_ci > 0:
                 lines.append(f"- {no_ci} Repos ohne CI-Workflows")
             if no_contracts > 0:

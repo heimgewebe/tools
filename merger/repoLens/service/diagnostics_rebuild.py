@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,18 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
             json.dump(diag, f, indent=2)
          return {"status": "error", "message": "Fleet snapshot is in error state"}
 
+    # P3: TTL check (>24h)
+    snapshot_ts_str = fleet_data.get("generated_at")
+    snapshot_status_override = None
+    if snapshot_ts_str:
+        try:
+            snap_ts = datetime.strptime(snapshot_ts_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            now_ts = datetime.now(timezone.utc)
+            if now_ts - snap_ts > timedelta(hours=24):
+                snapshot_status_override = "warn"
+        except ValueError:
+            pass
+
     repos = fleet_data.get("data", {}).get("repos", {})
     results = {}
 
@@ -92,14 +104,37 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
             "role": meta.get("role", "unknown")
         }
 
+    # P3: Summary & Issues Total
+    summary = {
+        "ok": sum(1 for r in results.values() if r["status"] == "ok"),
+        "issue": sum(1 for r in results.values() if r["status"] == "issue"),
+        "missing": sum(1 for r in results.values() if r["status"] == "missing")
+    }
+    issues_total = sum(len(r["checks"]) for r in results.values())
+
+    diag_status = snapshot_status_override or "ok"
+    if summary["issue"] > 0 or summary["missing"] > 0:
+        # If we have issues, the overall diagnostics status might still be OK (as in "process ran ok"),
+        # but logically it reflects the fleet health.
+        # "status" here usually means "did the diagnostic process succeed".
+        # However, P3 says "optional: TTL/outdated ... status: warn".
+        # So status refers to the validity of the diagnostic snapshot itself.
+        pass
+
     diag = {
-        "status": "ok",
+        "status": diag_status,
         "generated_at": ts,
         "source_snapshot_ts": fleet_data.get("generated_at"),
+        "summary": summary,
+        "issues_total": issues_total,
         "data": results
     }
 
     with open(diag_out_path, "w", encoding="utf-8") as f:
         json.dump(diag, f, indent=2)
 
-    return {"status": "ok", "issues": sum(1 for r in results.values() if r["status"] == "issue")}
+    return {
+        "status": diag_status,
+        "summary": summary,
+        "issues_total": issues_total
+    }

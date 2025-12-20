@@ -6,6 +6,11 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 logger = logging.getLogger(__name__)
 
 def _get_commit(repo_path: Path) -> str:
@@ -122,38 +127,73 @@ def refresh(hub_path: Path):
     # Prepare base objects
     metarepo_commit = _get_commit(metarepo_path)
 
-    if not repo_matrix.exists():
-        fleet_snapshot = {
-            "status": "error",
-            "generated_at": ts,
-            "sources": {
-                "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
-            },
-            "data": {},
-            "error": "Source file docs/repo-matrix.md not found in metarepo"
-        }
-    else:
+    # P1: Check for repos.yml first
+    repos_yml = metarepo_path / "fleet" / "repos.yml"
+
+    fleet_snapshot = None
+
+    if repos_yml.exists() and yaml is not None:
         try:
-            data = _parse_repo_matrix(repo_matrix)
+            raw_data = yaml.safe_load(repos_yml.read_text(encoding="utf-8"))
+            # Normalize structure:
+            # If dict: { "repo-a": { ... } } -> use as is
+            # If list: [ { "name": "repo-a", ... } ] -> convert to dict
+            data = {}
+            if isinstance(raw_data, dict):
+                data = raw_data
+            elif isinstance(raw_data, list):
+                for item in raw_data:
+                    name = item.get("name") or item.get("repo")
+                    if name:
+                        data[name] = item
+
             fleet_snapshot = {
                 "status": "ok",
                 "generated_at": ts,
                 "sources": {
-                    "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
+                    "metarepo": {"path": str(repos_yml.relative_to(hub_path)), "commit": metarepo_commit}
                 },
                 "data": {"repos": data}
             }
         except Exception as e:
-            logger.exception("Failed to parse repo-matrix.md")
+            logger.warning(f"Failed to parse repos.yml: {e}")
+            # Fallback to MD if YAML fails
+            pass
+
+    # Fallback to repo-matrix.md if YAML not used/failed
+    if not fleet_snapshot:
+        if not repo_matrix.exists():
             fleet_snapshot = {
                 "status": "error",
                 "generated_at": ts,
                 "sources": {
-                    "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
+                    "metarepo": {"path": str(repo_matrix.relative_to(hub_path)) if repo_matrix.is_relative_to(hub_path) else "metarepo/docs/repo-matrix.md", "commit": metarepo_commit}
                 },
                 "data": {},
-                "error": str(e)
+                "error": "Source file docs/repo-matrix.md not found in metarepo"
             }
+        else:
+            try:
+                data = _parse_repo_matrix(repo_matrix)
+                fleet_snapshot = {
+                    "status": "ok",
+                    "generated_at": ts,
+                    "sources": {
+                        "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
+                    },
+                    "data": {"repos": data}
+                }
+            except Exception as e:
+                logger.exception("Failed to parse repo-matrix.md")
+                fleet_snapshot = {
+                    "status": "error",
+                    "generated_at": ts,
+                    "sources": {
+                        "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
+                    },
+                    "data": {},
+                    "error": str(e)
+                }
 
     with open(fleet_out, "w", encoding="utf-8") as f:
         json.dump(fleet_snapshot, f, indent=2)
