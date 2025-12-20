@@ -12,6 +12,11 @@ try:
 except ImportError:
     yaml = None
 
+try:
+    import jsonschema
+except ImportError:
+    jsonschema = None
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "fleet.snapshot.v1"
@@ -157,6 +162,24 @@ def _normalize_repo_entry(raw: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
         del norm["fleet_member"]
     return repo, norm
 
+def _validate_snapshot(snapshot: Dict[str, Any], schema_path: Path) -> Optional[str]:
+    """
+    Validates the snapshot against the schema if jsonschema is available and schema exists.
+    Returns error message string if invalid, None if valid or validation skipped.
+    """
+    if jsonschema is None:
+        return None
+
+    if not schema_path.exists():
+        return None # Skip if schema not found
+
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(instance=snapshot, schema=schema)
+        return None
+    except Exception as e:
+        return str(e)
+
 def refresh(hub_path: Path):
     """
     Reads Metarepo sources and updates snapshots in .gewebe/cache/.
@@ -172,6 +195,9 @@ def refresh(hub_path: Path):
     # 1. Fleet Snapshot
     fleet_out = cache_dir / "fleet.snapshot.json"
     repo_matrix = metarepo_path / "docs" / "repo-matrix.md"
+
+    # Locate schema in metarepo
+    fleet_schema_path = metarepo_path / "contracts/fleet/fleet.snapshot.schema.json"
 
     # Prepare base objects
     metarepo_commit = _get_commit(metarepo_path)
@@ -268,6 +294,14 @@ def refresh(hub_path: Path):
                     "data": {},
                     "error": "Failed to parse repo-matrix.md"
                 }
+
+    # Validate Fleet Snapshot against Metarepo Schema (if available)
+    validation_error = _validate_snapshot(fleet_snapshot, fleet_schema_path)
+    if validation_error:
+        # We downgrade status to error, but still write the file so debug is possible
+        fleet_snapshot["status"] = "error"
+        fleet_snapshot["validation_error"] = validation_error
+        logger.warning(f"Fleet snapshot validation failed: {validation_error}")
 
     with open(fleet_out, "w", encoding="utf-8") as f:
         json.dump(fleet_snapshot, f, indent=2)

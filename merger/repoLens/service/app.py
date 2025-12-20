@@ -218,7 +218,7 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
         "diagnostics": {}
     }
 
-            # 1. Optional Sync
+    # 1. Optional Sync
     if should_sync:
         try:
             # We assume "dry_run" is NOT what we want for a "refresh" button, we want "apply".

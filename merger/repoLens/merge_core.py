@@ -525,6 +525,13 @@ class HealthCollector:
 
     def analyze_repo(self, root_label: str, files: List["FileInfo"]) -> RepoHealth:
         """Analyze health of a single repository."""
+        # Check if repo is known to fleet snapshot (completeness check)
+        is_known_to_snapshot = True
+        if self.fleet_snapshot:
+            repos = self.fleet_snapshot.get("data", {}).get("repos", {})
+            if root_label not in repos:
+                is_known_to_snapshot = False
+
         # Try to determine repo root
         repo_root: Optional[Path] = None
 
@@ -613,6 +620,15 @@ class HealthCollector:
         # Generate warnings and recommendations
         warnings = []
         recommendations = []
+
+        if not is_known_to_snapshot:
+            # We don't add a per-repo warning to avoid spam if the user requested "incomplete snapshot warning".
+            # But the requirement says: "Snapshot incomplete (unknown repos: X)" global warning.
+            # So we track it via a flag on RepoHealth or just count it globally.
+            # Let's add an info-level warning here so it is visible in the per-repo details if desired?
+            # User said: "optional pro repo: unknown_to_snapshot als Info/Warn (nicht als CRITICAL)."
+            warnings.append("Repo unknown to fleet snapshot")
+            # We do NOT mark this as CRITICAL, only warn/info.
 
         if not has_readme:
             warnings.append("No README.md found")
@@ -718,17 +734,29 @@ class HealthCollector:
             if (not h.has_wgx_profile) and (h.wgx_profile_expected is not False)
         )
 
-        # Snapshot Warn Global: missing OR outdated
+        # Snapshot Warn Global: missing OR outdated OR incomplete
         snapshot_missing = not self.fleet_snapshot
         snapshot_outdated = bool(self.fleet_snapshot_outdated)
 
-        if no_ci > 0 or no_contracts > 0 or no_wgx > 0 or snapshot_missing or snapshot_outdated:
+        # Check for incomplete snapshot (repos present locally but not in snapshot)
+        unknown_repos_count = 0
+        if self.fleet_snapshot:
+            snapshot_repos = self.fleet_snapshot.get("data", {}).get("repos", {})
+            for h in self._repo_health.values():
+                if h.repo_name not in snapshot_repos:
+                    unknown_repos_count += 1
+
+        if no_ci > 0 or no_contracts > 0 or no_wgx > 0 or snapshot_missing or snapshot_outdated or unknown_repos_count > 0:
             lines.append("### ⚔ Repo Feindynamiken (Global Risks)")
             lines.append("")
             if snapshot_missing:
                 lines.append("- ⚠️ **Fleet Snapshot missing** – policy checks skipped or may be inaccurate.")
             elif snapshot_outdated:
                 lines.append("- ⚠️ **Fleet Snapshot outdated (TTL exceeded)** – policy checks skipped or may be inaccurate.")
+
+            if unknown_repos_count > 0:
+                lines.append(f"- ⚠️ **Snapshot incomplete** – {unknown_repos_count} repositories unknown to fleet snapshot.")
+
             if no_ci > 0:
                 lines.append(f"- {no_ci} Repos ohne CI-Workflows")
             if no_contracts > 0:
