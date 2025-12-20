@@ -11,6 +11,7 @@ import sys
 import json
 import hashlib
 import datetime
+from datetime import datetime, timezone, timedelta
 import re
 from pathlib import Path
 from typing import Iterable, List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
@@ -391,15 +392,14 @@ class HealthCollector:
         self.hub_path = hub_path
         self.fleet_snapshot = self._read_fleet_snapshot()
         self.fleet_snapshot_outdated = self._is_fleet_snapshot_outdated(self.fleet_snapshot)
-        self.fleet_snapshot_outdated = self._is_fleet_snapshot_outdated(self.fleet_snapshot)
 
-    def _parse_dt(self, s: str) -> Optional[datetime.datetime]:
+    def _parse_dt(self, s: str) -> Optional[datetime]:
         # Accept "Z" timestamps and full ISO
         try:
             if s.endswith("Z"):
-                return datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+                return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
             # fromisoformat handles offsets like +00:00
-            return datetime.datetime.fromisoformat(s)
+            return datetime.fromisoformat(s)
         except Exception:
             return None
 
@@ -417,11 +417,11 @@ class HealthCollector:
             dt = self._parse_dt(gen.strip())
             if not dt:
                 return False
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.now(timezone.utc)
             # normalize naive datetimes to UTC to avoid crashes
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            return (now - dt) > datetime.timedelta(hours=ttl_hours)
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (now - dt) > timedelta(hours=ttl_hours)
         except Exception:
             return False
 
@@ -1966,7 +1966,7 @@ def _generate_run_id(
         A deterministic run_id string
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M")
+        timestamp = datetime.now().strftime("%y%m%d-%H%M")
 
     components: List[str] = []
 
@@ -2101,7 +2101,7 @@ def make_output_filename(
 
     # Legacy behavior: build filename from components
     # 1. Timestamp (jetzt immer am Ende)
-    ts = timestamp if timestamp else datetime.datetime.now().strftime("%y%m%d-%H%M")
+    ts = timestamp if timestamp else datetime.now().strftime("%y%m%d-%H%M")
 
     # 2. Repo-Block
     if not repo_names:
@@ -3518,7 +3518,7 @@ def write_reports_v2(
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
 
     # Global consistent timestamp for this run (all parts/formats must share it)
-    global_ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
+    global_ts = datetime.now().strftime("%y%m%d-%H%M")
     
     # Phase 1.3: Generate deterministic run_id once for this merge
     repo_names = [s["name"] for s in repo_summaries]
