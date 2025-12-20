@@ -184,6 +184,62 @@ def api_diagnostics_rebuild():
         logger.exception("Diagnostics rebuild failed")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/extras/refresh_all", dependencies=[Depends(verify_token)])
+def api_extras_refresh_all(payload: Dict[str, Any] = None):
+    # Payload can optionally contain "sync": true/false
+    if not state.hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    payload = payload or {}
+    # Default sync to False if not provided (safer/faster default)
+    should_sync = payload.get("sync", False)
+
+    result = {
+        "status": "ok",
+        "sync": {"skipped": True},
+        "refresh": {},
+        "diagnostics": {}
+    }
+
+    # 1. Optional Sync
+    if should_sync:
+        try:
+            # We assume "dry_run" is NOT what we want for a "refresh" button, we want "apply".
+            # Or should we default to dry_run? User says "refresh_all... optionaler sync...".
+            # Usually "refresh" implies getting latest state.
+            # But sync_from_metarepo modifies disk (Manifest -> Fleet).
+            # Let s assume "apply" is desired if sync=True.
+            # Also target list? Default to all? None = all.
+            sync_report = sync_from_metarepo(hub_path=state.hub, mode="apply", targets=None)
+
+            if sync_report.get("status") != "ok":
+                # Hard fail as requested
+                msg = sync_report.get("message") or sync_report.get("error") or "Sync failed"
+                raise HTTPException(status_code=500, detail=f"Sync failed: {msg}")
+
+            result["sync"] = sync_report
+        except Exception as e:
+            logger.exception("Sync failed during refresh_all")
+            raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+    # 2. Sources Refresh
+    try:
+        refresh_res = sources_refresh.refresh(state.hub)
+        result["refresh"] = refresh_res
+    except Exception as e:
+        logger.exception("Sources refresh failed during refresh_all")
+        raise HTTPException(status_code=500, detail=f"Sources refresh failed: {str(e)}")
+
+    # 3. Diagnostics Rebuild
+    try:
+        diag_res = diagnostics_rebuild.rebuild(state.hub)
+        result["diagnostics"] = diag_res
+    except Exception as e:
+        logger.exception("Diagnostics rebuild failed during refresh_all")
+        raise HTTPException(status_code=500, detail=f"Diagnostics rebuild failed: {str(e)}")
+
+    return result
+
 @app.get("/api/health")
 def health():
     return {

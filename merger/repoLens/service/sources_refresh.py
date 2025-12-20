@@ -135,6 +135,9 @@ def _normalize_repo_entry(raw: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
             "profile_expected": wgx_obj.get("profile_expected", None)
         }
     }
+    # Fix: omit null fields to satisfy schema
+    if norm["fleet_member"] is None:
+        del norm["fleet_member"]
     return repo, norm
 
 def refresh(hub_path: Path):
@@ -217,9 +220,10 @@ def refresh(hub_path: Path):
                 # MD fallback yields profile_expected at top-level; normalize to nested
                 normed = {}
                 for repo, entry in data.items():
+                    # Fix: omit null fields to satisfy schema
+                    # fleet_member is unknown in MD fallback, so we omit it.
                     normed[repo] = {
                         "repo": repo,
-                        "fleet_member": None,
                         "role": entry.get("role", "unknown"),
                         "policy_tier": "standard",
                         "wgx": { "profile_expected": entry.get("profile_expected", None) }
