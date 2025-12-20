@@ -249,7 +249,7 @@ def refresh(hub_path: Path):
                         "metarepo": {"path": str(repo_matrix.relative_to(hub_path)), "commit": metarepo_commit}
                     },
                     "data": {},
-                    "error": str(e)
+                    "error": "Failed to parse repo-matrix.md"
                 }
 
     with open(fleet_out, "w", encoding="utf-8") as f:

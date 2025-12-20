@@ -38,15 +38,16 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
     try:
         fleet_data = json.loads(fleet_snap_path.read_text(encoding="utf-8"))
     except Exception as e:
+        logger.exception("Failed to load fleet snapshot")
         diag = {
             "status": "error",
             "generated_at": ts,
             "data": {},
-            "error": f"Invalid fleet snapshot: {e}"
+            "error": "Invalid fleet snapshot"
         }
         with open(diag_out_path, "w", encoding="utf-8") as f:
             json.dump(diag, f, indent=2)
-        return {"status": "error", "message": f"Invalid fleet snapshot: {e}"}
+        return {"status": "error", "message": "Invalid fleet snapshot"}
 
     if fleet_data.get("status") != "ok":
          diag = {
