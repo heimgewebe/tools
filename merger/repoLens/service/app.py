@@ -450,7 +450,23 @@ def api_sync_metarepo(payload: Dict[str, Any]):
 
     try:
         report = sync_from_metarepo(hub_path=hub_path, mode=mode, targets=targets)
+
+        # IMPORTANT: do not return HTTP 200 for failed sync runs.
+        # sync_from_metarepo must return {"status": "ok"|"error", ...}
+        status = report.get("status")
+        if status and status != "ok":
+            msg = report.get("message") or report.get("error") or "Sync failed"
+            # Treat as server-side failure of the sync feature contract.
+            raise HTTPException(status_code=500, detail=msg)
+
+        # Backward-compat: older error payloads used {"error": "..."} without status
+        if "error" in report and report.get("error"):
+            raise HTTPException(status_code=500, detail=str(report["error"]))
+
         return report
+    except HTTPException:
+        # Preserve explicit HTTP failures
+        raise
     except Exception as e:
         logger.exception(f"Sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
