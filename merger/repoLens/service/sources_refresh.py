@@ -2,7 +2,7 @@ import json
 import logging
 import subprocess
 import re
-import uuid
+import hashlib
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
@@ -281,7 +281,7 @@ def refresh(hub_path: Path):
     org_index_out = cache_dir / "organism.index.snapshot.json"
     org_snapshot = {
         "schema_version": "organism.index.snapshot.v1",
-        "snapshot_id": str(uuid.uuid4()),
+        "snapshot_id": hashlib.md5(f"stub-{ts}".encode()).hexdigest(),
         "generated_at": ts,
         "source": "repoLens.sources_refresh",
         "organisms": []

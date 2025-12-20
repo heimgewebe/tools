@@ -415,14 +415,15 @@ class HealthCollector:
                 return False
             dt = self._parse_dt(gen.strip())
             if not dt:
-                return False
+                return True
             now = datetime.datetime.now(datetime.timezone.utc)
             # normalize naive datetimes to UTC to avoid crashes
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=datetime.timezone.utc)
             return (now - dt) > datetime.timedelta(hours=ttl_hours)
         except Exception:
-            return False
+            # Safer to assume outdated/invalid than fresh if parsing fails
+            return True
 
     def _read_fleet_snapshot(self) -> Optional[Dict[str, Any]]:
         """Reads .gewebe/cache/fleet.snapshot.json if available."""
