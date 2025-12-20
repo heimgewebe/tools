@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from fastapi import HTTPException
 from dataclasses import dataclass
-from .security import get_security_config
+from .security import get_security_config, resolve_any_path
 import os
 import time
 import json
@@ -136,7 +136,8 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         if rel in ("", ".", "/"):
             return TrustedPath(base_resolved)
 
-        # If user tries to navigate subpaths without token, block it to enforce token usage
+        # Subpaths require token navigation for security.
+        # Legacy absolute path resolution logic (if any) should use resolve_any_path in explicit callers.
         raise HTTPException(status_code=400, detail="Use token navigation for subpaths")
 
     # If neither token nor root_id is provided, reject (strict).
