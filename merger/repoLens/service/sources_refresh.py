@@ -206,7 +206,7 @@ def refresh(hub_path: Path):
                 "schema_version": SCHEMA_VERSION,
                 "status": "ok",
                 "generated_at": ts,
-                "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
+                "validity": { "ttl_hours": TTL_HOURS },
                 "sources": {
                     "metarepo": {"path": _relpath_safe(repos_yml, hub_path), "commit": metarepo_commit}
                 },
@@ -224,7 +224,7 @@ def refresh(hub_path: Path):
                 "schema_version": SCHEMA_VERSION,
                 "status": "error",
                 "generated_at": ts,
-                "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
+                "validity": { "ttl_hours": TTL_HOURS },
                 "sources": {
                     "metarepo": {"path": _relpath_safe(repo_matrix, hub_path), "commit": metarepo_commit}
                 },
@@ -249,7 +249,7 @@ def refresh(hub_path: Path):
                     "schema_version": SCHEMA_VERSION,
                     "status": "ok",
                     "generated_at": ts,
-                    "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
+                    "validity": { "ttl_hours": TTL_HOURS },
                     "sources": {
                         "metarepo": {"path": _relpath_safe(repo_matrix, hub_path), "commit": metarepo_commit}
                     },
@@ -261,7 +261,7 @@ def refresh(hub_path: Path):
                     "schema_version": SCHEMA_VERSION,
                     "status": "error",
                     "generated_at": ts,
-                    "validity": { "ttl_hours": TTL_HOURS, "outdated": False },
+                    "validity": { "ttl_hours": TTL_HOURS },
                     "sources": {
                         "metarepo": {"path": _relpath_safe(repo_matrix, hub_path), "commit": metarepo_commit}
                     },
