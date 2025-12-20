@@ -200,14 +200,16 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
     if not state.hub:
         raise HTTPException(status_code=400, detail="Hub not configured")
 
-    sync_cfg = payload.get("sync") if isinstance(payload.get("sync"), dict) else None
-    sync_mode = (sync_cfg.get("mode") if sync_cfg else None) if isinstance(sync_cfg, dict) else None
-    should_sync = bool(sync_cfg)
-    if sync_mode not in (None, "dry_run", "apply"):
-        sync_mode = "dry_run"
-    # SAFE: treat missing mode as dry_run
-    if should_sync and sync_mode is None:
-        sync_mode = "dry_run"
+    # Sync only if explicitly requested with a valid mode.
+    # This prevents accidental sync runs from payloads like { "sync": {} }.
+    sync_cfg = payload.get("sync")
+    sync_mode = None
+    should_sync = False
+    if isinstance(sync_cfg, dict):
+        m = sync_cfg.get("mode")
+        if m in ("dry_run", "apply"):
+            sync_mode = m
+            should_sync = True
 
     result = {
         "status": "ok",

@@ -29,7 +29,9 @@ def _relpath_safe(p: Path, base: Path) -> str:
         return str(p)
 
 def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    # Use stable Z-format timestamps to reduce downstream parsing variance.
+    # Example: 2025-12-20T15:15:07Z
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def _get_commit(repo_path: Path) -> str:
     """Get current git commit hash of the repo."""

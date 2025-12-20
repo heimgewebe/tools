@@ -726,9 +726,9 @@ class HealthCollector:
             lines.append("### ⚔ Repo Feindynamiken (Global Risks)")
             lines.append("")
             if snapshot_missing:
-                lines.append("- ⚠️ **Fleet Snapshot missing/outdated** – some policy checks skipped or inaccurate.")
+                lines.append("- ⚠️ **Fleet Snapshot missing** – policy checks skipped or may be inaccurate.")
             elif snapshot_outdated:
-                lines.append("- ⚠️ **Fleet Snapshot outdated** – TTL exceeded; some policy checks skipped or inaccurate.")
+                lines.append("- ⚠️ **Fleet Snapshot outdated (TTL exceeded)** – policy checks skipped or may be inaccurate.")
             if no_ci > 0:
                 lines.append(f"- {no_ci} Repos ohne CI-Workflows")
             if no_contracts > 0:
