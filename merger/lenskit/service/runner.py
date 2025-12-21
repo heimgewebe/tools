@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from .models import Job, JobRequest, Artifact
 from .jobstore import JobStore
-from lenskit.adapters.security import validate_source_dir
+from .security import validate_source_dir
 
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
@@ -16,7 +16,7 @@ from lenskit.adapters.security import validate_source_dir
 # We can try absolute import first.
 
 try:
-    from lenskit.core.merge import (
+    from merge_core import (
         detect_hub_dir,
         get_merges_dir,
         scan_repo,
@@ -30,7 +30,7 @@ try:
     )
 except ImportError:
     # Fallback to relative import if running as package
-    from ...core.merge import (
+    from ...merge_core import (
         detect_hub_dir,
         get_merges_dir,
         scan_repo,
