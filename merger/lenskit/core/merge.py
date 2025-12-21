@@ -725,7 +725,6 @@ class HealthCollector:
         lines.append("")
 
         # 1. Repo Feindynamiken (Global)
-        total_repos = len(self._repo_health)
         no_ci = sum(1 for h in self._repo_health.values() if not h.has_ci_workflows)
         no_contracts = sum(1 for h in self._repo_health.values() if not h.has_contracts)
         # Only count missing WGX profile as a "problem" if expected is True or unknown.
@@ -1935,17 +1934,6 @@ def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
 
 # --- Reporting Logic V2 ---
 
-def summarize_categories(file_infos: List[FileInfo]) -> Dict[str, List[int]]:
-    stats: Dict[str, List[int]] = {}
-    for fi in file_infos:
-        cat = fi.category or "other"
-        if cat not in stats:
-            stats[cat] = [0, 0]
-        stats[cat][0] += 1
-        stats[cat][1] += fi.size
-    return stats
-
-
 def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
     """Return the effective render mode based on plan/code switches."""
 
@@ -2885,7 +2873,7 @@ def iter_report_blocks(
                 meta_dict["merge"]["augment"] = augment_meta
 
         # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
-        if "yaml" in globals():
+        if yaml:
             meta_yaml = yaml.safe_dump(meta_dict)
             for line in meta_yaml.rstrip("\n").splitlines():
                 meta_lines.append(line)
