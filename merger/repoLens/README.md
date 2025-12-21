@@ -69,7 +69,7 @@ Das Manifest listet alle Dateien des Merges mit ihren Metadaten auf. Neben Kateg
 **Roles** sind semantische Kurzlabels, die automatisch aus Kategorie, Tags und Pfad abgeleitet werden. Sie helfen KIs und Menschen, die Funktion einer Datei auf einen Blick zu erkennen.
 
 **Wofür sind sie gedacht?**
-- Schnelle Filterung: „Zeige mir alle Contracts", „Wo sind die CI-Pipelines?"  
+- Schnelle Filterung: „Zeige mir alle Contracts", „Wo sind die CI-Pipelines?"
 - Semantische Navigation: Roles ergänzen die technische Kategorie um den Anwendungskontext.
 
 **Wie entstehen sie?**

@@ -1762,23 +1762,6 @@ def _normalize_ext_list(ext_text: str) -> List[str]:
     for p in parts:
         if not p:
             continue
-        # Fix v2.4: Allow filenames like Dockerfile without dot prefix
-        # Heuristic: if it's in CONFIG_FILENAMES or explicitly looks like a filename, keep it.
-        # But for robustness: if user typed "py", they mean ".py".
-        # If user typed "Dockerfile", they mean "Dockerfile" (no extension).
-
-        # Check against known filenames (case-insensitive)
-        is_filename = False
-        for cf in CONFIG_FILENAMES:
-            if cf.lower() == p.lower():
-                is_filename = True
-                break
-
-        if is_filename:
-            # Add as is (lowercase for comparison)
-            cleaned.append(p.lower())
-            continue
-
         if not p.startswith("."):
             p = "." + p
         cleaned.append(p.lower())
@@ -1855,12 +1838,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                     continue
 
                 ext = abs_path.suffix.lower()
-                if ext_filter is not None:
-                    # Fix v2.4: check if extension matches OR exact filename matches
-                    # (allows filtering for "Dockerfile" which has ext="")
-                    name_lower = abs_path.name.lower()
-                    if ext not in ext_filter and name_lower not in ext_filter:
-                        continue
+                if ext_filter is not None and ext not in ext_filter:
+                    continue
 
             try:
                 st = abs_path.stat()
@@ -2443,8 +2422,7 @@ class ReportValidator:
 
         # Helper: only treat *level-2* headings ("## ") as report sections.
         # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
-        # Fix v2.4: Simplify H2 check (redundant check removed)
-        is_h2 = stripped.startswith("## ")
+        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
 
         if stripped.startswith("# repoLens Report"):
             current_step = "header"

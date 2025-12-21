@@ -129,7 +129,7 @@ LAST_STATE_FILENAME = ".repoLens-state.json"
 
 # Import core logic
 try:
-    from merge_core import (
+    from lenskit.core.merge import (
         MERGES_DIR_NAME,
         SKIP_ROOTS,
         detect_hub_dir,
@@ -139,11 +139,11 @@ try:
         _normalize_ext_list,
         ExtrasConfig,
         MergeArtifacts,
-    parse_human_size,
+        parse_human_size,
     )
 except ImportError:
-    sys.path.append(str(SCRIPT_DIR))
-    from merge_core import (
+    sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
+    from lenskit.core.merge import (
         MERGES_DIR_NAME,
         SKIP_ROOTS,
         detect_hub_dir,
@@ -265,26 +265,17 @@ def _parse_extras_csv(extras_csv: str) -> List[str]:
 
 
 def _load_repolens_extractor_module():
-    """Dynamically load repolens-extractor.py from the same directory.
-
-    In Pythonista ist ``__file__`` nicht immer gesetzt (z. B. bei Ausführung
-    aus bestimmten UI-/Shortcut-Kontexten). In dem Fall fallen wir auf
-    ``sys.argv[0]`` bzw. das aktuelle Arbeitsverzeichnis zurück, statt mit
-    einem ``NameError`` abzustürzen.
-    """
-    from importlib.machinery import SourceFileLoader
-    import types
-
-    extractor_path = SCRIPT_PATH.with_name("repolens-extractor.py")
-    if not extractor_path.exists():
-        return None
+    """Load extractor module from core."""
     try:
-        loader = SourceFileLoader("repolens_extractor", str(extractor_path))
-        mod = types.ModuleType(loader.name)
-        loader.exec_module(mod)
-        return mod
+        from lenskit.core import extractor
+        return extractor
+    except ImportError:
+        # Fallback if path not yet set
+        sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
+        from lenskit.core import extractor
+        return extractor
     except Exception as exc:
-        print(f"[repoLens] could not load repolens-extractor: {exc}")
+        print(f"[repoLens] could not load lenskit.core.extractor: {exc}")
         return None
 
 
@@ -1372,39 +1363,39 @@ class MergerUI(object):
         Nutzt die Delta-Helfer aus repolens-extractor.py (falls verfügbar).
         """
         merges_dir = get_merges_dir(self.hub)
-        mod = _load_repolens_extractor_module()
+        try:
+            candidates = list(merges_dir.glob("*-import-diff-*.md"))
+        except Exception as exc:
+            print(f"[repoLens] could not scan merges dir: {exc}")
+            candidates = []
 
-        diff_path = None
-        repo_name = None
-
-        # Helper-Funktion nutzen, falls verfügbar (Fix v2.4 DRY)
-        if mod and hasattr(mod, "find_latest_diff_for_repo"):
-            # Da wir das Repo noch nicht kennen, müssen wir alle scannen
-            try:
-                # Fallback: Scanne alle Diffs und nimm das neuste
-                candidates = list(merges_dir.glob("*-import-diff-*.md"))
-                if candidates:
-                    diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
-            except Exception as exc:
-                print(f"[repoLens] could not scan merges dir: {exc}")
-        else:
-            # Legacy Fallback
-            try:
-                candidates = list(merges_dir.glob("*-import-diff-*.md"))
-                if candidates:
-                    diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
-            except Exception as exc:
-                print(f"[repoLens] could not scan merges dir: {exc}")
-
-        if not diff_path:
-            msg = "No import diff found."
+        if not candidates:
             if console:
-                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
+                console.alert(
+                    "repoLens",
+                    "No import diff found.",
+                    "OK",
+                    hide_cancel_button=True,
+                )
             else:
-                print(f"[repoLens] {msg}")
+                print("[repoLens] No import diff found.")
             return
 
-        # Repo-Namen ableiten
+        # jüngstes Diff wählen
+        try:
+            diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
+        except Exception as exc:
+            if console:
+                console.alert(
+                    "repoLens",
+                    f"Failed to select latest diff: {exc}",
+                    "OK",
+                    hide_cancel_button=True,
+                )
+            else:
+                print(f"[repoLens] Failed to select latest diff: {exc}")
+            return
+
         name = diff_path.name
         prefix = "-import-diff-"
         if prefix in name:

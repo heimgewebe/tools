@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""
+rLens Service Entry Point (Canonical)
+
+Strictly acts as a launcher for the app defined in service/app.py.
+Enforces configuration validity and security constraints before startup.
+"""
+import os
+import sys
+import argparse
+import ipaddress
+from pathlib import Path
+import uvicorn
+
+# Ensure correct path for imports if run as script
+SCRIPT_DIR = Path(__file__).resolve().parent
+# SCRIPT_DIR is lenskit/cli. Parent is lenskit. Parent of that is merger.
+MERGER_ROOT = SCRIPT_DIR.parent.parent
+if str(MERGER_ROOT) not in sys.path:
+    sys.path.insert(0, str(MERGER_ROOT))
+
+try:
+    from lenskit.service.app import app, init_service
+except ImportError:
+    # Fallback if the script is run from a different CWD context
+    sys.path.append(str(MERGER_ROOT))
+    from lenskit.service.app import app, init_service
+
+
+def _is_loopback_host(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if h in ("127.0.0.1", "localhost", "::1"):
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except Exception:
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="rlens")
+    parser.add_argument("--host", default=os.environ.get("RLENS_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("RLENS_PORT", "8787")))
+    parser.add_argument("--hub", default=os.environ.get("RLENS_HUB"), help="Path to the Hub directory (Required)")
+    parser.add_argument("--merges", default=os.environ.get("RLENS_MERGES"), help="Path to output directory")
+    parser.add_argument("--token", default=os.environ.get("RLENS_TOKEN"), help="Auth token (Required for non-loopback)")
+    parser.add_argument("--open", action="store_true", help="ignored (legacy)")
+
+    args = parser.parse_args()
+
+    # 1. Validate Hub Path
+    if not args.hub:
+         print("[rlens] Error: Missing hub path. Set --hub or RLENS_HUB.", file=sys.stderr)
+         sys.exit(1)
+
+    try:
+        hub_path = Path(args.hub).expanduser().resolve()
+    except Exception as e:
+        print(f"[rlens] Error: Invalid hub path syntax: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not hub_path.exists():
+        print(f"[rlens] Error: Hub path does not exist: {hub_path}", file=sys.stderr)
+        sys.exit(1)
+    if not hub_path.is_dir():
+        print(f"[rlens] Error: Hub path is not a directory: {hub_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # 2. Validate/Create Merges Path
+    merges_path = None
+    if args.merges:
+        try:
+            merges_path = Path(args.merges).expanduser().resolve()
+            merges_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"[rlens] Error: Could not create merges directory '{args.merges}': {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # 3. Security Checks
+
+    # Check 1: Token Requirement for non-loopback
+    token = args.token
+    if not _is_loopback_host(args.host) and not token:
+        print(f"[rlens] Security Error: Refusing to bind to non-loopback host '{args.host}' without a token.", file=sys.stderr)
+        print("[rlens] Hint: Set --token or RLENS_TOKEN.", file=sys.stderr)
+        sys.exit(1)
+
+    # Check 2: Root FS Capability vs Loopback
+    allow_fs_root = os.environ.get("RLENS_ALLOW_FS_ROOT", "0") == "1"
+    if allow_fs_root and not _is_loopback_host(args.host):
+        print(f"[rlens] Security Error: RLENS_ALLOW_FS_ROOT=1 requires loopback host (localhost/127.0.0.1).", file=sys.stderr)
+        print(f"[rlens] Current host: {args.host}", file=sys.stderr)
+        sys.exit(1)
+
+    # 4. Initialize Service
+    init_service(
+        hub_path=hub_path,
+        token=token,
+        host=args.host,
+        merges_dir=merges_path
+    )
+
+    # 5. Startup Logging
+    print(f"[rlens] serving on http://{args.host}:{args.port}", flush=True)
+    print(f"[rlens] hub: {hub_path}", flush=True)
+    print(f"[rlens] output: {merges_path if merges_path else '(default: hub/merges)'}", flush=True)
+    print(f"[rlens] token: {'(set)' if token else '(not set)'}", flush=True)
+    if args.open:
+        print("[rlens] note: --open flag is deprecated and ignored.", flush=True)
+
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+    )
+
+if __name__ == "__main__":
+    main()
