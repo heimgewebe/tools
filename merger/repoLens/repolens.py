@@ -1372,39 +1372,39 @@ class MergerUI(object):
         Nutzt die Delta-Helfer aus repolens-extractor.py (falls verfügbar).
         """
         merges_dir = get_merges_dir(self.hub)
-        try:
-            candidates = list(merges_dir.glob("*-import-diff-*.md"))
-        except Exception as exc:
-            print(f"[repoLens] could not scan merges dir: {exc}")
-            candidates = []
+        mod = _load_repolens_extractor_module()
 
-        if not candidates:
+        diff_path = None
+        repo_name = None
+
+        # Helper-Funktion nutzen, falls verfügbar (Fix v2.4 DRY)
+        if mod and hasattr(mod, "find_latest_diff_for_repo"):
+            # Da wir das Repo noch nicht kennen, müssen wir alle scannen
+            try:
+                # Fallback: Scanne alle Diffs und nimm das neuste
+                candidates = list(merges_dir.glob("*-import-diff-*.md"))
+                if candidates:
+                    diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
+            except Exception as exc:
+                print(f"[repoLens] could not scan merges dir: {exc}")
+        else:
+            # Legacy Fallback
+            try:
+                candidates = list(merges_dir.glob("*-import-diff-*.md"))
+                if candidates:
+                    diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
+            except Exception as exc:
+                print(f"[repoLens] could not scan merges dir: {exc}")
+
+        if not diff_path:
+            msg = "No import diff found."
             if console:
-                console.alert(
-                    "repoLens",
-                    "No import diff found.",
-                    "OK",
-                    hide_cancel_button=True,
-                )
+                console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
-                print("[repoLens] No import diff found.")
+                print(f"[repoLens] {msg}")
             return
 
-        # jüngstes Diff wählen
-        try:
-            diff_path = max(candidates, key=lambda p: p.stat().st_mtime)
-        except Exception as exc:
-            if console:
-                console.alert(
-                    "repoLens",
-                    f"Failed to select latest diff: {exc}",
-                    "OK",
-                    hide_cancel_button=True,
-                )
-            else:
-                print(f"[repoLens] Failed to select latest diff: {exc}")
-            return
-
+        # Repo-Namen ableiten
         name = diff_path.name
         prefix = "-import-diff-"
         if prefix in name:
