@@ -19,7 +19,14 @@ class SecurityConfig:
         self.allowlist_roots.append(path.resolve())
 
     def validate_path(self, path: Path):
-        resolved = path.resolve()
+        if "\0" in str(path):
+             raise HTTPException(status_code=400, detail="Invalid path (NUL byte)")
+
+        try:
+            resolved = path.resolve()
+        except Exception:
+             raise HTTPException(status_code=400, detail="Invalid path resolution")
+
         # If no roots configured, allow nothing? Or allow everything?
         # Requirement: "Default allowlist: nur hub und Subdirs"
         if not self.allowlist_roots:
@@ -65,14 +72,17 @@ def verify_token(
     raise HTTPException(status_code=401, detail="Missing or invalid authentication token")
 
 def validate_hub_path(path_str: str):
+    if "\0" in path_str:
+        raise HTTPException(status_code=400, detail="Invalid path (NUL byte)")
+
     p = Path(path_str)
-    get_security_config().validate_path(p)
+    resolved = get_security_config().validate_path(p)
     # Also require a real directory
-    if not p.exists():
+    if not resolved.exists():
         raise HTTPException(status_code=400, detail=f"Hub does not exist: {path_str}")
-    if not p.is_dir():
+    if not resolved.is_dir():
         raise HTTPException(status_code=400, detail=f"Hub is not a directory: {path_str}")
-    return p
+    return resolved
 
 _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 

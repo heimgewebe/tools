@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 import unittest
+import sys
+import os
 from pathlib import Path
-from merge_core import (
+
+# Add merger/ to sys.path so lenskit is importable
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+from lenskit.core.merge import (
     _slug_token,
     classify_file_v2,
     _generate_run_id,
