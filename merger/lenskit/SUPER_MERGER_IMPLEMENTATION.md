@@ -47,7 +47,7 @@ augment:
   version: 1
 
   hotspots:
-    - path: merger/repoLens/merge_core.py
+    - path: merger/lenskit/core/merge.py
       reason: "Complex branching logic"
       severity: "medium"
 

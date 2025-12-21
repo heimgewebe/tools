@@ -3,9 +3,9 @@ import os
 from pathlib import Path
 import sys
 
-sys.path.append(os.path.abspath("merger/repoLens"))
+sys.path.append(os.path.abspath("merger"))
 
-from service.security import resolve_secure_path, resolve_relative_path, resolve_any_path, get_security_config
+from lenskit.adapters.security import resolve_secure_path, resolve_relative_path, resolve_any_path, get_security_config
 
 class TestSecurityPaths(unittest.TestCase):
     def setUp(self):

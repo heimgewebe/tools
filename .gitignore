@@ -24,7 +24,8 @@ metrics.json
 merges/
 *_merge.md
 
-# RepoLens
+# RepoLens / LensKit
+merger/lenskit/merges/
 merger/repoLens/merges/
 **/.repolens-hub-path.txt
 
