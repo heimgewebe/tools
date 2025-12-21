@@ -79,7 +79,7 @@ def _parse_fs_token(token: str) -> Tuple[Path, int]:
 
     try:
         payload = json.loads(body.decode("utf-8"))
-        p = Path(payload["p"])
+        raw_p = payload["p"]
         exp = int(payload["exp"])
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid token payload")
@@ -87,20 +87,20 @@ def _parse_fs_token(token: str) -> Tuple[Path, int]:
     if int(time.time()) > exp:
         raise HTTPException(status_code=403, detail="Token expired")
 
-    if "\x00" in str(p):
-        raise HTTPException(status_code=400, detail="Invalid path request")
+    # Validate path here to establish trust boundary immediately
+    sec = get_security_config()
+    p_safe = sec.validate_path(Path(raw_p))
 
-    return p, exp
+    return p_safe, exp
 
 def resolve_fs_token(token: str) -> Path:
     """
     Resolve a token to an allowed absolute path.
     IMPORTANT: final authority is SecurityConfig.validate_path.
     """
-    sec = get_security_config()
-    p, _exp = _parse_fs_token(token)
-    # validate_path must enforce allowlisted roots (hub/merges/system opt-in)
-    return sec.validate_path(p)
+    # Parsing now includes validation
+    p_safe, _exp = _parse_fs_token(token)
+    return p_safe
 
 def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Optional[str] = None, rel_path: Optional[str] = None, token: Optional[str] = None) -> TrustedPath:
     """
@@ -141,4 +141,4 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         raise HTTPException(status_code=400, detail="Use token navigation for subpaths")
 
     # If neither token nor root_id is provided, reject (strict).
-    raise HTTPException(status_code=400, detail="Invalid fs request")
+    raise HTTPException(status_code=400, detail="Invalid FS request")
