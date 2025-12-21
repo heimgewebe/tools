@@ -129,7 +129,7 @@ LAST_STATE_FILENAME = ".repoLens-state.json"
 
 # Import core logic
 try:
-    from lenskit.core.merge import (
+    from merge_core import (
         MERGES_DIR_NAME,
         SKIP_ROOTS,
         detect_hub_dir,
@@ -139,12 +139,11 @@ try:
         _normalize_ext_list,
         ExtrasConfig,
         MergeArtifacts,
-        parse_human_size,
+    parse_human_size,
     )
 except ImportError:
-    # Add 'merger' dir to path so we can import lenskit package
-    sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
-    from lenskit.core.merge import (
+    sys.path.append(str(SCRIPT_DIR))
+    from merge_core import (
         MERGES_DIR_NAME,
         SKIP_ROOTS,
         detect_hub_dir,
@@ -266,17 +265,26 @@ def _parse_extras_csv(extras_csv: str) -> List[str]:
 
 
 def _load_repolens_extractor_module():
-    """Load extractor module from core."""
+    """Dynamically load repolens-extractor.py from the same directory.
+
+    In Pythonista ist ``__file__`` nicht immer gesetzt (z. B. bei Ausführung
+    aus bestimmten UI-/Shortcut-Kontexten). In dem Fall fallen wir auf
+    ``sys.argv[0]`` bzw. das aktuelle Arbeitsverzeichnis zurück, statt mit
+    einem ``NameError`` abzustürzen.
+    """
+    from importlib.machinery import SourceFileLoader
+    import types
+
+    extractor_path = SCRIPT_PATH.with_name("repolens-extractor.py")
+    if not extractor_path.exists():
+        return None
     try:
-        from lenskit.core import extractor
-        return extractor
-    except ImportError:
-        # Fallback if path not yet set
-        sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
-        from lenskit.core import extractor
-        return extractor
+        loader = SourceFileLoader("repolens_extractor", str(extractor_path))
+        mod = types.ModuleType(loader.name)
+        loader.exec_module(mod)
+        return mod
     except Exception as exc:
-        print(f"[repoLens] could not load lenskit.core.extractor: {exc}")
+        print(f"[repoLens] could not load repolens-extractor: {exc}")
         return None
 
 

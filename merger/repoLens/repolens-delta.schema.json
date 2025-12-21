@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heimgewebe.tools/contracts/repolens-delta.schema.json",
+  "title": "WC Merge Delta",
+  "description": "Delta-Contract für WC-Merger: beschreibt Änderungen zwischen zwei Import-Snapshots.",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "repolens-delta"
+    },
+    "base_import": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Zeitstempel des Basis-Snapshots."
+    },
+    "current_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Zeitstempel des aktuellen Snapshots."
+    },
+    "summary": {
+      "type": "object",
+      "description": "Aggregierte Delta-Zusammenfassung.",
+      "properties": {
+        "files_added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_changed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": ["files_added", "files_removed", "files_changed"]
+    }
+  },
+  "required": ["type", "base_import", "current_timestamp", "summary"],
+  "additionalProperties": true
+}

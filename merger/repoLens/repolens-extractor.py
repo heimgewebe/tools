@@ -70,16 +70,14 @@ SCRIPT_DIR = SCRIPT_PATH.parent
 
 # Import from core
 try:
-    from lenskit.core.merge import (
+    from merge_core import (
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
     )
 except ImportError:
-    # If run directly inside lenskit/core, we need to go up two levels to find 'lenskit' package root
-    # SCRIPT_DIR is lenskit/core
-    sys.path.append(str(SCRIPT_DIR.parent.parent))
-    from lenskit.core.merge import (
+    sys.path.append(str(SCRIPT_DIR))
+    from merge_core import (
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
