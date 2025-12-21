@@ -84,7 +84,7 @@ def validate_report_meta(report_path: Path) -> None:
         raise ValueError("Im @meta-Block fehlt der Schlüssel 'merge' oder er ist kein Objekt.")
 
     # Hauptschema laden
-    report_schema_path = (SCRIPT_DIR / "repolens-report.schema.json").resolve()
+    report_schema_path = (SCRIPT_DIR / "contracts" / "repolens-report.schema.json").resolve()
     if not report_schema_path.exists():
         raise FileNotFoundError(f"Schema nicht gefunden: {report_schema_path}")
 
@@ -105,7 +105,7 @@ def validate_report_meta(report_path: Path) -> None:
     # Optional: Delta-Contract validieren, falls vorhanden
     delta = merge_meta.get("delta")
     if isinstance(delta, dict) and delta.get("type") == "repolens-delta":
-        delta_schema_path = (SCRIPT_DIR / "repolens-delta.schema.json").resolve()
+        delta_schema_path = (SCRIPT_DIR / "contracts" / "repolens-delta.schema.json").resolve()
         if not delta_schema_path.exists():
             print("⚠️  Delta-Schema nicht gefunden, überspringe Delta-Validierung.")
             return

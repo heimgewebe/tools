@@ -76,8 +76,7 @@ try:
         get_repo_snapshot,
     )
 except ImportError:
-    # If run directly inside lenskit/core, we need to go up two levels to find 'lenskit' package root
-    # SCRIPT_DIR is lenskit/core
+    # SCRIPT_DIR is lenskit/core. Parent is lenskit. Parent is merger.
     sys.path.append(str(SCRIPT_DIR.parent.parent))
     from lenskit.core.merge import (
         detect_hub_dir,

@@ -142,7 +142,6 @@ try:
         parse_human_size,
     )
 except ImportError:
-    # Add 'merger' dir to path so we can import lenskit package
     sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
     from lenskit.core.merge import (
         MERGES_DIR_NAME,
