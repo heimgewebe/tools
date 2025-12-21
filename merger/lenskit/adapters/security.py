@@ -8,6 +8,7 @@ import re
 
 from fastapi import HTTPException, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from lenskit.core.path_security import resolve_secure_path
 
 security_scheme = HTTPBearer(auto_error=False)
 
@@ -30,35 +31,32 @@ class SecurityConfig:
             raise ValueError("Invalid root (empty)")
         if "\x00" in s:
             raise ValueError("Invalid root (NUL byte)")
+
         try:
+            # Normalize without requiring existence (strict=False) to handle setup flexibility
+            # resolving allows us to store canonical roots
             root = path.expanduser().resolve()
         except Exception:
             raise ValueError("Invalid root resolution")
+
         if not root.is_absolute():
             raise ValueError("Invalid root (not absolute)")
+
         if root not in self.allowlist_roots:
             self.allowlist_roots.append(root)
 
     def validate_path(self, path: Path) -> Path:
         """
         Central trust boundary for filesystem paths.
-        Any user-influenced path must be normalized + constrained to allowlist_roots here,
-        and callers must use ONLY the returned Path for filesystem operations.
+        Two-stage gate:
+          1) String-only containment pre-check (no filesystem touch) against allowlist_roots
+          2) resolve() + post-check using Path.relative_to for canonical enforcement
         """
-        s = str(path)
-        if not s.strip():
+        raw = str(path)
+        if not raw.strip():
             raise HTTPException(status_code=400, detail="Invalid path (empty)")
-        if "\x00" in s:
+        if "\0" in raw:
             raise HTTPException(status_code=400, detail="Invalid path (NUL byte)")
-
-        try:
-            # normalize before checking roots (prevents traversal and oddities)
-            resolved = path.expanduser().resolve()
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid path resolution")
-
-        if not resolved.is_absolute():
-            raise HTTPException(status_code=400, detail="Invalid path (not absolute)")
 
         if not self.allowlist_roots:
             raise HTTPException(
@@ -66,20 +64,50 @@ class SecurityConfig:
                 detail="No allowed roots configured (SecurityConfig not initialized)",
             )
 
-        # Enforce containment within at least one root
+        # --- Stage 1: pre-check without resolve() ---
+        # Expand ~ and normalize purely as a string.
+        expanded = os.path.expanduser(raw)
+        normalized = os.path.normpath(expanded)
+
+        if not os.path.isabs(normalized):
+            raise HTTPException(status_code=400, detail="Invalid path (not absolute)")
+
+        allowed_by_prefix = False
+        for root in self.allowlist_roots:
+            root_norm = os.path.normpath(str(root))
+            # commonpath is robust vs "../" tricks after normpath
+            try:
+                # commonpath returns the longest common sub-path
+                if os.path.commonpath([root_norm, normalized]) == root_norm:
+                    allowed_by_prefix = True
+                    break
+            except Exception:
+                # If commonpath fails (mixed drives etc.), treat as not allowed.
+                continue
+
+        if not allowed_by_prefix:
+            # This early exit helps CodeQL see the barrier before resolve()
+            raise HTTPException(status_code=403, detail="Access denied: Path is not allowed (prefix check)")
+
+        # --- Stage 2: canonicalize + enforce with Path semantics ---
+        try:
+            # Now safe to resolve (canonicalize symlinks etc)
+            resolved = Path(normalized).resolve()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid path resolution")
+
+        # Post-check: resolved path must still lie within allowlist roots.
+        # This prevents symlink escapes that passed string check.
         for root in self.allowlist_roots:
             try:
-                # Optional drive guard (mostly relevant on Windows)
-                if hasattr(root, "drive") and hasattr(resolved, "drive"):
-                    if root.drive and resolved.drive and root.drive != resolved.drive:
-                        continue
-                resolved.relative_to(root)
+                # Resolve root too to be sure (it should be already, but robustness)
+                resolved_root = root.resolve()
+                resolved.relative_to(resolved_root)
                 return resolved
             except ValueError:
                 continue
 
-        # Avoid leaking full filesystem layout in the error by default
-        raise HTTPException(status_code=403, detail="Access denied: Path is not allowed")
+        raise HTTPException(status_code=403, detail="Access denied: Path is not allowed (canonical check)")
 
 
 _security_config = SecurityConfig()
@@ -114,8 +142,9 @@ def validate_hub_path(path_str: str) -> Path:
         raise HTTPException(status_code=400, detail="Invalid path (NUL byte)")
 
     p = Path(path_str)
+    # Use resolved path for checks
     resolved = get_security_config().validate_path(p)
-    # Also require a real directory
+
     if not resolved.exists():
         raise HTTPException(status_code=400, detail="Hub does not exist")
     if not resolved.is_dir():
