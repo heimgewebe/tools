@@ -4,6 +4,12 @@ import json
 import urllib.request
 import urllib.error
 
+"""
+NOTE:
+These are mock-based client logic tests.
+They do NOT start a real server and are not end-to-end integration tests.
+"""
+
 class TestServiceSecurity(unittest.TestCase):
 
     @patch('urllib.request.urlopen')

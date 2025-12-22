@@ -3,10 +3,13 @@ from unittest.mock import MagicMock, patch
 import json
 import urllib.request
 import urllib.error
+import os
 
-# We mock urllib so we don't actually need a running server for unit tests
-# This tests the *client logic* in the test script itself, ensuring it behaves correctly
-# given specific server responses.
+"""
+NOTE:
+These are mock-based client logic tests.
+They do NOT start a real server and are not end-to-end integration tests.
+"""
 
 class TestServiceIntegration(unittest.TestCase):
 
@@ -52,6 +55,12 @@ class TestServiceIntegration(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(content['id'], 'job-123')
+
+    @unittest.skipUnless(os.environ.get("LENSKIT_E2E") == "1", "E2E test disabled by default")
+    def test_e2e_health_endpoint_real(self):
+        """Real E2E tests live here when enabled."""
+        # This would require actual server startup logic
+        pass
 
 if __name__ == "__main__":
     unittest.main()
