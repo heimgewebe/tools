@@ -38,7 +38,8 @@ def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
     found: list[Path] = []
     try:
         root_res = root.resolve()
-    except Exception:
+    except Exception as e:
+        print(f"[pathfinder] Error resolving root {root}: {e}", file=sys.stderr)
         root_res = root
 
     try:
@@ -48,8 +49,8 @@ def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
             d = hit.parent
             if d.is_dir():
                 found.append(d)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[pathfinder] Error scanning tree {root_res}: {e}", file=sys.stderr)
 
     # uniq
     uniq: list[Path] = []
@@ -65,7 +66,10 @@ def find_repolens_dirs(home: Path) -> list[Path]:
     Wir schreiben den Pfad in jedes gefundene repoLens-Verzeichnis.
     """
     candidates = [
+        # New canonical path (v2.4+)
         home / "merger" / "lenskit" / "frontends" / "pythonista",
+
+        # Legacy paths (deprecated)
         home / "merger" / "repoLens",
         home / "repoLens",
         home / "wc-merger",
@@ -76,7 +80,10 @@ def find_repolens_dirs(home: Path) -> list[Path]:
     icloud_docs = Path("/private/var/mobile/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents")
     if icloud_docs.exists():
         candidates.extend([
+            # New canonical path (v2.4+)
             icloud_docs / "merger" / "lenskit" / "frontends" / "pythonista",
+
+            # Legacy paths (deprecated)
             icloud_docs / "merger" / "repoLens",
             icloud_docs / "repoLens",
             icloud_docs / "wc-merger",
@@ -94,8 +101,8 @@ def find_repolens_dirs(home: Path) -> list[Path]:
                     # notfalls trotzdem aufnehmen, wenn es "repoLens" heißt
                     if d.name.lower() == "repolens":
                         found.append(d)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[pathfinder] Error checking candidate {d}: {e}", file=sys.stderr)
 
     # Duplikate entfernen, Reihenfolge behalten
     uniq: list[Path] = []
