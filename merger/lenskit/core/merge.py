@@ -13,7 +13,7 @@ import hashlib
 import datetime
 import re
 from pathlib import Path
-from typing import Iterable, List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
+from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
 
 try:
@@ -3815,17 +3815,19 @@ def write_reports_v2(
                 plan_only=plan_only, code_only=code_only, timestamp=global_ts
             )
 
+            # Fix: Explicitly capture loop variables (s_name, repo_run_id) as default args
+            # to avoid lazy binding issues in the lambda.
             process_and_write(
                 s_files,
                 [s_root],
-                lambda part_suffix="": make_output_filename(
+                lambda part_suffix="", _name=s_name, _rid=repo_run_id: make_output_filename(
                     merges_dir,
-                    [s_name],
+                    [_name],
                     detail,
                     part_suffix,
                     path_filter,
                     ext_filter_str,
-                    repo_run_id,
+                    _rid,
                     plan_only=plan_only,
                     code_only=code_only,
                     timestamp=global_ts,

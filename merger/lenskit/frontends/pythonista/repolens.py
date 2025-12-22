@@ -23,7 +23,6 @@ import sys
 import os
 import json
 import traceback
-import time
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
@@ -138,7 +137,6 @@ try:
         write_reports_v2,
         _normalize_ext_list,
         ExtrasConfig,
-        MergeArtifacts,
         parse_human_size,
     )
 except ImportError:
@@ -152,7 +150,6 @@ except ImportError:
         write_reports_v2,
         _normalize_ext_list,
         ExtrasConfig,
-        MergeArtifacts,
         parse_human_size,
     )
 
