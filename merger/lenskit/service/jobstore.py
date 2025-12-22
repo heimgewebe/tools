@@ -5,9 +5,9 @@ from typing import List, Optional, Dict
 from .models import Job, Artifact
 
 try:
-    from lenskit.core.merge import MERGES_DIR_NAME
+    from ..core.merge import MERGES_DIR_NAME
 except ImportError:
-    from ...core.merge import MERGES_DIR_NAME
+    from merger.lenskit.core.merge import MERGES_DIR_NAME
 
 class JobStore:
     def __init__(self, hub_path: Path):

@@ -20,11 +20,17 @@ if str(MERGER_ROOT) not in sys.path:
     sys.path.insert(0, str(MERGER_ROOT))
 
 try:
-    from lenskit.service.app import app, init_service
+    # Primary Canonical Import: relative to package
+    from ..service.app import app, init_service
 except ImportError:
-    # Fallback if the script is run from a different CWD context
-    sys.path.append(str(MERGER_ROOT))
-    from lenskit.service.app import app, init_service
+    # Fallback for standalone execution (if sys.path is set correctly for top-level)
+    try:
+        from merger.lenskit.service.app import app, init_service
+    except ImportError as e:
+        print(f"[rlens] Fatal Error: Could not import 'lenskit.service.app'.", file=sys.stderr)
+        print(f"[rlens] Debug info: sys.path={sys.path}", file=sys.stderr)
+        print(f"[rlens] Original error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -37,10 +43,21 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
+def _get_port() -> int:
+    raw = os.environ.get("RLENS_PORT", "")
+    if not raw:
+        return 8787
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"[rlens] Warning: Invalid RLENS_PORT='{raw}', defaulting to 8787", file=sys.stderr)
+        return 8787
+
+
 def main():
     parser = argparse.ArgumentParser(prog="rlens")
     parser.add_argument("--host", default=os.environ.get("RLENS_HOST", "127.0.0.1"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("RLENS_PORT", "8787")))
+    parser.add_argument("--port", type=int, default=_get_port())
     parser.add_argument("--hub", default=os.environ.get("RLENS_HUB"), help="Path to the Hub directory (Required)")
     parser.add_argument("--merges", default=os.environ.get("RLENS_MERGES"), help="Path to output directory")
     parser.add_argument("--token", default=os.environ.get("RLENS_TOKEN"), help="Auth token (Required for non-loopback)")
