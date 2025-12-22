@@ -84,7 +84,7 @@ def run_tests():
     # Happy Path Job
     print("Test 3: Valid Job...")
     payload = {
-        "repos": ["tests"], # assuming 'tests' exists in hub (merger/repoLens)
+        "repos": ["tests"], # assuming 'tests' exists in hub (merger/lenskit)
         "level": "max",
         "plan_only": True
     }

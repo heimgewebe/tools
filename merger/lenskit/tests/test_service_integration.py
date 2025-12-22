@@ -31,7 +31,7 @@ def run_tests():
     print("Repos:", repos)
 
     print("Creating job for 'tests' repo...")
-    # 'tests' folder exists in merger/repoLens
+    # 'tests' folder exists in merger/lenskit
     payload = {
         "repos": ["tests"],
         "level": "max",

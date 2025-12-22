@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - "merges/**.md"
-      - "merger/repoLens/**"
+      - "merger/lenskit/**"
       - ".github/workflows/validate-merges.yml"
   workflow_dispatch: {}
 
@@ -30,7 +30,7 @@ jobs:
           pip install pyyaml jsonschema
 
       - name: Validate merge meta blocks
-        working-directory: merger/repoLens
+        working-directory: merger/lenskit
         run: |
           set -e
           # Alle Merge-Dateien finden, z. B. tools_*_merge.md oder allgemein *.md

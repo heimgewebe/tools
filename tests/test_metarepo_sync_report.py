@@ -8,10 +8,10 @@ from pathlib import Path
 import sys
 
 # Add module path
-sys.path.append(os.path.abspath("merger/repoLens"))
+sys.path.append(os.path.abspath("."))
 
-from service.metarepo_sync import sync_from_metarepo, assert_report_shape, sync_repo
-from merge_core import HealthCollector
+from merger.lenskit.adapters.metarepo import sync_from_metarepo, assert_report_shape, sync_repo
+from merger.lenskit.core.merge import HealthCollector
 
 class TestMetarepoSync(unittest.TestCase):
     def setUp(self):

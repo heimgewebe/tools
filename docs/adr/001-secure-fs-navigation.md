@@ -38,5 +38,5 @@ This creates a visible type boundary between "untrusted user input" and "safe fi
 *   **Maintenance**: Requires `RLENS_FS_TOKEN_SECRET` (or `RLENS_TOKEN` fallback) to be managed securely.
 
 ## References
-*   `merger/repoLens/service/fs_resolver.py`
-*   `merger/repoLens/service/security.py`
+*   `merger/lenskit/adapters/filesystem.py` (formerly fs_resolver)
+*   `merger/lenskit/adapters/security.py`

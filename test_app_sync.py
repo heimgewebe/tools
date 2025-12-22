@@ -4,17 +4,17 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 
-# Add the service directory to sys.path
-sys.path.append(os.path.abspath("merger/repoLens"))
+# Add the root directory to sys.path
+sys.path.append(os.path.abspath("."))
 
-from service.app import api_sync_metarepo
-from service.app import state
+from merger.lenskit.service.app import api_sync_metarepo
+from merger.lenskit.service.app import state
 
 # Mock state
 state.hub = Path("mock_hub")
 
 # Mock sync_from_metarepo to return error
-with patch("service.app.sync_from_metarepo") as mock_sync:
+with patch("merger.lenskit.service.app.sync_from_metarepo") as mock_sync:
     mock_sync.return_value = {"status": "error", "message": "Manifest invalid"}
 
     print("Testing error case...")
@@ -28,7 +28,7 @@ with patch("service.app.sync_from_metarepo") as mock_sync:
             print(f"FAIL: Unexpected error code or detail: {e.status_code} {e.detail}")
 
 # Mock sync_from_metarepo to return ok
-with patch("service.app.sync_from_metarepo") as mock_sync:
+with patch("merger.lenskit.service.app.sync_from_metarepo") as mock_sync:
     mock_sync.return_value = {"status": "ok", "summary": {}}
 
     print("Testing success case...")

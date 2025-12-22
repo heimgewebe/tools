@@ -11,8 +11,8 @@ from .jobstore import JobStore
 from lenskit.adapters.security import validate_source_dir
 
 # Import core logic.
-# Since this file is in merger/repoLens/service/runner.py,
-# and merger/repoLens is usually in sys.path when running repolens.py.
+# Since this file is in merger/lenskit/service/runner.py,
+# and merger/lenskit is usually in sys.path when running rlens.py.
 # We can try absolute import first.
 
 try:
