@@ -14,17 +14,17 @@ import uvicorn
 
 # Ensure correct path for imports if run as script
 SCRIPT_DIR = Path(__file__).resolve().parent
-# SCRIPT_DIR is lenskit/cli. Parent is lenskit. Parent of that is merger.
-MERGER_ROOT = SCRIPT_DIR.parent.parent
-if str(MERGER_ROOT) not in sys.path:
-    sys.path.insert(0, str(MERGER_ROOT))
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    # We expect 'service' to be a package inside 'merger/lenskit' (REPO_ROOT)
+    sys.path.insert(0, str(REPO_ROOT))
 
 try:
-    from lenskit.service.app import app, init_service
+    from service.app import app, init_service
 except ImportError:
     # Fallback if the script is run from a different CWD context
-    sys.path.append(str(MERGER_ROOT))
-    from lenskit.service.app import app, init_service
+    sys.path.append(str(REPO_ROOT))
+    from service.app import app, init_service
 
 
 def _is_loopback_host(host: str) -> bool:

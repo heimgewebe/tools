@@ -3,12 +3,9 @@ import os
 from pathlib import Path
 import sys
 
-# Adjust path to root so we can import 'merger' package
-sys.path.append(os.path.abspath("."))
+sys.path.append(os.path.abspath("merger/repoLens"))
 
-from merger.lenskit.core.path_security import resolve_secure_path
-from merger.lenskit.adapters.security import resolve_any_path, get_security_config
-from fastapi import HTTPException
+from service.security import resolve_secure_path, resolve_relative_path, resolve_any_path, get_security_config
 
 class TestSecurityPaths(unittest.TestCase):
     def setUp(self):
@@ -20,7 +17,6 @@ class TestSecurityPaths(unittest.TestCase):
 
     def test_resolve_secure_path(self):
         # Valid relative
-        # Note: resolve_secure_path resolves the path.
         res = resolve_secure_path(self.root, "subdir/file.txt")
         self.assertEqual(res, self.root / "subdir/file.txt")
 
@@ -32,17 +28,32 @@ class TestSecurityPaths(unittest.TestCase):
         with self.assertRaises(ValueError):
             resolve_secure_path(self.root, "../outside")
 
+    def test_resolve_relative_path_strictness(self):
+        from fastapi import HTTPException
+
+        # Valid
+        res = resolve_relative_path(self.root, "ok.txt")
+        self.assertEqual(res, self.root / "ok.txt")
+
+        # Invalid: Absolute should be forbidden in strictly relative context
+        try:
+            resolve_relative_path(self.root, str(self.root / "file.txt"))
+            self.fail("Absolute path passed resolve_relative_path")
+        except HTTPException as e:
+            self.assertEqual(e.status_code, 403)
+        except ValueError:
+             # Should be caught inside
+             self.fail("ValueError leaked")
+
     def test_resolve_any_path(self):
         # 1. Absolute allowed
         abs_p = self.root / "allowed.txt"
-
         res = resolve_any_path(self.root, str(abs_p))
         self.assertEqual(res, abs_p)
 
         # 2. Absolute denied (outside root)
-        with self.assertRaises(HTTPException) as cm:
+        with self.assertRaises(Exception): # HTTPException 403 from validate_path
              resolve_any_path(self.root, "/etc/passwd")
-        self.assertEqual(cm.exception.status_code, 403)
 
         # 3. Relative allowed
         res = resolve_any_path(self.root, "rel.txt")

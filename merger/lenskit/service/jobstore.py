@@ -7,7 +7,7 @@ from .models import Job, Artifact
 try:
     from lenskit.core.merge import MERGES_DIR_NAME
 except ImportError:
-    from ...core.merge import MERGES_DIR_NAME
+    from ...merge_core import MERGES_DIR_NAME
 
 class JobStore:
     def __init__(self, hub_path: Path):

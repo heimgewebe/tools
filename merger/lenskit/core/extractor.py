@@ -76,8 +76,7 @@ try:
         get_repo_snapshot,
     )
 except ImportError:
-    # SCRIPT_DIR is lenskit/core. Parent is lenskit. Parent is merger.
-    sys.path.append(str(SCRIPT_DIR.parent.parent))
+    sys.path.append(str(SCRIPT_DIR))
     from lenskit.core.merge import (
         detect_hub_dir,
         get_merges_dir,

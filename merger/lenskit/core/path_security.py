@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 
 def resolve_secure_path(root: Path, relpath: str) -> Path:
+    """
+    Resolve a path relative to a root, preventing traversal.
+    Pure logic, no HTTP dependencies.
+    """
     if not isinstance(relpath, str):
         raise ValueError("relpath must be a string")
     if os.path.isabs(relpath) or "\0" in relpath:

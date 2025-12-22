@@ -16,18 +16,16 @@ from datetime import datetime
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
-# security moved to adapters
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
 from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from ..adapters.atlas import AtlasScanner, render_atlas_md
 from ..adapters.metarepo import sync_from_metarepo
-from ..adapters import sources as sources_refresh
-from ..adapters import diagnostics as diagnostics_rebuild
+from ..adapters import sources as sources_refresh, diagnostics_rebuild
 
 try:
     from lenskit.core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
 except ImportError:
-    from ...core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
+    from ...merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -719,8 +717,8 @@ Run `POST /api/export/webmaschine` to update these files.
         raise HTTPException(status_code=500, detail=f"Export failed: {e}")
 
 # Serve static UI
-# app.py is in lenskit/service. webui is in lenskit/frontends/webui.
+# We assume webui folder is next to this file
 current_dir = Path(__file__).parent
-webui_dir = current_dir.parent / "frontends" / "webui"
+webui_dir = current_dir / "webui"
 if webui_dir.exists():
     app.mount("/", StaticFiles(directory=str(webui_dir), html=True), name="webui")

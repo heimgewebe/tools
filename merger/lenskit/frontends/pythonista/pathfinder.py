@@ -65,7 +65,6 @@ def find_repolens_dirs(home: Path) -> list[Path]:
     Wir schreiben den Pfad in jedes gefundene repoLens-Verzeichnis.
     """
     candidates = [
-        home / "merger" / "lenskit" / "frontends" / "pythonista",
         home / "merger" / "repoLens",
         home / "repoLens",
         home / "wc-merger",
@@ -76,7 +75,6 @@ def find_repolens_dirs(home: Path) -> list[Path]:
     icloud_docs = Path("/private/var/mobile/Library/Mobile Documents/iCloud~com~omz-software~Pythonista3/Documents")
     if icloud_docs.exists():
         candidates.extend([
-            icloud_docs / "merger" / "lenskit" / "frontends" / "pythonista",
             icloud_docs / "merger" / "repoLens",
             icloud_docs / "repoLens",
             icloud_docs / "wc-merger",
