@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import json
+import urllib.request
 import urllib.error
 
 # We mock urllib so we don't actually need a running server for unit tests
