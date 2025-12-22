@@ -16,16 +16,17 @@ from datetime import datetime
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
-from .security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
-from .fs_resolver import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
-from .atlas import AtlasScanner, render_atlas_md
-from .metarepo_sync import sync_from_metarepo
-from . import sources_refresh, diagnostics_rebuild
+from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
+from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
+from ..adapters.atlas import AtlasScanner, render_atlas_md
+from ..adapters.metarepo import sync_from_metarepo
+from ..adapters import sources as sources_refresh
+from ..adapters import diagnostics as diagnostics_rebuild
 
 try:
-    from merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
+    from ..core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
 except ImportError:
-    from ...merge_core import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
+    from merger.lenskit.core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)

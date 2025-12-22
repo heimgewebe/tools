@@ -165,6 +165,16 @@ def main() -> int:
     if repolens_dirs:
         for (d, (ok, info)) in zip(repolens_dirs, results):
             lines.append(f"- repoLens @ {d}: {'OK' if ok else 'FAIL'}  {info}")
+
+        # Ambiguity check
+        if len(repolens_dirs) > 1:
+            warn_msg = f"WARNING: Found {len(repolens_dirs)} repoLens locations! Please cleanup legacy installations."
+            lines.append("")
+            lines.append(warn_msg)
+            print(warn_msg, file=sys.stderr)
+            if console:
+                 console.hud_alert("Multiple repoLens found!", "error", 2.0)
+
     else:
         lines.append("- repoLens: (not found automatically)")
 

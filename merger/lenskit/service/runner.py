@@ -8,7 +8,7 @@ from typing import Optional, List
 
 from .models import Job, JobRequest, Artifact
 from .jobstore import JobStore
-from lenskit.adapters.security import validate_source_dir
+from ..adapters.security import validate_source_dir
 
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
