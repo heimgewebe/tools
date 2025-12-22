@@ -139,10 +139,12 @@ try:
         _normalize_ext_list,
         ExtrasConfig,
         MergeArtifacts,
-    parse_human_size,
+        parse_human_size,
     )
 except ImportError:
-    sys.path.append(str(SCRIPT_DIR))
+    # SCRIPT_DIR is lenskit/frontends/pythonista
+    # We need to add 'merger' (grand-grand-parent) to path to import 'lenskit'
+    sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
     from lenskit.core.merge import (
         MERGES_DIR_NAME,
         SKIP_ROOTS,
@@ -265,21 +267,21 @@ def _parse_extras_csv(extras_csv: str) -> List[str]:
 
 
 def _load_repolens_extractor_module():
-    """Dynamically load repolens-extractor.py from the same directory.
+    """Dynamically load extractor logic.
 
-    In Pythonista ist ``__file__`` nicht immer gesetzt (z. B. bei Ausführung
-    aus bestimmten UI-/Shortcut-Kontexten). In dem Fall fallen wir auf
-    ``sys.argv[0]`` bzw. das aktuelle Arbeitsverzeichnis zurück, statt mit
-    einem ``NameError`` abzustürzen.
+    In Pythonista ist ``__file__`` nicht immer gesetzt.
+    Wir suchen lenskit/core/extractor.py relativ zum Skript.
     """
     from importlib.machinery import SourceFileLoader
     import types
 
-    extractor_path = SCRIPT_PATH.with_name("repolens-extractor.py")
+    # SCRIPT_PATH = .../lenskit/frontends/pythonista/repolens.py
+    # Extractor = .../lenskit/core/extractor.py
+    extractor_path = SCRIPT_PATH.parent.parent / "core" / "extractor.py"
     if not extractor_path.exists():
         return None
     try:
-        loader = SourceFileLoader("repolens_extractor", str(extractor_path))
+        loader = SourceFileLoader("lenskit_extractor", str(extractor_path))
         mod = types.ModuleType(loader.name)
         loader.exec_module(mod)
         return mod
