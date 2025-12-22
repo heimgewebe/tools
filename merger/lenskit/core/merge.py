@@ -2538,7 +2538,7 @@ def iter_report_blocks(
     nav = NavStyle(emit_search_markers=False)
 
     # UTC Timestamp
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
 
     # Sort files according to strict multi-repo order and then path
     files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
@@ -3401,7 +3401,7 @@ def generate_json_sidecar(
     Generate a JSON sidecar structure for machine consumption.
     Contains meta, files array, and minimal verification guards.
     """
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only}
     plan_only, code_only, normalized_requested = _normalize_mode_flags(
         requested_flags.get("plan_only", False),
