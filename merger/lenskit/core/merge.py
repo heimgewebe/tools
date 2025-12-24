@@ -1644,6 +1644,21 @@ def compute_md5(path: Path, limit_bytes: Optional[int] = None) -> str:
         return "ERROR"
 
 
+def compute_sha256(path: Path) -> str:
+    """Compute SHA256 hash of a file."""
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return "ERROR"
+
+
 def lang_for(ext: str) -> str:
     return LANG_MAP.get(ext.lower().lstrip("."), "")
 
@@ -3933,11 +3948,195 @@ def write_reports_v2(
             md_parts=verified_md,
             other=other_paths
         )
-    else:
-        # Markdown is primary when json_sidecar is disabled
-        return MergeArtifacts(
-            index_json=None,
-            canonical_md=verified_md[0] if verified_md else None,
-            md_parts=verified_md,
-            other=other_paths
-        )
+
+
+# --- Review Bundle Renderer (v2.4 Extension) ---
+
+REVIEW_BLOCKLIST = {
+    ".env",
+    "id_rsa",
+    "id_dsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "secrets.yaml",
+    "secrets.yml",
+    "secrets.json",
+    "tokens.json",
+    "tokens.yaml",
+}
+
+REVIEW_BLOCKLIST_PATTERNS = [
+    re.compile(r".*\.key$"),
+    re.compile(r".*\.pem$"),
+    re.compile(r".*\.p12$"),
+    re.compile(r".*\.pfx$"),
+    re.compile(r".*\.ovpn$"),
+    re.compile(r"id_rsa.*"),
+]
+
+def is_blocked_file(filename: str) -> bool:
+    if filename in REVIEW_BLOCKLIST:
+        return True
+    for p in REVIEW_BLOCKLIST_PATTERNS:
+        if p.match(filename):
+            return True
+    return False
+
+def render_review_bundle(
+    source_dir: Path,
+    output_dir: Path,
+    delta: Dict[str, Any],
+    base_dir: Optional[Path] = None
+) -> None:
+    """
+    Generates a full AI-ready review bundle.
+
+    Structure:
+      bundle/
+        review.md
+        delta.json
+        bundle.json
+        evidence/
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    evidence_dir = output_dir / "evidence"
+    evidence_dir.mkdir(exist_ok=True)
+
+    # 1. Write delta.json
+    delta_path = output_dir / "delta.json"
+    delta_path.write_text(json.dumps(delta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # 2. Write review.md
+    review_lines = []
+
+    # Header
+    review_lines.append("# PR Review")
+    review_lines.append("")
+
+    # Summary
+    summary = delta.get("summary", {})
+    review_lines.append("## Summary")
+    review_lines.append(f"- added: {summary.get('added', 0)}")
+    review_lines.append(f"- changed: {summary.get('changed', 0)}")
+    review_lines.append(f"- removed: {summary.get('removed', 0)}")
+
+    # Hotspots (simple heuristic based on categories in delta)
+    hotspots = set()
+    for f in delta.get("files", []):
+        cat = f.get("category")
+        path = f.get("path", "")
+        if cat in ("contract", "schema"):
+            hotspots.add("contracts/schemas")
+        if ".github" in path:
+            hotspots.add(".github/")
+
+    if hotspots:
+        review_lines.append(f"- hotspots: {', '.join(sorted(hotspots))}")
+
+    review_lines.append("")
+    review_lines.append("---")
+    review_lines.append("")
+
+    # Files
+    files = delta.get("files", [])
+
+    for f in files:
+        path = f.get("path")
+        status = f.get("status")
+        category = f.get("category")
+        size = f.get("size_bytes", 0)
+
+        review_lines.append(f"## File: {path}")
+        review_lines.append(f"status: {status}")
+        review_lines.append(f"category: {category}")
+        review_lines.append(f"size_bytes: {size}")
+        review_lines.append("")
+
+        # Determine if we show content
+        if status == "removed":
+            review_lines.append("(removed)")
+            review_lines.append("")
+            review_lines.append("---")
+            review_lines.append("")
+            continue
+
+        # Security Check
+        filename = Path(path).name
+        if is_blocked_file(filename):
+            review_lines.append("```markdown")
+            review_lines.append("[REDACTED: security rule]")
+            review_lines.append("```")
+            review_lines.append("")
+            review_lines.append("---")
+            review_lines.append("")
+            continue
+
+        # Size Check (200KB)
+        if size > 200 * 1024:
+            review_lines.append("```markdown")
+            review_lines.append(f"[OMITTED: file size {human_size(size)} > 200KB]")
+            review_lines.append("```")
+            review_lines.append("")
+            review_lines.append("---")
+            review_lines.append("")
+            continue
+
+        # Read Content
+        src_file = source_dir / path
+        content = ""
+        try:
+            if src_file.exists():
+                # Check for binary
+                if is_probably_text(src_file, size):
+                    content = src_file.read_text(encoding="utf-8", errors="replace")
+                else:
+                    content = "[BINARY CONTENT]"
+            else:
+                content = "[FILE NOT FOUND]"
+        except Exception as e:
+            content = f"[ERROR READING FILE: {e}]"
+
+        # Optional BEFORE context for changed files
+        before_content = None
+        if status == "changed" and base_dir:
+            base_file = base_dir / path
+            try:
+                if base_file.exists():
+                     if is_probably_text(base_file, base_file.stat().st_size):
+                         before_content = base_file.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+        # Render Content
+        if before_content is not None:
+             review_lines.append("```markdown")
+             review_lines.append("### BEFORE")
+             review_lines.append("```")
+             review_lines.append("```text")
+             review_lines.append(before_content)
+             review_lines.append("```")
+             review_lines.append("")
+             review_lines.append("AFTER")
+             review_lines.append("")
+
+        review_lines.append("```text")
+        review_lines.append(content)
+        review_lines.append("```")
+        review_lines.append("")
+        review_lines.append("---")
+        review_lines.append("")
+
+    review_path = output_dir / "review.md"
+    review_path.write_text("\n".join(review_lines), encoding="utf-8")
+
+    # 3. Write bundle.json
+    bundle_meta = {
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "source": str(source_dir),
+        "base": str(base_dir) if base_dir else None,
+        "delta_version": delta.get("version"),
+        "files_count": len(files)
+    }
+
+    bundle_path = output_dir / "bundle.json"
+    bundle_path.write_text(json.dumps(bundle_meta, indent=2), encoding="utf-8")

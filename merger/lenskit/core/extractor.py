@@ -74,6 +74,8 @@ try:
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
+        scan_repo,
+        compute_sha256,
     )
 except ImportError:
     # SCRIPT_DIR is lenskit/core. Parent is lenskit. Parent is merger.
@@ -82,6 +84,8 @@ except ImportError:
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
+        scan_repo,
+        compute_sha256,
     )
 
 
@@ -97,15 +101,7 @@ def build_delta_meta_from_diff(
 ) -> Dict[str, Any]:
     """
     Builds a delta metadata dict conforming to repolens-delta.schema.json.
-
-    Args:
-        only_old: List of files removed
-        only_new: List of files added
-        changed: List of changed file tuples (path, size_old, size_new, ...)
-        base_timestamp: Optional timestamp of base import
-
-    Returns:
-        Delta metadata dict conforming to schema
+    (Legacy V1 support)
     """
     now = datetime.datetime.now(datetime.timezone.utc)
 
@@ -131,6 +127,84 @@ def build_delta_meta_from_diff(
     }
 
     return delta_meta
+
+
+def compare_directories(
+    source_dir: Path,
+    base_dir: Optional[Path],
+    max_bytes: int = 0
+) -> Dict[str, Any]:
+    """
+    Compares two directories (source vs base) and returns a Delta V2 dictionary.
+
+    If base_dir is None, all files in source_dir are considered 'added'.
+
+    Returns a dict conforming to repolens-delta.v2.schema.json.
+    """
+    source_summary = scan_repo(source_dir, max_bytes=max_bytes)
+    source_files = {f.rel_path.as_posix(): f for f in source_summary["files"]}
+
+    base_files = {}
+    if base_dir and base_dir.exists():
+        base_summary = scan_repo(base_dir, max_bytes=max_bytes)
+        base_files = {f.rel_path.as_posix(): f for f in base_summary["files"]}
+
+    delta_files = []
+    summary_counts = {"added": 0, "changed": 0, "removed": 0}
+
+    # Check added and changed
+    for path, src_fi in source_files.items():
+        if path not in base_files:
+            status = "added"
+            summary_counts["added"] += 1
+            # Compute real SHA256
+            sha = compute_sha256(src_fi.abs_path)
+            delta_files.append({
+                "path": path,
+                "status": status,
+                "category": src_fi.category or "other",
+                "size_bytes": src_fi.size,
+                "sha256": sha
+            })
+        else:
+            base_fi = base_files[path]
+            # Compare content using MD5 from scan_repo (fast comparison)
+            if src_fi.size != base_fi.size or src_fi.md5 != base_fi.md5:
+                status = "changed"
+                summary_counts["changed"] += 1
+                # Compute real SHA256
+                sha = compute_sha256(src_fi.abs_path)
+                delta_files.append({
+                    "path": path,
+                    "status": status,
+                    "category": src_fi.category or "other",
+                    "size_bytes": src_fi.size,
+                    "sha256": sha
+                })
+
+    # Check removed
+    for path, base_fi in base_files.items():
+        if path not in source_files:
+            status = "removed"
+            summary_counts["removed"] += 1
+            # Compute real SHA256 for the removed file (from base)
+            sha = compute_sha256(base_fi.abs_path)
+            delta_files.append({
+                "path": path,
+                "status": status,
+                "category": base_fi.category or "other",
+                "size_bytes": base_fi.size, # Size at removal time (from base)
+                "sha256": sha
+            })
+
+    # Sort files by path for determinism
+    delta_files.sort(key=lambda x: x["path"])
+
+    return {
+        "version": "repolens-delta.v2",
+        "summary": summary_counts,
+        "files": delta_files
+    }
 
 
 def extract_delta_meta_from_diff_file(diff_path: Path) -> Optional[Dict[str, Any]]:

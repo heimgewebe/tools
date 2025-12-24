@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heimgewebe.tools/contracts/repolens-delta.v2.schema.json",
+  "title": "repoLens Review Delta v2",
+  "description": "Delta-Contract v2 for Review Bundles: single source of truth for file changes.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "repolens-delta.v2"
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "added": { "type": "integer", "minimum": 0 },
+        "changed": { "type": "integer", "minimum": 0 },
+        "removed": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["added", "changed", "removed"]
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "status": { "type": "string", "enum": ["added", "changed", "removed"] },
+          "category": { "type": "string", "enum": ["source", "config", "schema", "ci", "doc", "other"] },
+          "size_bytes": { "type": "integer" },
+          "sha256": { "type": "string" }
+        },
+        "required": ["path", "status", "category", "size_bytes", "sha256"]
+      }
+    }
+  },
+  "required": ["version", "summary", "files"],
+  "additionalProperties": false
+}

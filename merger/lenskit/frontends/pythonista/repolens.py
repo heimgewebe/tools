@@ -1750,6 +1750,12 @@ def _is_headless_requested() -> bool:
 
 def main_cli():
     import argparse
+
+    # Check for 'review' command
+    if len(sys.argv) > 1 and sys.argv[1] == "review":
+        sys.argv.pop(1)
+        return review_cli()
+
     parser = argparse.ArgumentParser(description="repoLens CLI")
     parser.add_argument("paths", nargs="*", help="Repositories to merge")
     parser.add_argument("--hub", help="Base directory (repolens-hub)")
@@ -1877,6 +1883,64 @@ def main_cli():
     print(f"Generated {len(out_paths)} report(s):")
     for p in out_paths:
         print(f"  - {p}")
+
+
+def review_cli():
+    """
+    New 'repolens review' command handler.
+    Generates a Review Bundle (AI-ready) from source (and optional base).
+    """
+    import argparse
+    try:
+        from lenskit.core.extractor import compare_directories
+        from lenskit.core.merge import render_review_bundle
+    except ImportError:
+        sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
+        from lenskit.core.extractor import compare_directories
+        from lenskit.core.merge import render_review_bundle
+
+    parser = argparse.ArgumentParser(description="repoLens Review: Generate AI-ready review bundle")
+    parser.add_argument("--source", required=True, help="Path to checked out PR branch (source)")
+    parser.add_argument("--base-snapshot", dest="base", help="Optional path to base snapshot (BEFORE context)")
+    parser.add_argument("--out", required=True, help="Output directory for bundle")
+
+    args = parser.parse_args()
+
+    source_dir = Path(args.source).resolve()
+    if not source_dir.exists() or not source_dir.is_dir():
+        print(f"Error: Source directory not found: {source_dir}", file=sys.stderr)
+        return 1
+
+    base_dir = Path(args.base).resolve() if args.base else None
+    if base_dir and not base_dir.exists():
+        print(f"Warning: Base directory not found: {base_dir}. Proceeding without BEFORE context.", file=sys.stderr)
+        base_dir = None
+
+    out_dir = Path(args.out).resolve()
+
+    print(f"Generating Review Bundle...")
+    print(f"  Source: {source_dir}")
+    print(f"  Base:   {base_dir if base_dir else '(none)'}")
+    print(f"  Output: {out_dir}")
+
+    try:
+        # 1. Compare (Delta V2)
+        delta = compare_directories(source_dir, base_dir)
+
+        # 2. Render Bundle
+        render_review_bundle(source_dir, out_dir, delta, base_dir)
+
+        print(f"Success! Bundle generated at {out_dir}")
+        print(f"  - {out_dir}/review.md")
+        print(f"  - {out_dir}/delta.json")
+        print(f"  - {out_dir}/bundle.json")
+
+    except Exception as e:
+        print(f"Error generating review bundle: {e}", file=sys.stderr)
+        traceback.print_exc()
+        return 1
+
+    return 0
 
 
 def main():
