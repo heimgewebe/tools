@@ -134,9 +134,11 @@ try:
         detect_hub_dir,
         get_merges_dir,
         scan_repo,
-        write_reports_v2,
-        _normalize_ext_list,
+        write_reports,
         ExtrasConfig,
+    )
+    from lenskit.core.fs_scan import (
+        _normalize_ext_list,
         parse_human_size,
     )
 except ImportError:
@@ -147,9 +149,11 @@ except ImportError:
         detect_hub_dir,
         get_merges_dir,
         scan_repo,
-        write_reports_v2,
-        _normalize_ext_list,
+        write_reports,
         ExtrasConfig,
+    )
+    from lenskit.core.fs_scan import (
+        _normalize_ext_list,
         parse_human_size,
     )
 
@@ -1506,7 +1510,7 @@ class MergerUI(object):
                 delta_reports=True # Force enable
             )
 
-            # Need to scan repo for write_reports_v2
+            # Need to scan repo for write_reports
             # Delta Report Strategy:
             # 1. Scan repo fully (max_bytes=0 => unlimited)
             # 2. Filter file list based on delta_meta (changed + added)
@@ -1551,7 +1555,7 @@ class MergerUI(object):
             # Generate merge reports
             # Use 'max' profile to ensure full content for the changed/added files
             # (dev/doc logic might otherwise hide content for doc changes)
-            artifacts = write_reports_v2(
+            artifacts = write_reports(
                 merges_dir,
                 self.hub,
                 [summary],
@@ -1688,7 +1692,7 @@ class MergerUI(object):
             return
 
         merges_dir = get_merges_dir(self.hub)
-        artifacts = write_reports_v2(
+        artifacts = write_reports(
             merges_dir,
             self.hub,
             summaries,
@@ -1862,7 +1866,7 @@ def main_cli():
             if args.debug:
                 print(f"Warning: Could not extract delta metadata: {e}")
 
-    artifacts = write_reports_v2(
+    artifacts = write_reports(
         merges_dir,
         hub,
         summaries,

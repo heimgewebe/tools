@@ -25,7 +25,7 @@
         "properties": {
           "path": { "type": "string" },
           "status": { "type": "string", "enum": ["added", "changed", "removed"] },
-          "category": { "type": "string", "enum": ["source", "config", "schema", "ci", "doc", "other"] },
+          "category": { "type": "string", "enum": ["source", "config", "schema", "contract", "test", "ci", "doc", "other"] },
           "size_bytes": { "type": "integer" },
           "sha256": { "type": "string" }
         },

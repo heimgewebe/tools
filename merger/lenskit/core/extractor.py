@@ -74,6 +74,8 @@ try:
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
+    )
+    from lenskit.core.fs_scan import (
         scan_repo,
         compute_sha256,
     )
@@ -84,6 +86,8 @@ except ImportError:
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
+    )
+    from lenskit.core.fs_scan import (
         scan_repo,
         compute_sha256,
     )

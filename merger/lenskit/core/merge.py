@@ -21,6 +21,28 @@ try:
 except Exception:  # pragma: no cover
     yaml = None
 
+from .fs_scan import (
+    FileInfo,
+    scan_repo,
+    compute_md5,
+    compute_sha256,
+    is_probably_text,
+    classify_file,
+    is_critical_file,
+    is_noise_file,
+    human_size,
+    TEXT_EXTENSIONS,
+    SKIP_DIRS,
+    SKIP_FILES,
+    CONFIG_FILENAMES,
+    DOC_EXTENSIONS,
+    SOURCE_EXTENSIONS,
+    DEFAULT_MAX_BYTES,
+    lang_for,
+    get_repo_sort_index,
+    extract_purpose,
+    get_declared_purpose
+)
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
@@ -99,12 +121,6 @@ MERGES_DIR_NAME = "merges"
 MERGE_CONTRACT_NAME = "repolens-report"
 MERGE_CONTRACT_VERSION = SPEC_VERSION
 
-# Ab v2.3+: 0 = "kein Limit pro Datei".
-# max_file_bytes wirkt nur noch als optionales Soft-Limit / Hint,
-# nicht mehr als harte Abschneide-Grenze. Große Dateien werden
-# vollständig gelesen und nur über die Split-Logik in Parts verteilt.
-DEFAULT_MAX_BYTES = 0
-
 def _debug_log_func(debug: "DebugCollector", level: str):
     """
     Map configured severity levels to DebugCollector methods.
@@ -160,25 +176,6 @@ AGENT_CONTRACT_VERSION = "v1"
 # Delta Report configuration
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
 
-# Directories to ignore
-SKIP_DIRS = {
-    ".git",
-    ".idea",
-    "node_modules",
-    ".svelte-kit",
-    ".next",
-    "dist",
-    "build",
-    "target",
-    ".venv",
-    "venv",
-    "__pycache__",
-    ".pytest_cache",
-    ".DS_Store",
-    ".mypy_cache",
-    "coverage",
-}
-
 # Top-level roots to skip in auto-discovery
 SKIP_ROOTS = {
     MERGES_DIR_NAME,
@@ -186,26 +183,6 @@ SKIP_ROOTS = {
     "output",
     "out",
 }
-
-# Individual files to ignore
-SKIP_FILES = {
-    ".DS_Store",
-    "thumbs.db",
-}
-
-# Extensions considered text (broadened)
-TEXT_EXTENSIONS = {
-    ".md", ".txt", ".rst", ".py", ".rs", ".ts", ".tsx", ".js", ".jsx",
-    ".json", ".jsonl", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf",
-    ".sh", ".bash", ".zsh", ".fish", ".dockerfile", "dockerfile",
-    ".svelte", ".css", ".scss", ".html", ".htm", ".xml", ".csv", ".log",
-    ".lock", ".bats", ".properties", ".gradle", ".groovy", ".kt", ".kts",
-    ".java", ".c", ".cpp", ".h", ".hpp", ".go", ".rb", ".php", ".pl",
-    ".lua", ".sql", ".bat", ".cmd", ".ps1", ".make", "makefile", "justfile",
-    ".tf", ".hcl", ".gitignore", ".gitattributes", ".editorconfig", ".cs",
-    ".swift", ".adoc", ".ai-context"
-}
-
 
 def _stable_file_id(fi: "FileInfo") -> str:
     """
@@ -327,7 +304,7 @@ class DebugCollector:
 @dataclass
 class MergeArtifacts:
     """
-    Result object for write_reports_v2() containing all generated artifacts.
+    Result object for write_reports() containing all generated artifacts.
     Makes it explicit which artifact is the primary (JSON or Markdown).
     """
     index_json: Optional[Path] = None
@@ -1192,51 +1169,9 @@ def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> Non
             )
 
 
-# Directories considered "noise" (build artifacts etc.)
-NOISY_DIRECTORIES = ("node_modules/", "dist/", "build/", "target/")
-
-# Standard lockfile names
-LOCKFILE_NAMES = {
-    "Cargo.lock",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "poetry.lock",
-    "Pipfile.lock",
-}
-
-# Files typically considered configuration
-CONFIG_FILENAMES = {
-    "pyproject.toml", "package.json", "package-lock.json", "pnpm-lock.yaml",
-    "Cargo.toml", "Cargo.lock", "requirements.txt", "Pipfile", "Pipfile.lock",
-    "poetry.lock", "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
-    "Justfile", "Makefile", "toolchain.versions.yml", ".editorconfig",
-    ".markdownlint.jsonc", ".markdownlint.yaml", ".yamllint", ".yamllint.yml",
-    ".lychee.toml", ".vale.ini", ".pre-commit-config.yaml", ".gitignore",
-    ".gitmodules", "tsconfig.json", "babel.config.js", "webpack.config.js",
-    "rollup.config.js", "vite.config.js", "vite.config.ts", ".ai-context.yml"
-}
-
 # Large generated files or lockfiles that should be summarized in 'dev' profile
 SUMMARIZE_FILES = {
     "package-lock.json", "pnpm-lock.yaml", "Cargo.lock", "yarn.lock", "Pipfile.lock", "poetry.lock"
-}
-
-DOC_EXTENSIONS = {".md", ".rst", ".txt", ".adoc"}
-SOURCE_EXTENSIONS = {
-    ".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".svelte", ".c", ".cpp",
-    ".h", ".hpp", ".go", ".java", ".cs", ".rb", ".php", ".swift", ".kt",
-    ".sh", ".bash", ".pl", ".lua"
-}
-
-LANG_MAP = {
-    "py": "python", "js": "javascript", "ts": "typescript", "html": "html", "css": "css",
-    "scss": "scss", "sass": "sass", "json": "json", "xml": "xml", "yaml": "yaml", "yml": "yaml",
-    "md": "markdown", "sh": "bash", "bat": "batch", "sql": "sql", "php": "php", "cpp": "cpp",
-    "c": "c", "java": "java", "cs": "csharp", "go": "go", "rs": "rust", "rb": "ruby",
-    "swift": "swift", "kt": "kotlin", "svelte": "svelte", "toml": "toml", "ini": "ini",
-    "dockerfile": "dockerfile", "tf": "hcl", "hcl": "hcl", "bats": "bash", "pl": "perl", "lua": "lua",
-    "ai-context": "yaml"
 }
 
 HARDCODED_HUB_PATH = (
@@ -1273,27 +1208,6 @@ REPO_ORDER = [
     "weltgewebe",
     "vault-gewebe",
 ]
-
-class FileInfo(object):
-    """Container for file metadata."""
-    def __init__(self, root_label, abs_path, rel_path, size, is_text, md5, category, tags, ext, skipped=False, reason=None, content=None, inclusion_reason="normal"):
-        self.root_label = root_label
-        self.abs_path = abs_path
-        self.rel_path = rel_path
-        self.size = size
-        self.is_text = is_text
-        self.md5 = md5
-        self.category = category
-        self.tags = tags
-        self.ext = ext
-        self.skipped = skipped
-        self.reason = reason
-        self.content = content
-        self.inclusion_reason = inclusion_reason
-        self.anchor = "" # Will be set during report generation
-        self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
-        self.roles = [] # Will be computed during report generation
-
 
 # --- Utilities ---
 
@@ -1513,50 +1427,6 @@ def determine_inclusion_status(fi: "FileInfo", level: str, max_file_bytes: int) 
 
     return "full" if fi.size <= max_file_bytes else "omitted"
 
-def is_noise_file(fi: "FileInfo") -> bool:
-    """
-    Heuristik für 'Noise'-Dateien:
-    - offensichtliche Lockfiles / Paketmanager-Artefakte
-    - typische Build-/Vendor-Verzeichnisse
-    ohne das Manifest-Schema zu verändern – nur das Included-Label wird erweitert.
-    """
-    try:
-        path_str = str(fi.rel_path).replace("\\", "/").lower()
-        name = fi.rel_path.name.lower()
-    except Exception as e:
-        sys.stderr.write(f"Warning: is_noise_file failed for {fi.rel_path}: {e}\n")
-        return False
-
-    noisy_dirs = (
-        "node_modules/",
-        "dist/",
-        "build/",
-        "target/",
-        "venv/",
-        ".venv/",
-        "__pycache__/",
-    )
-    if any(seg in path_str for seg in noisy_dirs):
-        return True
-
-    lock_names = {
-        "cargo.lock",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "yarn.lock",
-        "poetry.lock",
-        "pipfile.lock",
-        "composer.lock",
-    }
-    if name in lock_names or name.endswith(".lock"):
-        return True
-
-    tags_lower = {t.lower() for t in (fi.tags or [])}
-    if "lockfile" in tags_lower or "deps" in tags_lower or "vendor" in tags_lower:
-        return True
-
-    return False
-
 def detect_hub_dir(script_path: Path, arg_base_dir: Optional[str] = None) -> Path:
     env_base = os.environ.get("REPOLENS_BASEDIR")
     if env_base:
@@ -1587,329 +1457,6 @@ def get_merges_dir(hub: Path) -> Path:
     merges = hub / MERGES_DIR_NAME
     merges.mkdir(parents=True, exist_ok=True)
     return merges
-
-
-def human_size(n: float) -> str:
-    size = float(n)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024.0 or unit == "GB":
-            return "{0:.2f} {1}".format(size, unit)
-        size /= 1024.0
-    return "{0:.2f} GB".format(size)
-
-
-def is_probably_text(path: Path, size: int) -> bool:
-    name = path.name.lower()
-    base, ext = os.path.splitext(name)
-    if ext in TEXT_EXTENSIONS or name in TEXT_EXTENSIONS:
-        return True
-    if size > 20 * 1024 * 1024:  # 20 MiB
-        return False
-    try:
-        with path.open("rb") as f:
-            chunk = f.read(4096)
-    except OSError:
-        return False
-    if not chunk:
-        return True
-    if b"\x00" in chunk:
-        return False
-    return True
-
-
-def compute_md5(path: Path, limit_bytes: Optional[int] = None) -> str:
-    # MD5 is used for file integrity checking, not cryptographic security
-    try:
-        h = hashlib.md5(usedforsecurity=False)
-    except TypeError:
-        # Fallback for Python < 3.9
-        h = hashlib.md5()  # nosec B303
-    try:
-        with path.open("rb") as f:
-            remaining = limit_bytes
-            while True:
-                if remaining is None:
-                    chunk = f.read(65536)
-                else:
-                    chunk = f.read(min(65536, remaining))
-                if not chunk:
-                    break
-                h.update(chunk)
-                if remaining is not None:
-                    remaining -= len(chunk)
-                    if remaining <= 0:
-                        break
-        return h.hexdigest()
-    except OSError:
-        return "ERROR"
-
-
-def compute_sha256(path: Path) -> str:
-    """Compute SHA256 hash of a file."""
-    try:
-        h = hashlib.sha256()
-        with path.open("rb") as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk:
-                    break
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return "ERROR"
-
-
-def lang_for(ext: str) -> str:
-    return LANG_MAP.get(ext.lower().lstrip("."), "")
-
-
-def get_repo_sort_index(repo_name: str) -> int:
-    """Returns sort index for repo based on REPO_ORDER."""
-    try:
-        return REPO_ORDER.index(repo_name)
-    except ValueError:
-        return 999  # Put undefined repos at the end
-
-def extract_purpose(repo_root: Path) -> str:
-    """Safe purpose extraction from README or docs/intro.md. No guessing."""
-    candidates = ["README.md", "README", "docs/intro.md"]
-    for c in candidates:
-        p = repo_root / c
-        if p.exists():
-            try:
-                # Read text safely
-                with p.open("r", encoding="utf-8", errors="ignore") as f:
-                    txt = f.read().strip()
-                    # First paragraph is content until double newline
-                    first = txt.split("\n\n")[0].strip()
-                    # Markdown-Überschrift (#, ##, …) vorne abschneiden
-                    first = first.lstrip("#").strip()
-                    return first
-            except Exception as e:
-                sys.stderr.write(f"Warning: Failed to extract purpose from {p}: {e}\n")
-                return ""
-    return ""
-
-def get_declared_purpose(files: List[FileInfo]) -> str:
-    # Deprecated in favor of extract_purpose for consistency with Spec v2.3 patch D logic
-    # But kept as fallback or to support .ai-context which spec patch D didn't mention explicitly
-    # but patch D implemented it as:
-    # try: purpose = extract_purpose(sources[0]); ...
-    return "(none)" # Handled in iter_report_blocks via extract_purpose
-
-
-def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
-    """
-    Returns (category, tags).
-    Strict Pattern Matching based on v2.1 Spec.
-    """
-    parts = list(rel_path.parts)
-    name = rel_path.name.lower()
-    tags = []
-
-    # Tag Patterns - Strict match
-    # KI-Kontext-Dateien
-    if name.endswith(".ai-context.yml"):
-        tags.append("ai-context")
-
-    # CI-Workflows
-    if ".github" in parts and "workflows" in parts and ext in [".yml", ".yaml"]:
-        tags.append("ci")
-
-    # Contracts:
-    # Nur als Kategorie, nicht mehr als Tag – Spec sieht kein 'contract'-Tag vor.
-    # (Die Zuordnung passiert weiter unten über die Category-Logik.)
-
-    if "docs" in parts and "adr" in parts and ext == ".md":
-        tags.append("adr")
-    if name.startswith("runbook") and ext == ".md":
-        tags.append("runbook")
-
-    # Skripte: Shell und Python unter scripts/ oder bin/ als 'script' markieren
-    if (("scripts" in parts) or ("bin" in parts)) and ext in (".sh", ".py"):
-        tags.append("script")
-
-    if "export" in parts and ext == ".jsonl":
-        tags.append("feed")
-
-    # Lockfiles (package-lock, Cargo.lock, pnpm-lock, etc.)
-    if "lock" in name:
-        tags.append("lockfile")
-
-    # README: Spec-konform als KI-Kontext markieren, kein eigener 'readme'-Tag
-    if name == "readme.md":
-        tags.append("ai-context")
-
-    # WGX-Profile
-    if ".wgx" in parts and name.startswith("profile"):
-        tags.append("wgx-profile")
-
-
-    # Determine Category - Strict Logic
-    # Category ∈ {source, test, doc, config, contract, other}
-    category = "other"
-
-    # Order matters: check more specific first
-    if name in CONFIG_FILENAMES or "config" in parts or ".github" in parts or ".wgx" in parts or ext in [".toml", ".yaml", ".yml", ".json", ".lock"]:
-         # Note: .json could be contract or config, check contract path
-         if "contracts" in parts:
-             category = "contract"
-         else:
-             category = "config"
-    elif ext in DOC_EXTENSIONS or "docs" in parts:
-        category = "doc"
-    elif "contracts" in parts: # Fallback if not caught above
-        category = "contract"
-    elif "tests" in parts or "test" in parts or name.endswith("_test.py") or name.startswith("test_"):
-        category = "test"
-    elif ext in SOURCE_EXTENSIONS or "src" in parts or "crates" in parts or "scripts" in parts:
-        category = "source"
-
-    return category, tags
-
-
-def _normalize_ext_list(ext_text: str) -> List[str]:
-    if not ext_text:
-        return []
-    parts = [p.strip() for p in ext_text.split(",")]
-    cleaned: List[str] = []
-    for p in parts:
-        if not p:
-            continue
-        if not p.startswith("."):
-            p = "." + p
-        cleaned.append(p.lower())
-    return cleaned
-
-
-# --- Repo Scan Logic ---
-
-def is_critical_file(rel_path_str: str) -> bool:
-    """
-    Checks if a file is critical and should be force-included regardless of filters.
-    Rules:
-    - README.md (any case)
-    - .ai-context.yml
-    - .wgx/profile.yml
-    - .github/workflows/*guard*
-    """
-    lower = rel_path_str.lower()
-    if lower == "readme.md" or lower.endswith("/readme.md"):
-        return True
-    if lower == ".ai-context.yml" or lower.endswith("/.ai-context.yml"):
-        return True
-    if ".wgx/profile.yml" in lower:
-        return True
-    if ".github/workflows/" in lower and "guard" in lower:
-        return True
-    return False
-
-def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES) -> Dict[str, Any]:
-    repo_root = repo_root.resolve()
-    root_label = repo_root.name
-    files = []
-
-    ext_filter = set(e.lower() for e in extensions) if extensions else None
-    path_filter = path_contains.strip() if path_contains else None
-
-    total_files = 0
-    total_bytes = 0
-    ext_hist: Dict[str, int] = {}
-
-    for dirpath, dirnames, filenames in os.walk(str(repo_root)):
-        # Filter directories
-        keep_dirs = []
-        for d in dirnames:
-            if d in SKIP_DIRS:
-                continue
-            keep_dirs.append(d)
-        dirnames[:] = keep_dirs
-
-        for fn in filenames:
-            if fn in SKIP_FILES:
-                continue
-            if fn.startswith(".env") and fn not in (".env.example", ".env.template", ".env.sample"):
-                continue
-
-            abs_path = Path(dirpath) / fn
-            try:
-                rel_path = abs_path.relative_to(repo_root)
-            except ValueError:
-                continue
-
-            rel_path_str = rel_path.as_posix()
-
-            # Filter Logic with Force Include
-            is_critical = is_critical_file(rel_path_str)
-            inclusion_reason = "normal"
-
-            if is_critical:
-                ext = abs_path.suffix.lower()
-                inclusion_reason = "force_include"
-            else:
-                # Normal filtering
-                if path_filter and path_filter not in rel_path_str:
-                    continue
-
-                ext = abs_path.suffix.lower()
-                if ext_filter is not None and ext not in ext_filter:
-                    continue
-
-            try:
-                st = abs_path.stat()
-            except OSError:
-                continue
-
-            size = st.st_size
-            total_files += 1
-            total_bytes += size
-            ext_hist[ext] = ext_hist.get(ext, 0) + 1
-
-            is_text = is_probably_text(abs_path, size)
-            category, tags = classify_file_v2(rel_path, ext)
-
-            # MD5 calculation:
-            # - Textdateien: immer kompletter MD5
-            # - Binärdateien:
-            #   a) wenn kein Limit gesetzt ist (unlimited) -> hashen
-            #   b) wenn Limit gesetzt ist -> nur hashen, wenn size <= Limit
-            md5 = ""
-            # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
-            limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
-            if is_text:
-                md5 = compute_md5(abs_path, limit_bytes)
-            else:
-                # Fix v2.4: Allow binary hashing if unlimited (limit_bytes is None)
-                if limit_bytes is None or size <= limit_bytes:
-                    md5 = compute_md5(abs_path, limit_bytes)
-
-            fi = FileInfo(
-                root_label=root_label,
-                abs_path=abs_path,
-                rel_path=rel_path,
-                size=size,
-                is_text=is_text,
-                md5=md5,
-                category=category,
-                tags=tags,
-                ext=ext,
-                inclusion_reason=inclusion_reason
-            )
-            files.append(fi)
-
-    # Sort files: first by repo order (if multi-repo context handled outside,
-    # but here root_label is constant per scan_repo call unless we merge lists later),
-    # then by path.
-    files.sort(key=lambda fi: str(fi.rel_path).lower())
-
-    return {
-        "root": repo_root,
-        "name": root_label,
-        "files": files,
-        "total_files": total_files,
-        "total_bytes": total_bytes,
-        "ext_hist": ext_hist,
-    }
 
 def parse_human_size(text: str) -> int:
     text = str(text).upper().strip()
@@ -2309,1059 +1856,6 @@ def _render_delta_block(delta_meta: Dict[str, Any]) -> str:
     lines.append("")
     return "\n".join(lines)
 
-def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
-    """
-    Checks for objective inconsistencies specified in the spec.
-    """
-    warnings = []
-
-    # Check for hausKI casing
-    roots = set(f.root_label for f in files)
-
-    # Check for missing .wgx/profile.yml in repos
-    for root in roots:
-        has_profile = any(f.root_label == root and "wgx-profile" in f.tags for f in files)
-        if not has_profile:
-             if root in REPO_ORDER:
-                 warnings.append(f"- {root}: missing .wgx/profile.yml")
-
-    return warnings
-
-
-class ValidationException(Exception):
-    pass
-
-
-class ReportValidator:
-    """
-    Validates report structure incrementally (Stream Validation).
-    Enforces Spec v2.4 Invariant Structure (Section 2).
-    """
-
-    # Normalized signatures for required sections in order
-    REQUIRED_ORDER = [
-        "header",               # # repoLens Report ...
-        "source_profile",       # ## Source & Profile
-        "profile_desc",         # ## Profile Description
-        "reading_plan",         # ## Reading Plan
-        "plan",                 # ## Plan
-        # Extras come here (Health, Delta, etc) -> no strict check except they are between Plan and Structure
-        # Structure is optional (machine-lean)
-        # Manifest is required
-        # Content is required
-    ]
-
-    def __init__(self, plan_only: bool = False, code_only: bool = False, machine_lean: bool = False):
-        self.plan_only = plan_only
-        self.code_only = code_only
-        self.machine_lean = machine_lean
-        self.state_idx = 0
-        self.seen_sections = set()
-        self.buffer = ""
-        self.in_code_block = False
-        self.fence_len = 0
-
-    def feed(self, chunk: str):
-        """
-        Feed a chunk of the report (e.g. a block from iter_report_blocks).
-        Validates headings found in the chunk.
-        """
-        # We process line by line to reliably catch headings
-        self.buffer += chunk
-        while "\n" in self.buffer:
-            line, self.buffer = self.buffer.split("\n", 1)
-            self._check_line(line)
-
-    def close(self):
-        """Finalize validation."""
-        # Process remaining buffer
-        if self.buffer:
-            self._check_line(self.buffer)
-
-        # Check if we missed required sections
-        # Note: We can't strictly enforce "Content" presence here because of split-parts (last part might just be content)
-        # But for single-file generation it matters.
-        # However, since this validator is used in write_reports_v2 which might write partial files,
-        # strict "completeness" check at the end is tricky for splits.
-        # We assume if the stream finished without order violation, it's OK.
-        # Real completeness check is done via internal state logic if needed.
-        pass
-
-    def _check_line(self, line: str):
-        stripped = line.strip()
-
-        # Track code blocks to avoid false positives in file content
-        # Spec v2.4 fix: Support variable fence length (CommonMark)
-        if stripped.startswith("```"):
-            # Determine length of this fence
-            match = re.match(r"^(`+)", stripped)
-            current_len = len(match.group(1)) if match else 0
-
-            if not self.in_code_block:
-                # Opening a block
-                self.in_code_block = True
-                self.fence_len = current_len
-            else:
-                # Closing? Only if length >= opening length
-                if current_len >= self.fence_len:
-                    self.in_code_block = False
-                    self.fence_len = 0
-                else:
-                    # It's a nested fence (shorter), ignore it (treat as content)
-                    pass
-            return
-
-        if self.in_code_block:
-            return
-
-        if not stripped.startswith("#"):
-            return
-
-        # Identify section
-        lower = stripped.lower()
-
-        # Map headings to logical steps
-        current_step = None
-
-        # Helper: only treat *level-2* headings ("## ") as report sections.
-        # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
-        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
-
-        if stripped.startswith("# repoLens Report"):
-            current_step = "header"
-        elif "source & profile" in lower:
-            current_step = "source_profile"
-        elif "profile description" in lower:
-            current_step = "profile_desc"
-        elif "reading plan" in lower:
-            current_step = "reading_plan"
-        elif stripped == "## Plan":
-            current_step = "plan"
-        elif "structure" in lower and is_h2:
-            current_step = "structure"
-        elif "manifest" in lower and is_h2:
-            # Could be "## 🧾 Manifest"
-            current_step = "manifest"
-        elif "content" in lower and (stripped.startswith("## ") or stripped.startswith("# ")):
-            # Accept "# Content" (legacy/lean) or "## 📄 Content" (spec strict)
-            current_step = "content"
-        elif is_h2 and "organism" not in lower:
-            # Main Index (Patch B)
-            #
-            # IMPORTANT:
-            # The old check used a substring match ("index" in lower), which
-            # false-positives on headings like "Navigation-Indexe", "Indexierung",
-            # "Indexe", etc. Those can appear inside repo docs and would break
-            # the invariant structure ordering.
-            #
-            # We only treat it as the report's main Index if it strictly matches
-            # "## Index" or "## 🧭 Index".
-            #
-            # Additionally: never treat "### file-...index..." anchors as the main Index.
-            # Those are file section headings and may appear after Content has started,
-            # especially in multi-repo merges where many repos contain index.* files.
-            if re.search(r"^##\s*(?:🧭\s*)?index\s*$", lower):
-                current_step = "index"
-
-        if current_step:
-            self._enforce_order(current_step)
-
-    def _enforce_order(self, step: str):
-        # Define the strict sequence indices
-        # We allow gaps (skipping optional sections), but not backtracking.
-
-        sequence = {
-            "header": 0,
-            "source_profile": 10,
-            "profile_desc": 20,
-            "reading_plan": 30,
-            "plan": 40,
-            # Extras range: 41-49
-            "structure": 50,
-            "index": 55, # Spec v2.4 Section 8: Index before Manifest
-            "manifest": 60,
-            "content": 70
-        }
-
-        # Plan-only stops after Plan (roughly)
-        if self.plan_only and sequence.get(step, 0) > 40:
-             # Plan-only might have headers? Usually not Structure/Manifest/Content.
-             # But if it does (e.g. meta info formatted as header), we might need to be careful.
-             # Standard iter_report_blocks breaks early for plan_only.
-             pass
-
-        if step not in sequence:
-            return
-
-        new_idx = sequence[step]
-
-        # Special case: Structure is optional.
-        # Index is optional.
-
-        if new_idx < self.state_idx:
-            # Violation!
-            raise ValidationException(
-                f"Structure Violation: Found section '{step}' (order {new_idx}) "
-                f"after reaching order {self.state_idx}. "
-                "Invariant Structure (Spec v2.4) violated."
-            )
-
-        self.state_idx = new_idx
-        self.seen_sections.add(step)
-
-    def validate_full(self, report_content: str):
-        """Validate a full string report."""
-        self.feed(report_content)
-        self.close()
-
-        # For full validation, we can check required presence
-        required = ["header", "source_profile", "profile_desc", "reading_plan", "plan"]
-        if not self.plan_only:
-            required.append("manifest")
-            if not self.machine_lean:
-                # Structure optional in machine-lean
-                pass
-                # Note: Manifest and Content are mandatory for full merge
-            required.append("content")
-
-        for req in required:
-            if req not in self.seen_sections:
-                 # Be lenient if plan_only and we check content
-                 if self.plan_only and req in ("manifest", "content"):
-                     continue
-                 raise ValidationException(f"Missing required section: {req}")
-
-
-def iter_report_blocks(
-    files: List[FileInfo],
-    level: str,
-    max_file_bytes: int,
-    sources: List[Path],
-    plan_only: bool,
-    code_only: bool = False,
-    debug: bool = False,
-    path_filter: Optional[str] = None,
-    ext_filter: Optional[List[str]] = None,
-    extras: Optional[ExtrasConfig] = None,
-    delta_meta: Optional[Dict[str, Any]] = None,
-) -> Iterator[str]:
-    if extras is None:
-        extras = ExtrasConfig.none()
-
-    # Navigation style: default should be quiet.
-    # You can later expose this as a UI toggle if desired.
-    nav = NavStyle(emit_search_markers=False)
-
-    # UTC Timestamp
-    now = datetime.datetime.now(datetime.timezone.utc)
-
-    # Sort files according to strict multi-repo order and then path
-    files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
-
-    # Optional Code-only-Filter
-    if code_only:
-        files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
-
-    # Pre-calculate status based on Profile Strict Logic
-    processed_files = []
-
-    unknown_categories = set()
-    unknown_tags = set()
-    roots = set(f.root_label for f in files)
-
-    for fi in files:
-        # Generate deterministic anchor based on slugified repo + path, with collision-safe suffix
-        rel_id = _slug_token(fi.rel_path.as_posix())
-        repo_slug = _slug_token(fi.root_label)
-        base_anchor = f"file-{repo_slug}-{rel_id}"
-        suffix = (fi.md5 or "")[:6] if getattr(fi, "md5", None) else ""
-        fi.anchor_alias = base_anchor
-        fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
-
-        # Compute file roles
-        fi.roles = compute_file_roles(fi)
-
-        # Debug checks
-        # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
-        # "other" ist gültig, aber signalisiert: nicht eindeutig klassifizierbar.
-        if debug and fi.category not in DEBUG_CONFIG.allowed_categories:
-            unknown_categories.add(fi.category)
-        # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
-
-        # Check tags against the configured allow-list
-        if debug:
-            for tag in (fi.tags or []):
-                if tag not in DEBUG_CONFIG.allowed_tags:
-                    unknown_tags.add(tag)
-
-        status = determine_inclusion_status(fi, level, max_file_bytes)
-
-        # Explicitly removed: automatic downgrade from "full" to "truncated"
-        # if status == "full" and fi.size > max_file_bytes:
-        #    status = "truncated"
-
-        processed_files.append((fi, status))
-
-    if debug:
-        print("DEBUG: total files:", len(files))
-        print("DEBUG: unknown categories:", unknown_categories)
-        print("DEBUG: unknown tags:", unknown_tags)
-        print("DEBUG: files without anchors:", [fi.rel_path for fi in files if not hasattr(fi, "anchor")])
-
-    total_size = sum(fi.size for fi in files)
-    text_files = [fi for fi in files if fi.is_text]
-    included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
-
-    # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
-    # um später im Plan pro Repo eine Coverage-Zeile auszugeben
-    included_by_root: Dict[str, int] = {}
-
-    # Declared Purpose (Patch C)
-    declared_purpose = ""
-    try:
-        if sources:
-            declared_purpose = extract_purpose(sources[0])
-    except Exception as e:
-        sys.stderr.write(f"Warning: extract_purpose failed: {e}\n")
-
-    if not declared_purpose:
-        declared_purpose = "(none)"
-
-    infra_folders = set()
-    code_folders = set()
-    doc_folders = set()
-
-    # Organismus-Rollen (ohne neue Tags/Kategorien):
-    organism_ai_ctx: List[FileInfo] = []
-    organism_contracts: List[FileInfo] = []
-    organism_pipelines: List[FileInfo] = []
-    organism_wgx_profiles: List[FileInfo] = []
-
-    for fi in files:
-        parts = fi.rel_path.parts
-        if ".github" in parts or ".wgx" in parts or "contracts" in parts:
-            infra_folders.add(parts[0])
-        if "src" in parts or "scripts" in parts:
-            code_folders.add(parts[0])
-        if "docs" in parts:
-            doc_folders.add("docs")
-
-        # Organismus-Rollen:
-        if fi.category == "contract":
-            organism_contracts.append(fi)
-        if "ai-context" in (fi.tags or []):
-            organism_ai_ctx.append(fi)
-        if "ci" in (fi.tags or []):
-            organism_pipelines.append(fi)
-        if "wgx-profile" in (fi.tags or []):
-            organism_wgx_profiles.append(fi)
-
-    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    # Re-calculate or re-use existing categorization?
-    # We need files_by_root NOW for Health Check, before Header.
-    # It was originally calculated later (at Plan block).
-    # So we move the calculation here.
-    files_by_root: Dict[str, List[FileInfo]] = {}
-    for fi in files:
-        files_by_root.setdefault(fi.root_label, []).append(fi)
-
-    # jetzt, nachdem processed_files existiert, die Coverage pro Root berechnen
-    for fi, status in processed_files:
-        if status in ("full", "truncated"):
-            included_by_root[fi.root_label] = included_by_root.get(fi.root_label, 0) + 1
-
-    repo_stats: Dict[str, Dict[str, Any]] = {}
-    for root, root_files in files_by_root.items():
-        repo_stats[root] = summarize_repo(root_files, included_by_root.get(root, 0))
-
-    # Pre-Calculation for Health (needed for Meta Block)
-    health_collector = None
-    if extras.health:
-        # Pass hub path if available (via sources)
-        # sources list typically contains the repo roots.
-        # But HealthCollector is initialized once for the merge.
-        # If this is a multi-repo merge, sources are diverse.
-        # Best effort: try to derive hub from first source.
-        derived_hub = None
-        if sources:
-            derived_hub = sources[0].parent
-
-        health_collector = HealthCollector(hub_path=derived_hub)
-        # Analyze each repo
-        for root in sorted(files_by_root.keys()):
-            root_files = files_by_root[root]
-            health_collector.analyze_repo(root, root_files)
-
-    # --- 1. Header ---
-    header = []
-    header.append(READING_POLICY_BANNER)
-    header.append(f"# repoLens Report (v{SPEC_VERSION.split('.')[0]}.x)")
-    header.append("")
-
-    # --- Canonical Note (Epistemic Protection) ---
-    header.append("> **Kanonischer Hinweis**")
-    header.append(">")
-    header.append("> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des repoLens-Merges.")
-    header.append("> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.")
-    header.append(">")
-    header.append("> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,")
-    header.append("> Filterung und Metainformation.")
-    header.append("> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**")
-    header.append("")
-
-    # --- Contract roles (agent-first clarity) ---
-    # Human-readable report contract (this Markdown)
-    header.append("**Human Contract:** `repolens-report` (v2.4)")
-    # Machine-readable primary contract (the JSON primary artifact)
-    header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.index_json`")
-    header.append("")
-
-    render_mode = _effective_render_mode(plan_only, code_only)
-
-    if render_mode == "meta-only":
-        header.append("**META-ONLY Modus:** Dieser Merge enthält ausschließlich Meta-, Struktur-, Index- und Analyse-Informationen.")
-        header.append("**Kein Code, keine Planinhalte. Gedacht als Entscheidungs- und Steuerungsartefakt für Agenten.**")
-        header.append("")
-    else:
-        if code_only:
-            header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
-            header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
-            header.append("")
-        if plan_only:
-            header.append("**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**")
-            header.append("**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**")
-            header.append("")
-
-    # --- 2. Source & Profile ---
-    header.append("## Source & Profile")
-    source_names = sorted([s.name for s in sources])
-    header.append(f"- **Source:** {', '.join(source_names)}")
-    header.append(f"- **Profile:** `{level}`")
-    header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)")
-    if max_file_bytes and max_file_bytes > 0:
-        header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
-    else:
-        # 0 / None = kein per-File-Limit – alles wird vollständig gelesen
-        header.append("- **Max File Bytes:** unlimited")
-    header.append(f"- **Spec-Version:** {SPEC_VERSION}")
-    header.append(f"- **Contract:** {MERGE_CONTRACT_NAME}")
-    header.append(f"- **Contract-Version:** {MERGE_CONTRACT_VERSION}")
-    header.append(f"- **Plan Only:** {str(bool(plan_only)).lower()}")
-    header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
-    header.append(f"- **Render Mode:** `{render_mode}`")
-
-    # One-time navigation note (no per-file chatter).
-    header.append("### Navigation")
-    header.append("- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)")
-    header.append("- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.")
-    header.append("")
-
-    # Requirement 2: Profile Capability Warning (Epistemic Humility)
-    # Profiles other than max/full/dev cannot prove absence.
-    # Also if any filters are active.
-    # Note: 'full' is not a standard profile key in repoLens (overview, summary, dev, max, machine-lean).
-    # 'max' is the full profile.
-    allows_negative_claims = (level in ("max",)) and not path_filter and not ext_filter
-
-    if not allows_negative_claims:
-        header.append(EPISTEMIC_HUMILITY_WARNING)
-        header.append("")
-
-    # Semantische Use-Case-Zeile pro Profil (ergänzend zum Repo-Zweck)
-    profile_usecase = PROFILE_USECASE.get(level)
-    if profile_usecase:
-        header.append(f"- **Profile Use-Case:** {profile_usecase}")
-
-    header.append(f"- **Declared Purpose:** {declared_purpose}")
-
-    # Scope-Zeile: welche Roots/Repos sind beteiligt?
-    scope_desc = describe_scope(files)
-    header.append(f"- **Scope:** {scope_desc}")
-
-    # Neue, explizite Filterangaben
-    if path_filter:
-        header.append(f"- **Path Filter:** `{path_filter}`")
-    else:
-        header.append("- **Path Filter:** `none (full tree)`")
-
-    if ext_filter:
-        header.append(
-            "- **Extension Filter:** "
-            + ", ".join(f"`{e}`" for e in sorted(ext_filter))
-        )
-    else:
-        header.append("- **Extension Filter:** `none (all text types)`")
-
-    # Coverage in header (for quick AI assessment)
-    if text_files:
-        coverage_pct = int((included_count / len(text_files)) * 100)
-        # Spec v2.4: Coverage line with German suffix
-        header.append(f"- **Coverage:** {coverage_pct}% ({included_count}/{len(text_files)} Dateien mit vollem Inhalt)")
-
-    header.append("")
-
-    # --- 3. Machine-readable Meta Block (für KIs) ---
-    # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
-    if not plan_only:
-        meta_lines: List[str] = []
-        meta_lines.append("<!-- @meta:start -->")
-        meta_lines.append("```yaml")
-
-        # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
-        total_files = len(files)
-        text_files_count = len(text_files)
-        if text_files_count:
-            coverage_raw = (included_count / text_files_count) * 100.0
-            coverage_pct = round(coverage_raw, 1)
-        else:
-            coverage_pct = 0.0
-
-        meta_dict: Dict[str, Any] = {
-            "merge": {
-                "spec_version": SPEC_VERSION,
-                "profile": level,
-                "contract": MERGE_CONTRACT_NAME,
-                "contract_version": MERGE_CONTRACT_VERSION,
-                "plan_only": plan_only,
-                "code_only": code_only,
-                "render_mode": render_mode,
-                "max_file_bytes": max_file_bytes,
-                "scope": scope_desc,
-                "source_repos": sorted([s.name for s in sources]) if sources else [],
-                "path_filter": path_filter,  # Use actual value, not description
-                "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
-                "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
-                "total_files": total_files,        # Total number of files in the merge
-                "total_size_bytes": total_size,    # Sum of all file sizes
-                "coverage": {
-                    "included_files": included_count,
-                    "text_files": text_files_count,
-                    "coverage_pct": coverage_pct,
-                },
-            }
-        }
-
-        # Extras-Flags
-        if extras:
-            extras_meta = _build_extras_meta(extras, len(roots))
-            if extras_meta:
-                meta_dict["merge"]["extras"] = extras_meta
-
-        # Health-Status
-        if extras and extras.health and health_collector:
-            # Determine overall status from collector results
-            all_health = health_collector.get_all_health()
-            if any(h.status == "critical" for h in all_health):
-                overall = "critical"
-            elif any(h.status == "warn" for h in all_health):
-                overall = "warning"
-            else:
-                overall = "ok"
-
-            missing_set = set()
-            for h in all_health:
-                # Naive mapping logic for 'missing' based on recommendations/warnings
-                if not h.has_contracts: missing_set.add("contracts")
-                if not h.has_ci_workflows: missing_set.add("ci")
-                if not h.has_wgx_profile: missing_set.add("wgx-profile")
-
-            meta_dict["merge"]["health"] = {
-                "status": overall,
-                "missing": sorted(list(missing_set)),
-            }
-
-        # --- Delta Meta (NEW fully correct block) ---
-        if extras and extras.delta_reports:
-            if delta_meta:
-                # Use the real delta metadata if provided
-                meta_dict["merge"]["delta"] = delta_meta
-            else:
-                # Minimal enabling marker
-                meta_dict["merge"]["delta"] = {
-                    "enabled": True
-                }
-
-        # Augment-Metadaten
-        if extras and extras.augment_sidecar:
-            augment_meta = _build_augment_meta(sources)
-            if augment_meta:
-                meta_dict["merge"]["augment"] = augment_meta
-
-        # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
-        if yaml:
-            meta_yaml = yaml.safe_dump(meta_dict)
-            for line in meta_yaml.rstrip("\n").splitlines():
-                meta_lines.append(line)
-        else:
-             meta_lines.append("# YAML support missing")
-
-        meta_lines.append("```")
-        meta_lines.append("<!-- @meta:end -->")
-        meta_lines.append("")
-        header.extend(meta_lines)
-
-    # --- 4. Profile Description ---
-    header.append("## Profile Description")
-    if level == "overview":
-        header.append("`overview`")
-        header.append("- Nur: README (voll), Runbook (voll), ai-context (voll)")
-        header.append("- Andere Dateien: Included = meta-only")
-    elif level == "summary":
-        header.append("`summary`")
-        header.append("- Voll: README, Runbooks, ai-context, docs/, .wgx/, .github/workflows/, zentrale Config, Contracts")
-        header.append("- Code & Tests: Manifest + Struktur; nur Prioritätsdateien (README, Runbooks, ai-context) voll")
-    elif level == "dev":
-        header.append("`dev`")
-        header.append("- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll")
-        header.append("- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest")
-        header.append("- Lockfiles / Artefakte: ab bestimmter Größe meta-only")
-    elif level == "machine-lean":
-        header.append("`machine-lean`")
-        header.append("- Lean Snapshot: volle Inhalte, reduzierter Baum/Decorations")
-        header.append("- Manifest + Index + Content für Maschinen-Parsing optimiert")
-    elif level == "max":
-        header.append("`max`")
-        header.append("- alle Textdateien → voll")
-        header.append("- keine Kürzung (Dateien werden ggf. gesplittet)")
-    else:
-        header.append(f"`{level}` (custom)")
-    header.append("")
-
-    # --- 4. Reading Plan ---
-    header.append("## Reading Plan")
-    header.append("")
-    if plan_only:
-        # Plan-Only: explizit machen, dass nur Plan & Meta im Merge sind.
-        header.append("1. Hinweis: Dieser Merge wurde im **PLAN-ONLY** Modus erzeugt.")
-        header.append("   - Enthält nur: Profilbeschreibung, Plan und Meta (`@meta`).")
-        header.append("   - Enthält **nicht**: `Structure`, `Manifest` oder `Content`-Blöcke.")
-        header.append("")
-        header.append("2. Nutze diesen Merge, um schnell zu entscheiden, ob sich ein Voll-Merge lohnt,")
-        header.append("   ohne Tokens für Dateiinhalte zu verbrauchen.")
-    else:
-        # Standard-Lesepfad für Voll-Merges
-        header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
-        if level == "machine-lean":
-            header.append("2. Danach: `Manifest` -> `Content`")
-        else:
-            header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
-        header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
-    header.append("")
-
-    yield "\n".join(header) + "\n"
-
-    # --- 5. Plan ---
-    plan: List[str] = []
-    plan.append("## Plan")
-    plan.append("")
-    plan.append(f"- **Total Files:** {len(files)} (Text: {len(text_files)})")
-    plan.append(f"- **Total Size:** {human_size(total_size)}")
-    plan.append(f"- **Included Content:** {included_count} files (full)")
-    if text_files:
-        plan.append(
-            f"- **Coverage:** {included_count}/{len(text_files)} Textdateien mit Inhalt (`full`/`truncated`)"
-        )
-    plan.append("")
-
-    # Optional Delta Summary (if delta_meta is provided with summary)
-    if extras.delta_reports and delta_meta and isinstance(delta_meta, dict):
-        summary = delta_meta.get("summary", {})
-        if isinstance(summary, dict):
-            plan.append("### Delta Summary")
-            plan.append("")
-            files_added = summary.get("files_added", 0)
-            files_removed = summary.get("files_removed", 0)
-            files_changed = summary.get("files_changed", 0)
-            plan.append(f"- Files added: {files_added}")
-            plan.append(f"- Files removed: {files_removed}")
-            plan.append(f"- Files changed: {files_changed}")
-            plan.append("")
-
-    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    # files_by_root was calculated earlier for Health Check
-
-    if files_by_root:
-        plan.append("### Repo Snapshots")
-        plan.append("")
-        for root in sorted(files_by_root.keys()):
-            root_files = files_by_root[root]
-            root_total = len(root_files)
-            # „relevante Textdateien“: Code, Docs, Config, Tests, CI, Contracts
-            root_text = sum(
-                1
-                for f in root_files
-                if f.is_text
-                and f.category in {"source", "doc", "config", "test", "contract"}
-            )
-            root_bytes = sum(f.size for f in root_files)
-            root_included = included_by_root.get(root, 0)
-            plan.append(
-                f"- `{root}` → {root_total} files "
-                f"({root_text} relevant text, {human_size(root_bytes)}, {root_included} with content)"
-            )
-        plan.append("")
-
-    hotspots = build_hotspots(processed_files)
-    if hotspots:
-        plan.extend(hotspots)
-        plan.append("")
-    plan.append("**Folder Highlights:**")
-    if code_folders: plan.append(f"- Code: `{', '.join(sorted(code_folders))}`")
-    if doc_folders: plan.append(f"- Docs: `{', '.join(sorted(doc_folders))}`")
-    if infra_folders: plan.append(f"- Infra: `{', '.join(sorted(infra_folders))}`")
-    plan.append("")
-
-    # Organismus-Overview (im Plan, ohne Spec-Reihenfolge zu brechen)
-    plan.append("### Organism Overview")
-    plan.append("")
-    plan.append(
-        f"- AI-Kontext-Organe: {len(organism_ai_ctx)} Datei(en) (`ai-context`)"
-    )
-    plan.append(
-        f"- Contracts: {len(organism_contracts)} Datei(en) (category = `contract`)"
-    )
-    plan.append(
-        f"- Pipelines (CI/CD): {len(organism_pipelines)} Datei(en) (Tag `ci`)"
-    )
-    plan.append(
-        f"- Fleet-/WGX-Profile: {len(organism_wgx_profiles)} Datei(en) (Tag `wgx-profile`)"
-    )
-    plan.append("")
-
-    yield "\n".join(plan) + "\n"
-
-    # --- Health Report (Stage 1: Repo Doctor) ---
-    # Note: health_collector was already populated before header generation
-    if extras.health and health_collector:
-        health_report = health_collector.render_markdown()
-        if health_report:
-            yield health_report
-
-    # --- Delta Report Block (NEW) ---
-    if extras.delta_reports and delta_meta:
-        try:
-            delta_block = _render_delta_block(delta_meta)
-            if delta_block:
-                yield delta_block
-        except Exception as e:
-            yield f"\n<!-- delta-error: {e} -->\n"
-
-    # --- Fleet Panorama (Stage 2 Multi-Repo) ---
-    if extras.fleet_panorama:
-        fleet_block = _render_fleet_panorama(sources, files)
-        if fleet_block:
-            yield fleet_block
-
-    # --- Organism Index (Stage 2: Single Repo) ---
-    if extras.organism_index and len(roots) == 1:
-        # Single-Repo-Organismus: Rolle + Organe explizit sichtbar machen
-        repo_name = list(roots)[0]
-        repo_role = infer_repo_role(repo_name, files)
-
-        organism_index: List[str] = []
-        organism_index.append("<!-- @organism-index:start -->")
-        organism_index.append("## 🧬 Organism Index")
-        organism_index.append("")
-        organism_index.append(f"**Repo:** `{repo_name}`")
-        organism_index.append(f"**Rolle:** {repo_role}")
-        organism_index.append("")
-        organism_index.append("**Organ-Status:**")
-        organism_index.append(f"- AI-Kontext: {len(organism_ai_ctx)} Datei(en)")
-        organism_index.append(f"- Verträge (Contracts): {len(organism_contracts)} Datei(en)")
-        organism_index.append(f"- Pipelines (CI/CD): {len(organism_pipelines)} Workflow(s)")
-        organism_index.append(f"- WGX / Fleet-Profile: {len(organism_wgx_profiles)} Profil(e)")
-        organism_index.append("")
-
-        # Detaillierte Abschnitte mit Fallbacks
-
-        # AI-Kontext
-        if organism_ai_ctx:
-            organism_index.append("### AI-Kontext")
-            for fi in organism_ai_ctx:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### AI-Kontext")
-            organism_index.append("_Keine AI-Kontext-Dateien gefunden._")
-            organism_index.append("")
-
-        # Verträge / Contracts
-        if organism_contracts:
-            organism_index.append("### Verträge (Contracts)")
-            for fi in organism_contracts:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### Verträge (Contracts)")
-            organism_index.append("_Keine Contract-Dateien gefunden._")
-            organism_index.append("")
-
-        # Pipelines / CI
-        if organism_pipelines:
-            organism_index.append("### Pipelines (CI/CD)")
-            for fi in organism_pipelines:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### Pipelines (CI/CD)")
-            organism_index.append("_Keine CI/CD-Workflows gefunden._")
-            organism_index.append("")
-
-        # WGX / Fleet-Profile
-        if organism_wgx_profiles:
-            organism_index.append("### WGX / Fleet-Profile")
-            for fi in organism_wgx_profiles:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### WGX / Fleet-Profile")
-            organism_index.append("_Kein WGX-/Fleet-Profil gefunden._")
-            organism_index.append("")
-
-        organism_index.append("<!-- @organism-index:end -->")
-        organism_index.append("")
-        yield "\n".join(organism_index)
-
-    # --- AI Heatmap (Stage 3: Auto-Discovery) ---
-    if extras.heatmap:
-        heatmap_collector = HeatmapCollector(files)
-        hm_report = heatmap_collector.render_markdown()
-        if hm_report:
-            yield hm_report
-
-    # --- Augment Intelligence (Stage 4: Sidecar) ---
-    if extras.augment_sidecar:
-        augment_block = _render_augment_block(sources)
-        if augment_block:
-            yield augment_block
-
-    if plan_only:
-        return
-
-    # --- 6. Structure --- (skipped for machine-lean)
-    if level != "machine-lean":
-        structure = []
-        structure.append("## 📁 Structure")
-        structure.append("")
-        structure.append(build_tree(files))
-        structure.append("")
-        yield "\n".join(structure) + "\n"
-
-    # --- Index (Patch B) ---
-    # Generated Categories Index - Only show non-empty categories/tags
-    index_blocks = []
-    index_blocks.extend(_heading_block(2, "index", "🧭 Index", nav=nav))
-
-    # Pre-check which categories/tags have files
-    cats_to_idx = ["source", "doc", "config", "contract", "test"]
-    non_empty_cats = []
-    for c in cats_to_idx:
-        cat_files = [f for f in files if f.category == c]
-        if cat_files:
-            non_empty_cats.append(c)
-
-    # Check tag presence
-    ci_files = [f for f in files if "ci" in (f.tags or [])]
-    wgx_files = [f for f in files if "wgx-profile" in f.tags]
-
-    # Build TOC - only for non-empty sections
-    for c in non_empty_cats:
-        index_blocks.append(f"- [{c.capitalize()}](#cat-{_slug_token(c)})")
-
-    # Add tag TOC entries only if they have files
-    if ci_files:
-        index_blocks.append("- [CI Pipelines](#tag-ci)")
-    if wgx_files:
-        index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
-
-    index_blocks.append("")
-
-    # Category Lists - only non-empty
-    for c in non_empty_cats:
-        cat_files = [f for f in files if f.category == c]
-        index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}", nav=nav))
-        for f in cat_files:
-            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-        index_blocks.append("")
-
-    # Tag Lists – only non-empty
-    if ci_files:
-        index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci", nav=nav))
-        for f in ci_files:
-            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-        index_blocks.append("")
-
-    if wgx_files:
-        index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile", nav=nav))
-        for f in wgx_files:
-            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-        index_blocks.append("")
-
-    yield "\n".join(index_blocks) + "\n"
-
-    # --- 7. Manifest (Patch A) ---
-    manifest: List[str] = []
-    manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
-
-    roots_sorted = sorted(files_by_root.keys())
-    if roots_sorted:
-        manifest_nav = " · ".join(
-            f"[{r}](#manifest-{_slug_token(r)})" for r in roots_sorted
-        )
-        manifest.append(f"**Repos im Merge:** {manifest_nav}")
-        manifest.append("")
-
-    if code_only:
-        manifest.append(
-            "_Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: "
-            "`entrypoint`=CLIs/Starts, `config`=zentral, `ci`=Workflows, `test`=Tests._"
-        )
-        manifest.append("")
-
-    if not roots_sorted:
-        manifest.append("_Keine Dateien im Manifest._")
-        manifest.append("")
-        yield "\n".join(manifest) + "\n"
-    else:
-        for root in roots_sorted:
-            root_files = files_by_root[root]
-            stats = repo_stats.get(root, {})
-            repo_role = infer_repo_role(root, root_files)
-
-            manifest.extend(_heading_block(3, f"manifest-{_slug_token(root)}", f"Repo `{root}`", nav=nav))
-            manifest.append(
-                f"- Rolle: {repo_role}"
-            )
-            if stats:
-                manifest.append(
-                    f"- Umfang: {stats.get('total', 0)} Dateien "
-                    f"({stats.get('text_files', 0)} Text), {human_size(stats.get('bytes', 0))}; "
-                    f"Inhalt: {stats.get('included', 0)} mit Content"
-                )
-            manifest.append("")
-            manifest.append("| Path | Category | Tags | Roles | Size | Included | MD5 |")
-            manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
-
-            for fi, status in processed_files:
-                if fi.root_label != root:
-                    continue
-
-                tags_str = ", ".join(fi.tags) if fi.tags else "-"
-                roles_str = ", ".join(fi.roles) if fi.roles else "-"
-                included_label = status
-                if is_noise_file(fi):
-                    included_label = f"{status} (noise)"
-
-                path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
-                manifest.append(
-                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
-                    f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
-                )
-            manifest.append("")
-
-        yield "\n".join(manifest) + "\n"
-
-    # --- Optional: Fleet Consistency ---
-    consistency_warnings = check_fleet_consistency(files)
-    if consistency_warnings:
-        cons = []
-        cons.append("## Fleet Consistency")
-        cons.append("")
-        for w in consistency_warnings:
-            cons.append(w)
-        cons.append("")
-        yield "\n".join(cons) + "\n"
-
-    # --- 8. Content ---
-    # Spec v2.4 Section 2: "7. 📄 Content" implies ## level to match invariants.
-    # However, legacy "Lean hierarchy" used # Content.
-    # We adopt ## 📄 Content for strict compliance and shift sub-levels.
-
-    content_header: List[str] = ["## 📄 Content", ""]
-    # Only list repos that actually have visible content blocks (full/truncated).
-    # meta-only/omitted files don't generate file blocks, so their repo header might be skipped if *all* files are skipped.
-    # We check if a repo has at least one file with status "full" or "truncated".
-
-    # Pre-calculate repos with actual content
-    visible_roots = set()
-    for fi, status in processed_files:
-        if status in ("full", "truncated"):
-            visible_roots.add(fi.root_label)
-
-    if visible_roots:
-        nav_links = " · ".join(
-            f"[{root}](#repo-{_slug_token(root)})" for root in sorted(visible_roots)
-        )
-        content_header.append(f"**Repos im Merge:** {nav_links}")
-        content_header.append("")
-
-    yield "\n".join(content_header)
-
-    current_root = None
-
-    for fi, status in processed_files:
-        if status in ("omitted", "meta-only"):
-            continue
-
-        if fi.root_label != current_root:
-            repo_slug = _slug_token(fi.root_label)
-            # Level 3 for Repos (was 2)
-            yield "\n".join(_heading_block(3, f"repo-{repo_slug}", fi.root_label, nav=nav)) + "\n"
-            current_root = fi.root_label
-
-        block = ["---"]
-        # Backwards-compatible alias anchor (old style without suffix)
-        if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
-            # Provide HTML id for alias too (quiet mode: no visible marker spam)
-            block.append(f'<a id="{fi.anchor_alias}"></a>')
-            block.append("")
-        # Level 4 for Files (was 3)
-        block.extend(_heading_block(4, fi.anchor, nav=nav))
-        block.append(f"**Path:** `{fi.rel_path}`")
-        block.append(f"- Category: {fi.category}")
-        if fi.tags:
-            block.append(f"- Tags: {', '.join(fi.tags)}")
-        else:
-            block.append("- Tags: -")
-        block.append(f"- Size: {human_size(fi.size)}")
-        block.append(f"- Included: {status}")
-        block.append(f"- MD5: {fi.md5}")
-
-        content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
-        # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
-        block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
-
-        # File Meta Block (Spec Patch)
-        block.append("<!--")
-        block.append("file_meta:")
-        block.append(f"  repo: {fi.root_label}")
-        block.append(f"  path: {fi.rel_path}")
-        block.append(f"  lines: {len(content.splitlines())}")
-        block.append(f"  included: {status}")
-        if getattr(fi, "inclusion_reason", "normal") != "normal":
-            block.append(f"  inclusion_reason: {fi.inclusion_reason}")
-        block.append("-->")
-
-        # Dynamic fence length to escape content containing backticks
-        max_ticks = 0
-        if "```" in content:
-            ticks = re.findall(r"`{3,}", content)
-            if ticks:
-                max_ticks = max(len(t) for t in ticks)
-
-        fence_len = max(3, max_ticks + 1)
-        fence = "`" * fence_len
-
-        lang = lang_for(fi.ext)
-        block.append("")
-        block.append(f"{fence}{lang}")
-        block.append(content)
-        block.append(f"{fence}")
-        block.append("")
-        # Backlinks: keep them simple
-        block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
-        yield "\n".join(block) + "\n\n"
-
 def generate_report_content(
     files: List[FileInfo],
     level: str,
@@ -3526,7 +2020,7 @@ def generate_json_sidecar(
     _validate_agent_json_dict(out, allow_empty_primary=True)
     return out
 
-def write_reports_v2(
+def write_reports(
     merges_dir: Path,
     hub: Path,
     repo_summaries: List[Dict],
@@ -3948,6 +2442,14 @@ def write_reports_v2(
             md_parts=verified_md,
             other=other_paths
         )
+    else:
+        # Markdown is primary when json_sidecar is disabled
+        return MergeArtifacts(
+            index_json=None,
+            canonical_md=verified_md[0] if verified_md else None,
+            md_parts=verified_md,
+            other=other_paths
+        )
 
 
 # --- Review Bundle Renderer (v2.4 Extension) ---
@@ -4023,11 +2525,13 @@ def render_review_bundle(
     # Hotspots (simple heuristic based on categories in delta)
     hotspots = set()
     for f in delta.get("files", []):
-        cat = f.get("category")
         path = f.get("path", "")
-        if cat in ("contract", "schema"):
-            hotspots.add("contracts/schemas")
-        if ".github" in path:
+        # Hotspots: path-based only (Fix 4)
+        if "contracts/" in path:
+            hotspots.add("contracts/")
+        if "schemas/" in path:
+            hotspots.add("schemas/")
+        if ".github/" in path:
             hotspots.add(".github/")
 
     if hotspots:
@@ -4107,21 +2611,42 @@ def render_review_bundle(
             except Exception:
                 pass
 
-        # Render Content
+        # Render Content (Fix 2: No nested fences & dynamic length)
+        # We need to scan content for backticks to ensure the fence is long enough.
+        # This is critical for robustness.
+
+        # Calculate fence length for content
+        max_ticks = 0
+        if "```" in content:
+            ticks = re.findall(r"`{3,}", content)
+            if ticks:
+                max_ticks = max(len(t) for t in ticks)
+        fence_len = max(3, max_ticks + 1)
+        fence = "`" * fence_len
+
+        # Calculate fence length for before_content (if present)
+        before_fence = "```"
         if before_content is not None:
-             review_lines.append("```markdown")
+            max_ticks_before = 0
+            if "```" in before_content:
+                ticks_b = re.findall(r"`{3,}", before_content)
+                if ticks_b:
+                    max_ticks_before = max(len(t) for t in ticks_b)
+            before_fence_len = max(3, max_ticks_before + 1)
+            before_fence = "`" * before_fence_len
+
+        if before_content is not None:
              review_lines.append("### BEFORE")
-             review_lines.append("```")
-             review_lines.append("```text")
+             review_lines.append(f"{before_fence}text")
              review_lines.append(before_content)
-             review_lines.append("```")
+             review_lines.append(f"{before_fence}")
              review_lines.append("")
              review_lines.append("AFTER")
              review_lines.append("")
 
-        review_lines.append("```text")
+        review_lines.append(f"{fence}text")
         review_lines.append(content)
-        review_lines.append("```")
+        review_lines.append(f"{fence}")
         review_lines.append("")
         review_lines.append("---")
         review_lines.append("")
