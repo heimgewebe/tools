@@ -321,12 +321,12 @@ class PRSchauDataSource(object):
 
         # Robust reload: try various signatures known in different Pythonista versions
         try:
-            # Standard signature
-            tv.reload_rows([(section, row)])
+            # Common/simpler signature first (list of rows, implicit section 0 or explicit kwarg)
+            tv.reload_rows([row])
         except Exception:
             try:
-                # Alternative signature (list of rows, implicit section 0 or explicit kwarg)
-                tv.reload_rows([row])
+                # Explicit tuple signature [(section, row)]
+                tv.reload_rows([(section, row)])
             except Exception:
                 # Fallback
                 tv.reload_data()
@@ -1545,6 +1545,9 @@ class MergerUI(object):
 
         def _normalize_ts(val: str) -> Optional[str]:
             """Ensure timestamp is strictly %Y-%m-%dT%H%M%SZ."""
+            # 0. Safety guard for non-string types (e.g. from JSON)
+            if not isinstance(val, str):
+                return None
             # 1. Check strict match
             if re.match(r"^\d{4}-\d{2}-\d{2}T\d{6}Z$", val):
                 return val
