@@ -1417,9 +1417,10 @@ class MergerUI(object):
                 console.hud_alert("No bundles selected", "error")
             return
 
-        # Ensure stable sort order (ts desc)
-        selected_items = [items[i] for i in selected_indices]
-        selected_items.sort(key=lambda x: x["ts"], reverse=True)
+        # Deterministische Auswahlreihenfolge: sortiere Indices nach Timestamp (desc) der Items
+        # Dies ist robuster als das Sortieren der extrahierten Liste
+        sorted_indices = sorted(selected_indices, key=lambda i: items[i]["ts"], reverse=True)
+        selected_items = [items[i] for i in sorted_indices]
 
         # Zielverzeichnis: merges/
         merges_dir = get_merges_dir(self.hub)
@@ -1430,6 +1431,7 @@ class MergerUI(object):
         lines = [
             "# PR-Schau Merge Report",
             f"- Generated: {now_ts}",
+            f"- Source root: {PR_SCHAU_DIR}",
             f"- Bundles: {len(selected_items)}",
             "",
             "## Included Bundles",
@@ -1472,6 +1474,13 @@ class MergerUI(object):
                 summary_str = f"+{s.get('added',0)} / ~{s.get('changed',0)} / -{s.get('removed',0)}"
 
             lines.append(f"## {repo} @ {created}")
+            # Provenance: Bundle-Pfad relativ zum Hub (falls möglich) oder zu Source Root
+            try:
+                rel_bundle_path = bdir.relative_to(self.hub)
+                lines.append(f"- Bundle dir: `{rel_bundle_path}`")
+            except Exception:
+                lines.append(f"- Bundle dir: `{bdir.name}`")
+
             lines.append(f"- **Summary**: {summary_str}")
             if "hub_rel" in meta:
                 lines.append(f"- **Path**: `{meta['hub_rel']}`")
@@ -1492,6 +1501,8 @@ class MergerUI(object):
                     lines.append(content)
                 except Exception as e:
                     lines.append(f"> Error reading review content: {e}")
+            else:
+                lines.append("> (No review.md content available)")
             lines.append("")
             lines.append("---")
             lines.append("")
@@ -1535,15 +1546,21 @@ class MergerUI(object):
                 for ts_dir in repo_dir.iterdir():
                     if not ts_dir.is_dir(): continue
                     review_md = ts_dir / "review.md"
-                    # Include bundle_dir even if review.md is missing?
-                    # User logic relies on review.md for display.
-                    if review_md.exists():
+                    bundle_json = ts_dir / "bundle.json"
+                    delta_json = ts_dir / "delta.json"
+
+                    # Robustness: Include even if review.md missing, if metadata exists
+                    if review_md.exists() or bundle_json.exists() or delta_json.exists():
+                        display_text = f"{repo_name} @ {ts_dir.name}"
+                        if not review_md.exists():
+                            display_text += " (no review.md)"
+
                         items.append({
                             "repo": repo_name,
                             "ts": ts_dir.name,
                             "path": review_md,
                             "bundle_dir": ts_dir,
-                            "display": f"{repo_name} @ {ts_dir.name}"
+                            "display": display_text
                         })
 
         if not items:
@@ -1605,12 +1622,15 @@ class MergerUI(object):
 
             if row >= 0 and row < len(items):
                 path = str(items[row]["path"])
-                if editor:
-                    editor.open_file(path)
-                    try: sheet.close()
-                    except: pass
-                elif console:
-                    console.quicklook(path)
+                # Check existance before opening, as it might be missing in robust mode
+                if os.path.exists(path):
+                    if editor:
+                        editor.open_file(path)
+                        # Do NOT close sheet (UX requirement)
+                    elif console:
+                        console.quicklook(path)
+                else:
+                    if console: console.hud_alert("File not found (meta only)", "error")
             else:
                 if console: console.hud_alert("Select a bundle to open")
 
