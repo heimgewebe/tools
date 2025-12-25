@@ -321,8 +321,8 @@ def diff_trees(
     return out_path
 
 
-def _compute_sha256(path: Path) -> str:
-    """Computes SHA256 for a file."""
+def _compute_sha256(path: Path) -> Optional[str]:
+    """Computes SHA256 for a file. Returns None on failure."""
     try:
         h = hashlib.sha256()
         with path.open("rb") as f:
@@ -333,7 +333,7 @@ def _compute_sha256(path: Path) -> str:
                 h.update(chunk)
         return h.hexdigest()
     except Exception:
-        return "ERROR"
+        return None
 
 
 def _is_secret_file(path_str: str) -> bool:
@@ -390,6 +390,25 @@ def _heuristic_category(rel_path: str) -> str:
         return "code"
 
     return "other"
+
+
+def _content_looks_like_secret(text: str) -> bool:
+    # Heuristik: wenige, harte Patterns. Keine False-Positive-Panik, lieber einmal zu viel redacted.
+    patterns = [
+        "ghp_", "github_pat_",                    # GitHub tokens
+        "AKIA",                                   # AWS access key prefix
+        "-----BEGIN PRIVATE KEY-----",
+        "-----BEGIN RSA PRIVATE KEY-----",
+        "-----BEGIN OPENSSH PRIVATE KEY-----",
+        "Bearer ",                                # OAuth bearer
+        "xoxb-", "xoxp-",                         # Slack tokens
+        "AIza",                                   # Google API key prefix
+    ]
+    # Simple check, no regex for performance and simplicity
+    for p in patterns:
+        if p in text:
+            return True
+    return False
 
 
 def generate_review_bundle(
@@ -451,10 +470,13 @@ def generate_review_bundle(
     def make_entry(rel_path, status, root_path):
         fpath = root_path / rel_path
         size = 0
-        sha = ""
+        sha = None
+        sha_status = "skipped" # default for removed or missing
+
         if status != "removed" and fpath.exists():
             size = fpath.stat().st_size
             sha = _compute_sha256(fpath)
+            sha_status = "ok" if sha else "error"
         else:
             # For removed, use old snapshot size if available
             if rel_path in old_snap:
@@ -465,7 +487,8 @@ def generate_review_bundle(
             "status": status,
             "category": _heuristic_category(rel_path), # Heuristic category added
             "size_bytes": size,
-            "sha256": sha
+            "sha256": sha,
+            "sha256_status": sha_status
         }
 
     # Populate delta_files with prioritization for review order
@@ -560,11 +583,14 @@ def generate_review_bundle(
         lines.append(f"### {'🆕' if status == 'added' else '📝'} `{path}`")
         lines.append(f"- Status: {status}")
         lines.append(f"- Size: {item['size_bytes']} bytes")
-        lines.append(f"- SHA256: `{item['sha256']}`")
+        if item.get("sha256"):
+            lines.append(f"- SHA256: `{item['sha256']}`")
+        else:
+            lines.append(f"- SHA256: (n/a)")
 
         # Security / Binary / Size checks
         if _is_secret_file(path):
-            lines.append("\n> 🔒 **REDACTED (matched filename rule)**\n")
+            lines.append("\n> 🔒 **REDACTED (filename rule)**\n")
             lines.append("")
             continue
 
@@ -586,6 +612,12 @@ def generate_review_bundle(
 
             # Read text
             text_content = fpath.read_text(encoding="utf-8", errors="replace")
+
+            # Check for secret content
+            if _content_looks_like_secret(text_content):
+                lines.append("\n> 🔒 **REDACTED (content rule)**\n")
+                lines.append("")
+                continue
 
             # Extension for code block
             p_obj = Path(path)
@@ -616,6 +648,10 @@ def generate_review_bundle(
         "repo": repo_name,
         "source": "wc-hub",
         "created_at": now_utc.isoformat(),
+        "hub_rel": str(PR_SCHAU_DIR / repo_name / ts_folder),
+        "old_tree_hint": str(old_repo.name),
+        "new_tree_hint": str(new_repo.name),
+        "generator": {"name": "repolens", "component": "extractor"},
         "note": "auto PR-schau bundle"
     }
     (bundle_dir / "bundle.json").write_text(
