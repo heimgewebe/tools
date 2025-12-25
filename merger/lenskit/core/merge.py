@@ -92,6 +92,7 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
 SPEC_VERSION = "2.4"
 MERGES_DIR_NAME = "merges"
+PR_SCHAU_DIR = ".repolens/pr-schau"
 
 # Formale Contract-Deklaration für alle repoLens-Reports.
 # Name/Version können von nachgelagerten Tools verwendet werden,

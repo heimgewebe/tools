@@ -76,6 +76,7 @@ try:
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
+        PR_SCHAU_DIR,
     )
 except ImportError:
     # SCRIPT_DIR is lenskit/core. Parent is lenskit. Parent is merger.
@@ -84,6 +85,7 @@ except ImportError:
         detect_hub_dir,
         get_merges_dir,
         get_repo_snapshot,
+        PR_SCHAU_DIR,
     )
 
 
@@ -344,6 +346,42 @@ def _is_secret_file(path_str: str) -> bool:
     return False
 
 
+def _heuristic_category(rel_path: str) -> str:
+    """
+    Determine heuristic category for review bundles.
+    """
+    p = Path(rel_path)
+    name = p.name.lower()
+    ext = p.suffix.lower()
+    parts = p.parts
+
+    # Schema/Contracts
+    if name.endswith(".schema.json") or "contracts" in parts:
+        return "schema"
+
+    # CI
+    if ".github" in parts and "workflows" in parts:
+        return "ci"
+    if "ci" in parts:
+        return "ci"
+
+    # Config (explicit heuristic)
+    if "config" in parts or ext in (".yml", ".yaml", ".toml", ".ini"):
+        return "config"
+    if name in ("package.json", "dockerfile", "makefile", "justfile"):
+        return "config"
+
+    # Docs
+    if ext in (".md", ".txt", ".rst") or "docs" in parts:
+        return "docs"
+
+    # Code
+    if ext in (".py", ".js", ".ts", ".rs", ".go", ".c", ".cpp", ".h", ".java", ".rb", ".sh"):
+        return "code"
+
+    return "other"
+
+
 def generate_review_bundle(
     old_repo: Path, new_repo: Path, repo_name: str, hub: Path
 ) -> None:
@@ -359,8 +397,8 @@ def generate_review_bundle(
     now_utc = datetime.datetime.now(datetime.timezone.utc)
     ts_folder = now_utc.strftime("%Y-%m-%dT%H%M%SZ")
 
-    # Bundle Output Directory
-    bundle_dir = hub / ".repolens" / "pr-schau" / repo_name / ts_folder
+    # Bundle Output Directory (using centralized constant)
+    bundle_dir = hub / PR_SCHAU_DIR / repo_name / ts_folder
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"  Erzeuge PR-Review-Bundle in: {bundle_dir}")
@@ -409,6 +447,7 @@ def generate_review_bundle(
         return {
             "path": rel_path,
             "status": status,
+            "category": _heuristic_category(rel_path), # Heuristic category added
             "size_bytes": size,
             "sha256": sha
         }
@@ -443,11 +482,18 @@ def generate_review_bundle(
     lines.append(f"- **Summary:** +{len(added)} / ~{len(changed)} / -{len(removed)}")
     lines.append("")
 
-    # Hotspots check (simple heuristic from file list)
+    # Hotspots check (extended heuristic)
     hotspots = []
     for f in (added + changed):
+        # Original
         if f.startswith(".github/") or f.startswith("contracts/") or f.endswith("schema.json"):
             hotspots.append(f)
+            continue
+
+        # Extended
+        if f.startswith("ci/") or f.startswith("scripts/") or f.startswith("config/"):
+            hotspots.append(f)
+            continue
 
     if hotspots:
         lines.append("## 🔥 Hotspots")

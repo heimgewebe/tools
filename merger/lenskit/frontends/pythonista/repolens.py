@@ -126,12 +126,11 @@ def force_close_files(paths: List[Path]) -> None:
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
 LAST_STATE_FILENAME = ".repoLens-state.json"
 
-PR_SCHAU_DIR = ".repolens/pr-schau"
-
 # Import core logic
 try:
     from lenskit.core.merge import (
         MERGES_DIR_NAME,
+        PR_SCHAU_DIR,
         SKIP_ROOTS,
         detect_hub_dir,
         get_merges_dir,
@@ -145,6 +144,7 @@ except ImportError:
     sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
     from lenskit.core.merge import (
         MERGES_DIR_NAME,
+        PR_SCHAU_DIR,
         SKIP_ROOTS,
         detect_hub_dir,
         get_merges_dir,
@@ -1372,6 +1372,7 @@ class MergerUI(object):
 
     def show_pr_schau_browser(self, sender):
         """Zeigt Liste der verfügbaren PR-Schau Bundles."""
+        # Use central constant
         pr_dir = self.hub / PR_SCHAU_DIR
 
         items = []
