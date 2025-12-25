@@ -1417,7 +1417,9 @@ class MergerUI(object):
                 console.hud_alert("No bundles selected", "error")
             return
 
+        # Ensure stable sort order (ts desc)
         selected_items = [items[i] for i in selected_indices]
+        selected_items.sort(key=lambda x: x["ts"], reverse=True)
 
         # Zielverzeichnis: merges/
         merges_dir = get_merges_dir(self.hub)
@@ -1437,6 +1439,8 @@ class MergerUI(object):
         for item in selected_items:
             lines.append(f"- {item['display']}")
         lines.append("")
+
+        MAX_CHARS = 40000
 
         for item in selected_items:
             bdir = item.get("bundle_dir")
@@ -1477,12 +1481,14 @@ class MergerUI(object):
                 lines.append(f"- **Head**: `{meta['new_tree_hint']}`")
             lines.append("")
 
-            # Review Content
+            # Review Content (Truncated)
             review_md = item.get("path")
             if review_md and review_md.exists():
                 lines.append("### Review Content")
                 try:
                     content = review_md.read_text("utf-8", errors="replace")
+                    if len(content) > MAX_CHARS:
+                        content = content[:MAX_CHARS] + "\n\n... [Truncated due to size] ..."
                     lines.append(content)
                 except Exception as e:
                     lines.append(f"> Error reading review content: {e}")
@@ -1492,11 +1498,20 @@ class MergerUI(object):
 
         try:
             out_path.write_text("\n".join(lines), encoding="utf-8")
+
+            # Validierung vor Feedback
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                raise RuntimeError("Output file empty or missing.")
+
             msg = f"Merged {len(selected_items)} bundles to {out_filename}"
             if console:
                 console.hud_alert("Merge created", "success")
             else:
                 print(msg)
+
+            # Optional: Open output if editor available
+            if editor:
+                editor.open_file(str(out_path))
 
             # Close sheet on success
             sheet.close()
@@ -1572,10 +1587,10 @@ class MergerUI(object):
         btn_h = 34
         margin = 10
 
-        # Button: Open
+        # Button: Open (Left aligned, Fixed)
         btn_open = ui.Button(title="Open")
         btn_open.frame = (margin, btn_y, 80, btn_h)
-        btn_open.flex = "R"
+        btn_open.flex = ""
         btn_open.background_color = "#333333"
         btn_open.tint_color = "white"
         btn_open.corner_radius = 6
@@ -1602,7 +1617,7 @@ class MergerUI(object):
         btn_open.action = action_open
         bar.add_subview(btn_open)
 
-        # Button: Close
+        # Button: Close (Right aligned)
         btn_close = ui.Button(title="Close")
         btn_close.frame = (sheet.width - 80 - margin, btn_y, 80, btn_h)
         btn_close.flex = "L"
@@ -1612,7 +1627,7 @@ class MergerUI(object):
         btn_close.action = lambda s: sheet.close()
         bar.add_subview(btn_close)
 
-        # Button: Merge Selected
+        # Button: Merge Selected (Middle, Flexible width)
         # Calculate remaining space
         mid_x = 80 + margin * 2
         mid_w = sheet.width - (80 + margin * 2) * 2
