@@ -23,6 +23,7 @@ import sys
 import os
 import json
 import traceback
+import datetime
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
@@ -279,6 +280,45 @@ def _load_repolens_extractor_module():
 
 
 # --- UI Class (Pythonista) ---
+
+class PRSchauDataSource(object):
+    def __init__(self, items):
+        self.items = items
+        self.selected = set()
+        self.last_tapped_row = -1
+
+    def tableview_number_of_rows(self, tv, section):
+        return len(self.items)
+
+    def tableview_cell_for_row(self, tv, section, row):
+        cell = ui.TableViewCell()
+        cell.background_color = "#111111"
+        cell.text_label.font = ("<System>", 14)
+        cell.text_label.text = self.items[row]["display"]
+
+        # Custom selection background
+        bg = ui.View()
+        bg.background_color = "#333333"
+        cell.selected_background_view = bg
+
+        if row in self.selected:
+            cell.accessory_type = "checkmark"
+            # Purple highlight for text to indicate selection
+            cell.text_label.text_color = "#E0B0FF"
+        else:
+            cell.accessory_type = "none"
+            cell.text_label.text_color = "white"
+
+        return cell
+
+    def tableview_did_select(self, tv, section, row):
+        self.last_tapped_row = row
+        if row in self.selected:
+            self.selected.remove(row)
+        else:
+            self.selected.add(row)
+        tv.reload_data()
+
 
 def _run_extractor_on_start(hub: Path) -> None:
     """Run repolens-extractor automatically at app start (best-effort, quiet)."""
@@ -1370,9 +1410,105 @@ class MergerUI(object):
         except Exception:
             return 0
 
+    def merge_pr_schau_bundles(self, ds, items, sheet) -> None:
+        selected_indices = ds.selected
+        if not selected_indices:
+            if console:
+                console.hud_alert("No bundles selected", "error")
+            return
+
+        selected_items = [items[i] for i in selected_indices]
+
+        # Zielverzeichnis: merges/
+        merges_dir = get_merges_dir(self.hub)
+        now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+        out_filename = f"pr-schau-merge_{now_ts}.md"
+        out_path = merges_dir / out_filename
+
+        lines = [
+            "# PR-Schau Merge Report",
+            f"- Generated: {now_ts}",
+            f"- Bundles: {len(selected_items)}",
+            "",
+            "## Included Bundles",
+        ]
+
+        # Inhaltsverzeichnis
+        for item in selected_items:
+            lines.append(f"- {item['display']}")
+        lines.append("")
+
+        for item in selected_items:
+            bdir = item.get("bundle_dir")
+            if not bdir: continue
+
+            # Load metadata
+            meta = {}
+            delta = {}
+            try:
+                p_bundle = bdir / "bundle.json"
+                if p_bundle.exists():
+                    meta = json.loads(p_bundle.read_text("utf-8"))
+            except Exception:
+                pass
+
+            try:
+                p_delta = bdir / "delta.json"
+                if p_delta.exists():
+                    delta = json.loads(p_delta.read_text("utf-8"))
+            except Exception:
+                pass
+
+            repo = meta.get("repo", item["repo"])
+            created = meta.get("created_at", item["ts"])
+
+            summary_str = "n/a"
+            if "summary" in delta:
+                s = delta["summary"]
+                summary_str = f"+{s.get('added',0)} / ~{s.get('changed',0)} / -{s.get('removed',0)}"
+
+            lines.append(f"## {repo} @ {created}")
+            lines.append(f"- **Summary**: {summary_str}")
+            if "hub_rel" in meta:
+                lines.append(f"- **Path**: `{meta['hub_rel']}`")
+            if "old_tree_hint" in meta:
+                lines.append(f"- **Base**: `{meta['old_tree_hint']}`")
+            if "new_tree_hint" in meta:
+                lines.append(f"- **Head**: `{meta['new_tree_hint']}`")
+            lines.append("")
+
+            # Review Content
+            review_md = item.get("path")
+            if review_md and review_md.exists():
+                lines.append("### Review Content")
+                try:
+                    content = review_md.read_text("utf-8", errors="replace")
+                    lines.append(content)
+                except Exception as e:
+                    lines.append(f"> Error reading review content: {e}")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        try:
+            out_path.write_text("\n".join(lines), encoding="utf-8")
+            msg = f"Merged {len(selected_items)} bundles to {out_filename}"
+            if console:
+                console.hud_alert("Merge created", "success")
+            else:
+                print(msg)
+
+            # Close sheet on success
+            sheet.close()
+
+        except Exception as e:
+            if console:
+                console.alert("Merge Failed", str(e), "OK")
+            else:
+                print(f"Merge Failed: {e}")
+
     def show_pr_schau_browser(self, sender):
-        """Zeigt Liste der verfügbaren PR-Schau Bundles."""
-        # Use central constant
+        """Zeigt Liste der verfügbaren PR-Schau Bundles mit Multi-Select Workflow."""
         pr_dir = self.hub / PR_SCHAU_DIR
 
         items = []
@@ -1381,15 +1517,17 @@ class MergerUI(object):
                 if not repo_dir.is_dir(): continue
                 repo_name = repo_dir.name
 
-                # Scan timestamps
                 for ts_dir in repo_dir.iterdir():
                     if not ts_dir.is_dir(): continue
                     review_md = ts_dir / "review.md"
+                    # Include bundle_dir even if review.md is missing?
+                    # User logic relies on review.md for display.
                     if review_md.exists():
                         items.append({
                             "repo": repo_name,
                             "ts": ts_dir.name,
                             "path": review_md,
+                            "bundle_dir": ts_dir,
                             "display": f"{repo_name} @ {ts_dir.name}"
                         })
 
@@ -1401,46 +1539,94 @@ class MergerUI(object):
         # Sort by timestamp descending
         items.sort(key=lambda x: x["ts"], reverse=True)
 
-        # Simple Sheet to select
-        display_items = [i["display"] for i in items]
-
-        def on_select(sender):
-            if sender.selected_row < 0: return
-            item = items[sender.selected_row]
-            path = str(item["path"])
-
-            # Open file
-            if editor:
-                editor.open_file(path)
-                # Close the sheet via view pointer if possible
-                try:
-                    sender.superview.close()
-                except Exception:
-                    pass
-            elif console:
-                console.quicklook(path)
-
-        # Create UI
         sheet = ui.View()
         sheet.name = "PR-Schau Bundles"
         sheet.background_color = "#111111"
-        sheet.frame = (0, 0, 500, 600)
+        # Increase size for better overview
+        sheet.frame = (0, 0, 600, 700)
+
+        # Button Bar Area
+        bar_height = 50
 
         tv = ui.TableView()
-        tv.frame = (0, 0, 500, 600)
+        tv.frame = (0, 0, sheet.width, sheet.height - bar_height)
         tv.flex = "WH"
         tv.background_color = "#111111"
         tv.separator_color = "#333333"
+        tv.row_height = 44 # Better touch target
 
-        ds = ui.ListDataSource(display_items)
-        ds.text_color = "white"
-        ds.highlight_color = "#8E44AD"
-        ds.action = on_select
-
+        ds = PRSchauDataSource(items)
         tv.data_source = ds
         tv.delegate = ds
 
         sheet.add_subview(tv)
+
+        # Bottom Bar
+        bar = ui.View()
+        bar.frame = (0, sheet.height - bar_height, sheet.width, bar_height)
+        bar.flex = "WT"
+        bar.background_color = "#222222"
+        sheet.add_subview(bar)
+
+        btn_y = 8
+        btn_h = 34
+        margin = 10
+
+        # Button: Open
+        btn_open = ui.Button(title="Open")
+        btn_open.frame = (margin, btn_y, 80, btn_h)
+        btn_open.flex = "R"
+        btn_open.background_color = "#333333"
+        btn_open.tint_color = "white"
+        btn_open.corner_radius = 6
+
+        def action_open(sender):
+            row = -1
+            # Prioritize last tapped, then first selected
+            if ds.last_tapped_row >= 0:
+                row = ds.last_tapped_row
+            elif ds.selected:
+                row = next(iter(ds.selected))
+
+            if row >= 0 and row < len(items):
+                path = str(items[row]["path"])
+                if editor:
+                    editor.open_file(path)
+                    try: sheet.close()
+                    except: pass
+                elif console:
+                    console.quicklook(path)
+            else:
+                if console: console.hud_alert("Select a bundle to open")
+
+        btn_open.action = action_open
+        bar.add_subview(btn_open)
+
+        # Button: Close
+        btn_close = ui.Button(title="Close")
+        btn_close.frame = (sheet.width - 80 - margin, btn_y, 80, btn_h)
+        btn_close.flex = "L"
+        btn_close.background_color = "#333333"
+        btn_close.tint_color = "white"
+        btn_close.corner_radius = 6
+        btn_close.action = lambda s: sheet.close()
+        bar.add_subview(btn_close)
+
+        # Button: Merge Selected
+        # Calculate remaining space
+        mid_x = 80 + margin * 2
+        mid_w = sheet.width - (80 + margin * 2) * 2
+
+        btn_merge = ui.Button(title="Merge selected")
+        btn_merge.frame = (mid_x, btn_y, mid_w, btn_h)
+        btn_merge.flex = "W"
+        btn_merge.background_color = "#8E44AD"
+        btn_merge.tint_color = "white"
+        btn_merge.corner_radius = 6
+        btn_merge.action = lambda s: self.merge_pr_schau_bundles(ds, items, sheet)
+
+        bar.add_subview(btn_merge)
+
         sheet.present("sheet")
 
     def run_delta_from_last_import(self, sender) -> None:
