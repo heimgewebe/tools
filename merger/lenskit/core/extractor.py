@@ -394,19 +394,21 @@ def _heuristic_category(rel_path: str) -> str:
 
 def _content_looks_like_secret(text: str) -> bool:
     # Heuristik: wenige, harte Patterns. Keine False-Positive-Panik, lieber einmal zu viel redacted.
+    # Convert to lower case for insensitive check
+    text_lower = text.lower()
     patterns = [
         "ghp_", "github_pat_",                    # GitHub tokens
-        "AKIA",                                   # AWS access key prefix
-        "-----BEGIN PRIVATE KEY-----",
-        "-----BEGIN RSA PRIVATE KEY-----",
-        "-----BEGIN OPENSSH PRIVATE KEY-----",
-        "Bearer ",                                # OAuth bearer
+        "akia",                                   # AWS access key prefix
+        "-----begin private key-----",
+        "-----begin rsa private key-----",
+        "-----begin openssh private key-----",
+        "bearer ",                                # OAuth bearer
         "xoxb-", "xoxp-",                         # Slack tokens
-        "AIza",                                   # Google API key prefix
+        "aiza",                                   # Google API key prefix
     ]
     # Simple check, no regex for performance and simplicity
     for p in patterns:
-        if p in text:
+        if p in text_lower:
             return True
     return False
 
@@ -473,10 +475,13 @@ def generate_review_bundle(
         sha = None
         sha_status = "skipped" # default for removed or missing
 
-        if status != "removed" and fpath.exists():
-            size = fpath.stat().st_size
-            sha = _compute_sha256(fpath)
-            sha_status = "ok" if sha else "error"
+        if status != "removed":
+            if fpath.exists():
+                size = fpath.stat().st_size
+                sha = _compute_sha256(fpath)
+                sha_status = "ok" if sha else "error"
+            else:
+                sha_status = "error" # file missing but should be there
         else:
             # For removed, use old snapshot size if available
             if rel_path in old_snap:
