@@ -126,6 +126,8 @@ def force_close_files(paths: List[Path]) -> None:
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
 LAST_STATE_FILENAME = ".repoLens-state.json"
 
+PR_SCHAU_DIR = ".repolens/pr-schau"
+
 # Import core logic
 try:
     from lenskit.core.merge import (
@@ -783,6 +785,20 @@ class MergerUI(object):
 
         cy += small_btn_height + 10 # Gap
 
+        # --- PR-Schau Button (Neu) ---
+        pr_schau_btn = ui.Button()
+        pr_schau_btn.title = "PR-Schau (Reviews)"
+        pr_schau_btn.font = ("<System>", 14)
+        pr_schau_btn.frame = (10, cy, cw - 20, small_btn_height)
+        pr_schau_btn.flex = "W"
+        pr_schau_btn.background_color = "#8E44AD"  # Violet/Purple distinction
+        pr_schau_btn.tint_color = "white"
+        pr_schau_btn.corner_radius = 6.0
+        pr_schau_btn.action = self.show_pr_schau_browser
+        bottom_container.add_subview(pr_schau_btn)
+
+        cy += small_btn_height + 10  # Gap
+
         # --- Delta Button ---
         delta_btn = ui.Button()
         delta_btn.title = "Delta from Last Import"
@@ -1353,6 +1369,78 @@ class MergerUI(object):
             return parse_human_size(txt)
         except Exception:
             return 0
+
+    def show_pr_schau_browser(self, sender):
+        """Zeigt Liste der verfügbaren PR-Schau Bundles."""
+        pr_dir = self.hub / PR_SCHAU_DIR
+
+        items = []
+        if pr_dir.exists():
+            for repo_dir in pr_dir.iterdir():
+                if not repo_dir.is_dir(): continue
+                repo_name = repo_dir.name
+
+                # Scan timestamps
+                for ts_dir in repo_dir.iterdir():
+                    if not ts_dir.is_dir(): continue
+                    review_md = ts_dir / "review.md"
+                    if review_md.exists():
+                        items.append({
+                            "repo": repo_name,
+                            "ts": ts_dir.name,
+                            "path": review_md,
+                            "display": f"{repo_name} @ {ts_dir.name}"
+                        })
+
+        if not items:
+            if console:
+                console.alert("PR-Schau", "Keine PR-Bundles gefunden.", "OK", hide_cancel_button=True)
+            return
+
+        # Sort by timestamp descending
+        items.sort(key=lambda x: x["ts"], reverse=True)
+
+        # Simple Sheet to select
+        display_items = [i["display"] for i in items]
+
+        def on_select(sender):
+            if sender.selected_row < 0: return
+            item = items[sender.selected_row]
+            path = str(item["path"])
+
+            # Open file
+            if editor:
+                editor.open_file(path)
+                # Close the sheet via view pointer if possible
+                try:
+                    sender.superview.close()
+                except Exception:
+                    pass
+            elif console:
+                console.quicklook(path)
+
+        # Create UI
+        sheet = ui.View()
+        sheet.name = "PR-Schau Bundles"
+        sheet.background_color = "#111111"
+        sheet.frame = (0, 0, 500, 600)
+
+        tv = ui.TableView()
+        tv.frame = (0, 0, 500, 600)
+        tv.flex = "WH"
+        tv.background_color = "#111111"
+        tv.separator_color = "#333333"
+
+        ds = ui.ListDataSource(display_items)
+        ds.text_color = "white"
+        ds.highlight_color = "#8E44AD"
+        ds.action = on_select
+
+        tv.data_source = ds
+        tv.delegate = ds
+
+        sheet.add_subview(tv)
+        sheet.present("sheet")
 
     def run_delta_from_last_import(self, sender) -> None:
         """

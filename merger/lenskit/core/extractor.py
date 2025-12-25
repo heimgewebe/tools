@@ -24,6 +24,8 @@ import shutil
 import zipfile
 import datetime
 import json
+import hashlib
+import fnmatch
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
@@ -317,6 +319,219 @@ def diff_trees(
     return out_path
 
 
+def _compute_sha256(path: Path) -> str:
+    """Computes SHA256 for a file."""
+    try:
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return "ERROR"
+
+
+def _is_secret_file(path_str: str) -> bool:
+    """Checks for sensitive files based on naming patterns."""
+    name = Path(path_str).name
+    patterns = [".env", "*.pem", "*.key", "id_rsa*", "tokens*", "secrets*"]
+    for pat in patterns:
+        if fnmatch.fnmatch(name, pat):
+            return True
+    return False
+
+
+def generate_review_bundle(
+    old_repo: Path, new_repo: Path, repo_name: str, hub: Path
+) -> None:
+    """
+    Erzeugt ein persistentes 'PR-Schau'-Bundle aus dem Vergleich zweier Repo-Stände.
+    Das Bundle wird unter wc-hub/.repolens/pr-schau/<repo>/<timestamp>/ abgelegt.
+
+    Enthält:
+    - delta.json (Format 1)
+    - review.md (Content)
+    - bundle.json (Meta)
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    ts_folder = now_utc.strftime("%Y-%m-%dT%H%M%SZ")
+
+    # Bundle Output Directory
+    bundle_dir = hub / ".repolens" / "pr-schau" / repo_name / ts_folder
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"  Erzeuge PR-Review-Bundle in: {bundle_dir}")
+
+    # Snapshots holen (basierend auf lenskit.core.merge Logik)
+    # get_repo_snapshot liefert: Dict[rel_path] -> (size, md5, category)
+    # Wir brauchen aber SHA256 und echten Content, also scannen wir die Keys
+    # und lesen dann gezielt.
+
+    old_snap = get_repo_snapshot(old_repo)
+    new_snap = get_repo_snapshot(new_repo)
+
+    old_files = set(old_snap.keys())
+    new_files = set(new_snap.keys())
+
+    added = sorted(list(new_files - old_files))
+    removed = sorted(list(old_files - new_files))
+    common = old_files & new_files
+
+    changed = []
+    for f in common:
+        # Check size or MD5 from snapshot to detect change
+        # snapshot tuple: (size, md5, category)
+        s_old, m_old, _ = old_snap[f]
+        s_new, m_new, _ = new_snap[f]
+        if s_old != s_new or m_old != m_new:
+            changed.append(f)
+    changed.sort()
+
+    # --- 1. delta.json ---
+    delta_files = []
+
+    # Helper to build file entry
+    def make_entry(rel_path, status, root_path):
+        fpath = root_path / rel_path
+        size = 0
+        sha = ""
+        if status != "removed" and fpath.exists():
+            size = fpath.stat().st_size
+            sha = _compute_sha256(fpath)
+        else:
+            # For removed, use old snapshot size if available
+            if rel_path in old_snap:
+                size = old_snap[rel_path][0]
+
+        return {
+            "path": rel_path,
+            "status": status,
+            "size_bytes": size,
+            "sha256": sha
+        }
+
+    for f in added:
+        delta_files.append(make_entry(f, "added", new_repo))
+    for f in changed:
+        delta_files.append(make_entry(f, "changed", new_repo))
+    for f in removed:
+        delta_files.append(make_entry(f, "removed", old_repo))
+
+    delta_json = {
+        "format": 1,
+        "repo": repo_name,
+        "generated_at": now_utc.isoformat(),
+        "summary": {
+            "added": len(added),
+            "changed": len(changed),
+            "removed": len(removed)
+        },
+        "files": delta_files
+    }
+
+    (bundle_dir / "delta.json").write_text(
+        json.dumps(delta_json, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    # --- 2. review.md ---
+    lines = []
+    lines.append(f"# PR-Review: {repo_name}")
+    lines.append(f"- **Date:** {now_utc.isoformat()}")
+    lines.append(f"- **Summary:** +{len(added)} / ~{len(changed)} / -{len(removed)}")
+    lines.append("")
+
+    # Hotspots check (simple heuristic from file list)
+    hotspots = []
+    for f in (added + changed):
+        if f.startswith(".github/") or f.startswith("contracts/") or f.endswith("schema.json"):
+            hotspots.append(f)
+
+    if hotspots:
+        lines.append("## 🔥 Hotspots")
+        for h in sorted(hotspots)[:10]: # Limit list
+            lines.append(f"- `{h}`")
+        if len(hotspots) > 10:
+            lines.append(f"- ... ({len(hotspots)-10} more)")
+        lines.append("")
+
+    lines.append("## Details")
+    lines.append("")
+
+    # Content generation for added/changed
+    MAX_INLINE_SIZE = 200 * 1024 # 200 KB
+
+    for item in delta_files:
+        path = item["path"]
+        status = item["status"]
+
+        if status == "removed":
+            lines.append(f"### ❌ `{path}` (Removed)")
+            lines.append(f"- Size: {item['size_bytes']} bytes")
+            lines.append("")
+            continue
+
+        # Added or Changed
+        lines.append(f"### {'🆕' if status == 'added' else '📝'} `{path}`")
+        lines.append(f"- Status: {status}")
+        lines.append(f"- Size: {item['size_bytes']} bytes")
+        lines.append(f"- SHA256: `{item['sha256']}`")
+
+        # Security / Binary / Size checks
+        if _is_secret_file(path):
+            lines.append("\n> 🔒 **REDACTED (Secret File)**\n")
+            lines.append("")
+            continue
+
+        if item["size_bytes"] > MAX_INLINE_SIZE:
+             lines.append(f"\n> ⚠️ **Omitted (Size > {MAX_INLINE_SIZE/1024:.0f}KB)**\n")
+             lines.append("")
+             continue
+
+        # Read Content
+        fpath = new_repo / path
+        try:
+            # Check for binary content
+            with fpath.open("rb") as bf:
+                chunk = bf.read(4096)
+                if b"\x00" in chunk:
+                    lines.append("\n> 💾 **Binary File**\n")
+                    lines.append("")
+                    continue
+
+            # Read text
+            text_content = fpath.read_text(encoding="utf-8", errors="replace")
+
+            # Extension for code block
+            ext = Path(path).suffix.lstrip(".") or "txt"
+
+            lines.append("")
+            lines.append(f"```{ext}")
+            lines.append(text_content)
+            lines.append("```")
+            lines.append("")
+
+        except Exception as e:
+            lines.append(f"\n> ⚠️ Error reading content: {e}\n")
+            lines.append("")
+
+    (bundle_dir / "review.md").write_text("\n".join(lines), encoding="utf-8")
+
+    # --- 3. bundle.json ---
+    bundle_meta = {
+        "format": 1,
+        "repo": repo_name,
+        "source": "wc-hub",
+        "created_at": now_utc.isoformat(),
+        "note": "auto PR-schau bundle"
+    }
+    (bundle_dir / "bundle.json").write_text(
+        json.dumps(bundle_meta, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
     """
     Entpackt eine einzelne ZIP-Datei in den Hub, behandelt Konflikte,
@@ -342,15 +557,29 @@ def import_zip(zip_path: Path, hub: Path, merges_dir: Path) -> Optional[Path]:
 
     diff_path = None  # type: Optional[Path]
 
-    # Wenn es schon ein Repo mit diesem Namen gibt -> Diff + löschen
+    # Wenn es schon ein Repo mit diesem Namen gibt -> Diff + Bundle + löschen
     if target_dir.exists():
         print("  Zielordner existiert bereits:", target_dir)
+
+        # 1. PR-Review-Bundle erzeugen (Kritisch: muss VOR Löschung passieren)
+        try:
+            generate_review_bundle(target_dir, tmp_dir, repo_name, hub)
+            print("  PR-Review-Bundle erfolgreich erstellt.")
+        except Exception as e:
+            print(f"  ❌ FEHLER bei PR-Bundle-Erstellung: {e}")
+            print("  ⚠️ ABBRUCH: Alter Ordner wird NICHT gelöscht, um Datenverlust zu vermeiden.")
+            # Aufräumen des Temp-Ordners
+            shutil.rmtree(tmp_dir)
+            raise e  # Hard stop
+
+        # 2. Legacy Diff (Optional, but kept for compatibility as 'diff work state')
         try:
             diff_path = diff_trees(target_dir, tmp_dir, repo_name, merges_dir)
             print("  Diff-Bericht:", diff_path)
         except Exception as e:
             print(f"  Warnung: Fehler beim Diff-Erstellen ({e}). Fahre fort.")
 
+        # 3. Löschen
         shutil.rmtree(target_dir)
         print("  Alter Ordner gelöscht:", target_dir)
     else:
