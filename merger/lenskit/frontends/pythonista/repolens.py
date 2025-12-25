@@ -22,6 +22,7 @@ Rationale:
 import sys
 import os
 import json
+import re
 import traceback
 import datetime
 from pathlib import Path
@@ -317,7 +318,10 @@ class PRSchauDataSource(object):
             self.selected.remove(row)
         else:
             self.selected.add(row)
-        tv.reload_data()
+        try:
+            tv.reload_rows([(section, row)])
+        except Exception:
+            tv.reload_data()
 
 
 def _run_extractor_on_start(hub: Path) -> None:
@@ -794,80 +798,8 @@ class MergerUI(object):
         # --- Buttons am unteren Rand (innerhalb des Containers) ---
 
         cy += 10 # Gap
-
-        small_btn_height = 32
-
-        # --- Extras Button ---
-        extras_btn = ui.Button()
-        extras_btn.title = "Extras..."
-        extras_btn.font = ("<System>", 14)
-        extras_btn.frame = (10, cy, cw - 20, small_btn_height)
-        extras_btn.flex = "W"
-        extras_btn.background_color = "#333333"
-        extras_btn.tint_color = "white"
-        extras_btn.corner_radius = 6.0
-        extras_btn.action = self.show_extras_sheet
-        bottom_container.add_subview(extras_btn)
-
-        cy += small_btn_height + 10 # Gap
-
-        # --- Load State Button ---
-        load_btn = ui.Button()
-        load_btn.title = "Load Last Config"
-        load_btn.font = ("<System>", 14)
-        load_btn.frame = (10, cy, cw - 20, small_btn_height)
-        load_btn.flex = "W"
-        load_btn.background_color = "#333333"
-        load_btn.tint_color = "white"
-        load_btn.corner_radius = 6.0
-        load_btn.action = self.restore_last_state
-        bottom_container.add_subview(load_btn)
-
-        cy += small_btn_height + 10 # Gap
-
-        # --- PR-Schau Button (Neu) ---
-        pr_schau_btn = ui.Button()
-        pr_schau_btn.title = "PR-Schau (Reviews)"
-        pr_schau_btn.font = ("<System>", 14)
-        pr_schau_btn.frame = (10, cy, cw - 20, small_btn_height)
-        pr_schau_btn.flex = "W"
-        pr_schau_btn.background_color = "#8E44AD"  # Violet/Purple distinction
-        pr_schau_btn.tint_color = "white"
-        pr_schau_btn.corner_radius = 6.0
-        pr_schau_btn.action = self.show_pr_schau_browser
-        bottom_container.add_subview(pr_schau_btn)
-
-        cy += small_btn_height + 10  # Gap
-
-        # --- Delta Button ---
-        delta_btn = ui.Button()
-        delta_btn.title = "Delta from Last Import"
-        delta_btn.font = ("<System>", 14)
-        delta_btn.frame = (10, cy, cw - 20, small_btn_height)
-        delta_btn.flex = "W"
-        delta_btn.background_color = "#444444"
-        delta_btn.tint_color = "white"
-        delta_btn.corner_radius = 6.0
-        delta_btn.action = self.run_delta_from_last_import
-        bottom_container.add_subview(delta_btn)
-        self.delta_button = delta_btn
-
-        cy += small_btn_height + 10 # Gap
-
-        # --- Run Button ---
-        run_height = 40
-        btn = ui.Button()
-        btn.title = "Run Merge"
-        btn.frame = (10, cy, cw - 20, run_height)
-        btn.flex = "W"
-        btn.background_color = "#007aff"
-        btn.tint_color = "white"
-        btn.corner_radius = 6.0
-        btn.action = self.run_merge
-        bottom_container.add_subview(btn)
-        self.run_button = btn
-
-        cy += run_height + 24 # Bottom margin inside container
+        cy = self._make_bottom_bar(bottom_container, cy, cw)
+        cy += 24 # Bottom margin inside container
 
         container_height = cy
 
@@ -910,6 +842,70 @@ class MergerUI(object):
         # Beim Start: Defaults verwenden, nur Ignore-Liste wurde bereits geladen.
         # Info-Zeile initial aktualisieren.
         self._update_repo_info()
+
+    def _make_bottom_bar(self, parent, y, w):
+        """
+        Erstellt die kompakte Button-Bar (2 Reihen).
+        Reihe 1: Extras | Load | Delta | PR-Schau
+        Reihe 2: Run Merge (CTA)
+        """
+        # Reihe 1: 4 Buttons
+        row1_h = 34
+        gap = 8
+        margin = 10
+
+        count = 4
+        w_avail = w - (2 * margin)
+        btn_w = (w_avail - (count - 1) * gap) / count
+
+        # Titles & Actions
+        # Extras, Load, Delta, PR-Schau
+
+        btns = [
+            ("Extras", self.show_extras_sheet, "#333333"),
+            ("Load", self.restore_last_state, "#333333"),
+            ("Delta", self.run_delta_from_last_import, "#444444"), # Delta slightly different
+            ("PR-Schau", self.show_pr_schau_browser, "#8E44AD"),   # Purple
+        ]
+
+        curr_x = margin
+        for title, action, color in btns:
+            b = ui.Button()
+            b.title = title
+            b.font = ("<System>", 13)
+            b.frame = (curr_x, y, btn_w, row1_h)
+            b.flex = "W"
+            b.background_color = color
+            b.tint_color = "white"
+            b.corner_radius = 6.0
+            b.action = action
+            parent.add_subview(b)
+
+            # Save references if needed (delta button was saved in self.delta_button)
+            if title == "Delta":
+                self.delta_button = b
+
+            curr_x += btn_w + gap
+
+        y += row1_h + gap
+
+        # Reihe 2: Run Merge
+        row2_h = 42
+
+        run_btn = ui.Button()
+        run_btn.title = "Run Merge"
+        run_btn.font = ("<System-Bold>", 16)
+        run_btn.frame = (margin, y, w - 2*margin, row2_h)
+        run_btn.flex = "W"
+        run_btn.background_color = "#007aff"
+        run_btn.tint_color = "white"
+        run_btn.corner_radius = 6.0
+        run_btn.action = self.run_merge
+        parent.add_subview(run_btn)
+        self.run_button = run_btn
+
+        y += row2_h
+        return y
 
     def _tableview_did_select(self, tableview, section, row):
         if self.ignore_mode:
@@ -1498,6 +1494,7 @@ class MergerUI(object):
                 try:
                     content = review_md.read_text("utf-8", errors="replace")
                     if len(content) > MAX_CHARS:
+                        lines.append(f"> **Note**: Content truncated at {MAX_CHARS} characters. Full content in original `review.md`.")
                         content = content[:MAX_CHARS] + "\n\n... [Truncated due to size] ..."
                     lines.append(content)
                 except Exception as e:
@@ -1546,19 +1543,36 @@ class MergerUI(object):
 
                 for ts_dir in repo_dir.iterdir():
                     if not ts_dir.is_dir(): continue
+
+                    # Timestamp Contract: Ensure strictly formatted timestamp folder name
+                    # Expected: %Y-%m-%dT%H%M%SZ (e.g. 2025-05-10T123000Z)
+                    ts_val = ts_dir.name
+                    if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{6}Z$", ts_val):
+                        # Attempt fallback from bundle.json if folder name is invalid
+                        # but we still prefer strict compliance. For now, we accept it if we can parse it
+                        # or if bundle.json has a valid created_at.
+                        try:
+                            bj_path = ts_dir / "bundle.json"
+                            if bj_path.exists():
+                                bj = json.loads(bj_path.read_text("utf-8"))
+                                if "created_at" in bj:
+                                    ts_val = bj["created_at"]
+                        except Exception:
+                            pass
+
                     review_md = ts_dir / "review.md"
                     bundle_json = ts_dir / "bundle.json"
                     delta_json = ts_dir / "delta.json"
 
                     # Robustness: Include even if review.md missing, if metadata exists
                     if review_md.exists() or bundle_json.exists() or delta_json.exists():
-                        display_text = f"{repo_name} @ {ts_dir.name}"
+                        display_text = f"{repo_name} @ {ts_val}"
                         if not review_md.exists():
                             display_text += " (no review.md)"
 
                         items.append({
                             "repo": repo_name,
-                            "ts": ts_dir.name,
+                            "ts": ts_val,
                             "path": review_md,
                             "bundle_dir": ts_dir,
                             "display": display_text
@@ -1622,17 +1636,29 @@ class MergerUI(object):
                 row = next(iter(ds.selected))
 
             if row >= 0 and row < len(items):
-                # Robust Path check avoiding string drift
-                p_obj = items[row].get("path")
-                if p_obj and isinstance(p_obj, Path) and p_obj.exists():
-                    path_str = str(p_obj)
-                    if editor:
-                        editor.open_file(path_str)
-                        # Do NOT close sheet (UX requirement)
-                    elif console:
-                        console.quicklook(path_str)
-                else:
-                    if console: console.hud_alert("File not found (meta only)", "error")
+                # Smart Open: Try review.md -> bundle.json -> delta.json
+                item = items[row]
+                candidates = [
+                    item.get("path"),                   # review.md
+                    item.get("bundle_dir") / "bundle.json",
+                    item.get("bundle_dir") / "delta.json"
+                ]
+
+                opened = False
+                for cand in candidates:
+                    if cand and isinstance(cand, Path) and cand.exists():
+                        path_str = str(cand)
+                        if editor:
+                            editor.open_file(path_str)
+                            opened = True
+                            break
+                        elif console:
+                            console.quicklook(path_str)
+                            opened = True
+                            break
+
+                if not opened:
+                    if console: console.hud_alert("No viewable file found", "error")
             else:
                 if console: console.hud_alert("Select a bundle to open")
 
