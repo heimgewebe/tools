@@ -318,10 +318,18 @@ class PRSchauDataSource(object):
             self.selected.remove(row)
         else:
             self.selected.add(row)
+
+        # Robust reload: try various signatures known in different Pythonista versions
         try:
+            # Standard signature
             tv.reload_rows([(section, row)])
         except Exception:
-            tv.reload_data()
+            try:
+                # Alternative signature (list of rows, implicit section 0 or explicit kwarg)
+                tv.reload_rows([row])
+            except Exception:
+                # Fallback
+                tv.reload_data()
 
 
 def _run_extractor_on_start(hub: Path) -> None:
@@ -1535,6 +1543,21 @@ class MergerUI(object):
         """Zeigt Liste der verfügbaren PR-Schau Bundles mit Multi-Select Workflow."""
         pr_dir = self.hub / PR_SCHAU_DIR
 
+        def _normalize_ts(val: str) -> Optional[str]:
+            """Ensure timestamp is strictly %Y-%m-%dT%H%M%SZ."""
+            # 1. Check strict match
+            if re.match(r"^\d{4}-\d{2}-\d{2}T\d{6}Z$", val):
+                return val
+            # 2. Try parsing common formats
+            try:
+                # Handle Z suffix manually for pre-3.11 compatibility or partial ISO
+                clean = val.replace("Z", "+00:00")
+                dt = datetime.datetime.fromisoformat(clean)
+                # Re-format strict
+                return dt.strftime("%Y-%m-%dT%H%M%SZ")
+            except ValueError:
+                return None
+
         items = []
         if pr_dir.exists():
             for repo_dir in pr_dir.iterdir():
@@ -1546,19 +1569,28 @@ class MergerUI(object):
 
                     # Timestamp Contract: Ensure strictly formatted timestamp folder name
                     # Expected: %Y-%m-%dT%H%M%SZ (e.g. 2025-05-10T123000Z)
-                    ts_val = ts_dir.name
-                    if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{6}Z$", ts_val):
+                    ts_raw = ts_dir.name
+                    ts_sort = _normalize_ts(ts_raw)
+
+                    if not ts_sort:
                         # Attempt fallback from bundle.json if folder name is invalid
-                        # but we still prefer strict compliance. For now, we accept it if we can parse it
-                        # or if bundle.json has a valid created_at.
                         try:
                             bj_path = ts_dir / "bundle.json"
                             if bj_path.exists():
                                 bj = json.loads(bj_path.read_text("utf-8"))
                                 if "created_at" in bj:
-                                    ts_val = bj["created_at"]
+                                    # Normalize the JSON timestamp too
+                                    ts_sort = _normalize_ts(bj["created_at"])
                         except Exception:
                             pass
+
+                    # If still no valid sort key, use a fallback to ensure list display but minimal priority
+                    display_ts = ts_raw
+                    if not ts_sort:
+                        ts_sort = "0000-00-00T000000Z" # Sorts to bottom in desc
+                        display_ts = f"{ts_raw} (invalid ts)"
+                    else:
+                        display_ts = ts_sort
 
                     review_md = ts_dir / "review.md"
                     bundle_json = ts_dir / "bundle.json"
@@ -1566,13 +1598,13 @@ class MergerUI(object):
 
                     # Robustness: Include even if review.md missing, if metadata exists
                     if review_md.exists() or bundle_json.exists() or delta_json.exists():
-                        display_text = f"{repo_name} @ {ts_val}"
+                        display_text = f"{repo_name} @ {display_ts}"
                         if not review_md.exists():
                             display_text += " (no review.md)"
 
                         items.append({
                             "repo": repo_name,
-                            "ts": ts_val,
+                            "ts": ts_sort,
                             "path": review_md,
                             "bundle_dir": ts_dir,
                             "display": display_text
