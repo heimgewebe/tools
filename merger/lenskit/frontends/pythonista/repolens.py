@@ -1419,6 +1419,7 @@ class MergerUI(object):
 
         # Deterministische Auswahlreihenfolge: sortiere Indices nach Timestamp (desc) der Items
         # Dies ist robuster als das Sortieren der extrahierten Liste
+        # Note: We rely on string sorting of 'ts' which is strictly ISO-8601-like (%Y-%m-%dT%H%M%SZ)
         sorted_indices = sorted(selected_indices, key=lambda i: items[i]["ts"], reverse=True)
         selected_items = [items[i] for i in sorted_indices]
 
@@ -1621,14 +1622,15 @@ class MergerUI(object):
                 row = next(iter(ds.selected))
 
             if row >= 0 and row < len(items):
-                path = str(items[row]["path"])
-                # Check existance before opening, as it might be missing in robust mode
-                if os.path.exists(path):
+                # Robust Path check avoiding string drift
+                p_obj = items[row].get("path")
+                if p_obj and isinstance(p_obj, Path) and p_obj.exists():
+                    path_str = str(p_obj)
                     if editor:
-                        editor.open_file(path)
+                        editor.open_file(path_str)
                         # Do NOT close sheet (UX requirement)
                     elif console:
-                        console.quicklook(path)
+                        console.quicklook(path_str)
                 else:
                     if console: console.hud_alert("File not found (meta only)", "error")
             else:
