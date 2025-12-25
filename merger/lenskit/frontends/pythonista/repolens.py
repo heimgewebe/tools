@@ -118,7 +118,13 @@ def _notify(msg: str, level: str = "info") -> None:
         try:
             # Map level to duration or icon if needed
             duration = 1.0 if level == "info" else 1.5
-            console.hud_alert(msg, icon=level, duration=duration)
+            icon_map = {
+                "success": "success",
+                "error": "error",
+                "info": None,
+            }
+            icon = icon_map.get(level)
+            console.hud_alert(msg, icon=icon, duration=duration)
             return
         except Exception:
             pass
