@@ -63,6 +63,11 @@ try:
 except Exception:
     editor = None    # type: ignore
 
+try:
+    import quicklook # type: ignore
+except Exception:
+    quicklook = None # type: ignore
+
 # Keep track of the currently presented Merger UI view (Pythonista).
 # This prevents stacking multiple fullscreen windows when the script is opened repeatedly.
 _ACTIVE_MERGER_VIEW = None
@@ -101,6 +106,38 @@ def safe_script_path() -> Path:
 # Cache script path at module level for consistent behavior
 SCRIPT_PATH = safe_script_path()
 SCRIPT_DIR = SCRIPT_PATH.parent
+
+
+def _notify(msg: str, level: str = "info") -> None:
+    """
+    Central notification helper that degrades gracefully.
+    Levels: 'info', 'success', 'error'
+    """
+    # 1. Console HUD (Preferred for transient info/success)
+    if console:
+        try:
+            # Map level to duration or icon if needed
+            duration = 1.0 if level == "info" else 1.5
+            console.hud_alert(msg, icon=level, duration=duration)
+            return
+        except Exception:
+            pass
+
+    # 2. UI Alert (Fallback for errors or if console missing)
+    # Only if ui is available
+    if ui:
+        try:
+            # Short title based on level
+            title = "repoLens"
+            if level == "error":
+                title += " Error"
+            ui.alert(title, msg, "OK", hide_cancel_button=True)
+            return
+        except Exception:
+            pass
+
+    # 3. Print (Last resort)
+    sys.stderr.write(f"[repoLens] [{level}] {msg}\n")
 
 
 def force_close_files(paths: List[Path]) -> None:
@@ -1670,32 +1707,61 @@ class MergerUI(object):
             elif ds.selected:
                 row = next(iter(ds.selected))
 
-            if row >= 0 and row < len(items):
-                # Smart Open: Try review.md -> bundle.json -> delta.json
-                item = items[row]
-                candidates = [
-                    item.get("path"),                   # review.md
-                    item.get("bundle_dir") / "bundle.json",
-                    item.get("bundle_dir") / "delta.json"
-                ]
+            if row < 0 or row >= len(items):
+                _notify("Select a bundle to open", "info")
+                return
 
-                opened = False
-                for cand in candidates:
-                    if cand and isinstance(cand, Path) and cand.exists():
-                        path_str = str(cand)
-                        if editor:
+            # Smart Open: Try review.md -> bundle.json -> delta.json
+            item = items[row]
+            candidates = [
+                item.get("path"),                   # review.md
+                item.get("bundle_dir") / "bundle.json",
+                item.get("bundle_dir") / "delta.json"
+            ]
+
+            opened = False
+            for cand in candidates:
+                if cand and isinstance(cand, Path) and cand.exists():
+                    path_str = str(cand)
+
+                    # Strategy 1: Editor
+                    if editor:
+                        try:
                             editor.open_file(path_str)
                             opened = True
                             break
-                        elif console:
+                        except Exception:
+                            pass
+
+                    # Strategy 2: Console Quicklook
+                    if console:
+                        try:
                             console.quicklook(path_str)
                             opened = True
                             break
+                        except Exception:
+                            pass
 
-                if not opened:
-                    if console: console.hud_alert("No viewable file found", "error")
-            else:
-                if console: console.hud_alert("Select a bundle to open")
+                    # Strategy 3: Standard Quicklook module
+                    if quicklook:
+                        try:
+                            quicklook.quicklook(path_str)
+                            opened = True
+                            break
+                        except Exception:
+                            pass
+
+                    # Strategy 4: Fallback UI Alert (inform user file exists but can't be viewed)
+                    if ui:
+                        try:
+                            ui.alert("File exists", f"Cannot open: {cand.name}\n(No viewer available)", "OK", hide_cancel_button=True)
+                            opened = True # Handled in UI
+                            break
+                        except Exception:
+                            pass
+
+            if not opened:
+                _notify("No viewable file found", "error")
 
         btn_open.action = action_open
         bar.add_subview(btn_open)
