@@ -339,7 +339,17 @@ def _compute_sha256(path: Path) -> str:
 def _is_secret_file(path_str: str) -> bool:
     """Checks for sensitive files based on naming patterns."""
     name = Path(path_str).name
-    patterns = [".env", "*.pem", "*.key", "id_rsa*", "tokens*", "secrets*"]
+    patterns = [
+        ".env*",
+        "*.pem",
+        "*.key",
+        "id_rsa*",
+        "*token*",
+        "secrets*",
+        "*.p12",
+        "*.pfx",
+        "*.kdbx",
+    ]
     for pat in patterns:
         if fnmatch.fnmatch(name, pat):
             return True
@@ -420,10 +430,16 @@ def generate_review_bundle(
 
     changed = []
     for f in common:
-        # Check size or MD5 from snapshot to detect change
-        # snapshot tuple: (size, md5, category)
-        s_old, m_old, _ = old_snap[f]
-        s_new, m_new, _ = new_snap[f]
+        # Robust snapshot unpacking
+        tup_old = old_snap.get(f, ())
+        tup_new = new_snap.get(f, ())
+
+        s_old = tup_old[0] if len(tup_old) > 0 else 0
+        m_old = tup_old[1] if len(tup_old) > 1 else ""
+
+        s_new = tup_new[0] if len(tup_new) > 0 else 0
+        m_new = tup_new[1] if len(tup_new) > 1 else ""
+
         if s_old != s_new or m_old != m_new:
             changed.append(f)
     changed.sort()
@@ -452,15 +468,28 @@ def generate_review_bundle(
             "sha256": sha
         }
 
+    # Populate delta_files with prioritization for review order
+    # Priority: schema > ci > config > docs > code > other
+    # Sort order mapping
+    cat_prio = {"schema": 0, "ci": 1, "config": 2, "docs": 3, "code": 4, "other": 5}
+
+    # We collect all entries first
+    all_entries = []
     for f in added:
-        delta_files.append(make_entry(f, "added", new_repo))
+        all_entries.append(make_entry(f, "added", new_repo))
     for f in changed:
-        delta_files.append(make_entry(f, "changed", new_repo))
+        all_entries.append(make_entry(f, "changed", new_repo))
     for f in removed:
-        delta_files.append(make_entry(f, "removed", old_repo))
+        all_entries.append(make_entry(f, "removed", old_repo))
+
+    # Sort for delta.json (optional, but good for consistency)
+    # Primary sort: Status (added/changed/removed) - actually standard is usually by path or status.
+    # Let's keep delta.json strictly sorted by path to be canonical.
+    delta_files = sorted(all_entries, key=lambda x: x["path"])
 
     delta_json = {
-        "format": 1,
+        "kind": "repolens.pr_schau.delta",
+        "version": 1,
         "repo": repo_name,
         "generated_at": now_utc.isoformat(),
         "summary": {
@@ -486,7 +515,7 @@ def generate_review_bundle(
     hotspots = []
     for f in (added + changed):
         # Original
-        if f.startswith(".github/") or f.startswith("contracts/") or f.endswith("schema.json"):
+        if f.startswith(".github/") or f.startswith("contracts/") or f.endswith(".schema.json"):
             hotspots.append(f)
             continue
 
@@ -506,10 +535,18 @@ def generate_review_bundle(
     lines.append("## Details")
     lines.append("")
 
+    # Sort files for review.md: schema > ci > config > docs > code > other
+    def review_sort_key(item):
+        cat = item.get("category", "other")
+        prio = cat_prio.get(cat, 99)
+        return (prio, item["path"])
+
+    review_files = sorted(all_entries, key=review_sort_key)
+
     # Content generation for added/changed
     MAX_INLINE_SIZE = 200 * 1024 # 200 KB
 
-    for item in delta_files:
+    for item in review_files:
         path = item["path"]
         status = item["status"]
 
@@ -527,7 +564,7 @@ def generate_review_bundle(
 
         # Security / Binary / Size checks
         if _is_secret_file(path):
-            lines.append("\n> 🔒 **REDACTED (Secret File)**\n")
+            lines.append("\n> 🔒 **REDACTED (matched filename rule)**\n")
             lines.append("")
             continue
 
@@ -551,7 +588,14 @@ def generate_review_bundle(
             text_content = fpath.read_text(encoding="utf-8", errors="replace")
 
             # Extension for code block
-            ext = Path(path).suffix.lstrip(".") or "txt"
+            p_obj = Path(path)
+            ext = p_obj.suffix.lstrip(".") or "txt"
+
+            # Normalize common languages
+            if p_obj.name.endswith(".schema.json") or ext == "json":
+                ext = "json"
+            elif ext in ("yml", "yaml"):
+                ext = "yaml"
 
             lines.append("")
             lines.append(f"```{ext}")
@@ -567,7 +611,8 @@ def generate_review_bundle(
 
     # --- 3. bundle.json ---
     bundle_meta = {
-        "format": 1,
+        "kind": "repolens.pr_schau.bundle",
+        "version": 1,
         "repo": repo_name,
         "source": "wc-hub",
         "created_at": now_utc.isoformat(),
