@@ -2406,9 +2406,20 @@ def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], in
         risk_level = "medium"
 
     lines.append(f"- **Active Lenses:** {', '.join(active_lenses) if active_lenses else 'none'}")
-    lines.append(f"- **Text Contact:** {included_count}/{text_files_count} files ({coverage_pct:.1f}%)")
-    if truncation_count > 0:
-        lines.append(f"- **Truncated Files:** {truncation_count}")
+
+    # Task T-Fix-SR-4: Markdown metrics
+    total_files_count = len(files)
+    meta_count = total_files_count - included_count
+    full_count = included_count - truncation_count
+
+    contact_ratio_pct = int((included_count / total_files_count) * 100) if total_files_count else 0
+
+    lines.append("- **Text Contact Breakdown:**")
+    lines.append(f"  - full: {full_count}")
+    lines.append(f"  - snippet: {truncation_count}")
+    lines.append(f"  - meta: {meta_count}")
+    lines.append(f"- **Contact Ratio:** {contact_ratio_pct}%")
+
     lines.append(f"- **Risk Level:** `{risk_level}`")
 
     if risk_level == "high":
@@ -3635,17 +3646,18 @@ def generate_json_sidecar(
         elif status == "truncated":
             evidence = "snippet"
 
+        contact_entry = {
+            "path": fi.rel_path.as_posix(),
+            "evidence_type": evidence,
+        }
+
         if evidence in ("full", "snippet"):
              # Read content to get truthful char count (Task T-Fix1)
              content, _, _ = read_smart_content(fi, max_file_bytes)
              chars_seen = len(content)
+             contact_entry["chars_seen"] = chars_seen
 
-             contact_entry = {
-                 "path": fi.rel_path.as_posix(),
-                 "evidence_type": evidence,
-                 "chars_seen": chars_seen
-             }
-             contact_list.append(contact_entry)
+        contact_list.append(contact_entry)
 
     risk_level = "low"
     if coverage_pct < 10:
@@ -3655,6 +3667,30 @@ def generate_json_sidecar(
 
     if truncation_count > 0 and risk_level == "low":
         risk_level = "medium"
+
+    # Task T-Fix-SR-2: Explicit Contact Metrics
+    total_files_count = len(files)
+    meta_count = total_files_count - included_count
+    full_count = included_count - truncation_count
+
+    contact_ratio = round((included_count / total_files_count) if total_files_count else 0.0, 2)
+    meta_ratio = round((meta_count / total_files_count) if total_files_count else 0.0, 2)
+
+    contact_metrics = {
+        "total_files": total_files_count,
+        "full": full_count,
+        "snippet": truncation_count,
+        "meta": meta_count,
+        "contact_ratio": contact_ratio,
+        "meta_ratio": meta_ratio,
+    }
+
+    # Task T-Fix-SR-3: Explicit Risk Rationale
+    risk_rationale = {
+        "low_if": "contact_ratio >= 0.5 and truncation_count == 0",
+        "medium_if": "contact_ratio < 0.5 or truncation_count > 0",
+        "high_if": "contact_ratio < 0.1"
+    }
 
     out = {
         "meta": meta,
@@ -3685,7 +3721,9 @@ def generate_json_sidecar(
         "self_report": {
              "active_lenses": lenses.LENS_IDS,
              "text_contact": contact_list,
+             "contact_metrics": contact_metrics,
              "risk_level": risk_level,
+             "risk_rationale": risk_rationale,
              "uncertainty_score": round(1.0 - (coverage_pct / 100.0), 2),
         },
         "files": files_out,
