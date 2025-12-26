@@ -1251,15 +1251,15 @@ HUB_PATH_FILENAME = ".repolens-hub-path.txt"
 
 # Constants
 # Load Epistemic Charter from assets or fallback
-_CHARTER_FALLBACK = """# Epistemic Reading Charter (Condensed)
-**Status:** Normative | **Applied:** Yes
+_CHARTER_FALLBACK = """## Epistemic Reading Charter (Condensed)
+**Status:** Normative | **Applied:** true | **Scope:** report_header
 
 1. **Facts:** `full`/`snippet` = read. `meta` = unread/structure only.
 2. **Constraint:** Strong claims only with `full` contact. `meta` requires hypothetical language.
 3. **Duty:** If `risk_level != low`, explicitly flag uncertainty.
 4. **Guard:** Do not simulate knowledge you don't have.
 
-*Full Charter: contracts/epistemic/reading_charter.v1.md*
+*Full Charter: merger/lenskit/assets/epistemic_reading_charter.md*
 """
 
 # Semantische Use-Case-Beschreibung pro Profil.
@@ -1986,15 +1986,15 @@ def compute_epistemic_metrics(files: List[FileInfo], processed_files: List[Tuple
         risk_level = "medium"
 
     risk_rationale = {
-        "low_if": "text_coverage_ratio >= 0.5 and truncation_count == 0",
-        "medium_if": "text_coverage_ratio < 0.5 or truncation_count > 0",
+        "low_if": "text_coverage_ratio >= 0.5 and snippet_count == 0",
+        "medium_if": "text_coverage_ratio < 0.5 or snippet_count > 0",
         "high_if": "text_coverage_ratio < 0.1"
     }
 
     risk_inputs = {
         "contact_ratio_all_files": contact_ratio,
         "text_coverage_ratio": text_coverage_ratio,
-        "truncation_count": snippet_count
+        "snippet_count": snippet_count
     }
 
     # Uncertainty Score: based on text coverage gap
@@ -3088,26 +3088,8 @@ def iter_report_blocks(
     # --- 3.1 Epistemic Charter & Declaration (T-Charter-1 + ED-1) ---
     # Moved after Meta block as requested.
     if not plan_only:
-        # Load Charter from asset or fallback
-        charter_text = _CHARTER_FALLBACK
-        try:
-            # Locate asset relative to this file
-            asset_path = Path(__file__).parent.parent / "assets" / "epistemic_reading_charter.md"
-            if asset_path.exists():
-                charter_text = asset_path.read_text(encoding="utf-8")
-        except Exception:
-            pass
-
-        # Use condensed version for report if possible, or link?
-        # User requested short version in report.
-        # We'll use the fallback constant which is already condensed for inline usage,
-        # unless we want to embed the FULL charter from file.
-        # Strategy: Use _CHARTER_FALLBACK for inline display to minimize text weight,
-        # but link to the full one in the repo (conceptually).
-        # Actually, if the file exists, maybe we should use it?
-        # User said: "Kurzfassung im Merge (10-15 Zeilen) ... Volltext im metarepo".
-        # So I will use _CHARTER_FALLBACK always here as the "Kurzfassung".
-
+        # User requested condensed version in report header.
+        # Full charter is available in assets/epistemic_reading_charter.md
         header.append(_CHARTER_FALLBACK)
         header.append("")
 
