@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
 
+from . import lenses
+
 try:
     import yaml  # PyYAML
 except Exception:  # pragma: no cover
@@ -1294,6 +1296,7 @@ class FileInfo(object):
         self.anchor = "" # Will be set during report generation
         self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
         self.roles = [] # Will be computed during report generation
+        self.lens = None # Assigned during scan or later
 
 
 # --- Utilities ---
@@ -1881,6 +1884,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 ext=ext,
                 inclusion_reason=inclusion_reason
             )
+            fi.lens = lenses.infer_lens(rel_path)
             files.append(fi)
 
     # Sort files: first by repo order (if multi-repo context handled outside,
@@ -2314,6 +2318,111 @@ def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
     return warnings
 
 
+def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = None) -> List[str]:
+    """
+    Renders the 'Reading Lenses' block.
+    Shows recommended subset (focus overlay) per lens.
+    """
+    if active_lenses is None:
+        active_lenses = lenses.LENS_IDS
+
+    lines = []
+    lines.append("## Reading Lenses")
+    lines.append("")
+    lines.append("Active lenses: " + ", ".join(f"`{l}`" for l in active_lenses))
+    lines.append("")
+    lines.append("### Recommended subset (focus, not exclusion)")
+    lines.append("")
+
+    # Simple heuristic for recommended subset:
+    # Take top N files per active lens.
+    # Criteria: included (full/truncated), prioritized by shortness of path and specific roles.
+
+    # Sort candidates
+    def score_candidate(fi: FileInfo):
+        # Shorter paths are usually higher level / more important entry points
+        score = -len(fi.rel_path.parts)
+        if is_priority_file(fi):
+            score += 5
+        if fi.inclusion_reason == "force_include":
+            score += 3
+        return score
+
+    displayed_any = False
+
+    for lens_id in active_lenses:
+        candidates = [f for f in files if f.lens == lens_id and f.inclusion_reason != "omitted"] # Include meta-only in recommendation? Maybe.
+        # Focus mainly on content available files for reading
+        candidates = [f for f in candidates if f.anchor]
+
+        if not candidates:
+            continue
+
+        # Sort and take top 5-10
+        candidates.sort(key=score_candidate, reverse=True)
+        top = candidates[:6] # Keep it brief
+
+        lines.append(f"**({lens_id})**")
+        for f in top:
+            lines.append(f"- [`{f.rel_path}`](#{f.anchor})")
+        lines.append("")
+        displayed_any = True
+
+    if not displayed_any:
+        lines.append("_No specific recommendations found._")
+        lines.append("")
+
+    lines.append("> All files are included below. This subset is a focus suggestion, not a filter.")
+    lines.append("")
+    return lines
+
+def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], included_count: int, text_files_count: int, truncation_count: int) -> List[str]:
+    """
+    Renders 'Epistemic Status' block.
+    Self-report on text contact and risks.
+    """
+    lines = []
+    lines.append("## Epistemic Status")
+    lines.append("")
+
+    # Calculate risk level
+    # High: < 10% coverage of text files
+    # Medium: < 50% coverage OR truncation happened
+    # Low: >= 50% coverage AND no truncation
+
+    risk_level = "low"
+    coverage_pct = 0.0
+    if text_files_count > 0:
+        coverage_pct = (included_count / text_files_count) * 100.0
+        if coverage_pct < 10:
+            risk_level = "high"
+        elif coverage_pct < 50:
+            risk_level = "medium"
+    else:
+        # No text files? Low risk of missing text.
+        risk_level = "low"
+
+    if truncation_count > 0 and risk_level == "low":
+        risk_level = "medium"
+
+    lines.append(f"- **Active Lenses:** {', '.join(active_lenses) if active_lenses else 'none'}")
+    lines.append(f"- **Text Contact:** {included_count}/{text_files_count} files ({coverage_pct:.1f}%)")
+    if truncation_count > 0:
+        lines.append(f"- **Truncated Files:** {truncation_count}")
+    lines.append(f"- **Risk Level:** `{risk_level}`")
+
+    if risk_level == "high":
+        lines.append("  - ⚠️ **High Risk:** Low text coverage. Relying heavily on metadata/structure.")
+    elif risk_level == "medium":
+         if truncation_count > 0:
+             lines.append("  - ⚠️ **Medium Risk:** Truncation occurred. Some files are incomplete.")
+         else:
+             lines.append("  - ⚠️ **Medium Risk:** Partial text coverage. Some context might be missing.")
+
+    lines.append("")
+    return lines
+
+
 class ValidationException(Exception):
     pass
 
@@ -2597,6 +2706,7 @@ def iter_report_blocks(
     total_size = sum(fi.size for fi in files)
     text_files = [fi for fi in files if fi.is_text]
     included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
+    truncation_count = sum(1 for _, s in processed_files if s == "truncated")
 
     # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
     # um später im Plan pro Repo eine Coverage-Zeile auszugeben
@@ -2885,6 +2995,22 @@ def iter_report_blocks(
         meta_lines.append("<!-- @meta:end -->")
         meta_lines.append("")
         header.extend(meta_lines)
+
+    # --- 3a. Reading Lenses & Epistemic Status (New in v2.4) ---
+    if not plan_only:
+        active_lenses = lenses.LENS_IDS # Default to all canonical
+
+        # Reading Lenses
+        header.extend(_render_reading_lenses(files, active_lenses))
+
+        # Epistemic Status
+        # Note: included_count and text_files might be calculated later in iter_report_blocks
+        # We need to rely on the variables calculated *before* header generation.
+        # Check logic above:
+        # text_files = [fi for fi in files if fi.is_text]
+        # included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
+        # Both are available before header block.
+        header.extend(_render_epistemic_status(files, active_lenses, included_count, len(text_files), truncation_count))
 
     # --- 4. Profile Description ---
     header.append("## Profile Description")
@@ -3424,12 +3550,15 @@ def generate_json_sidecar(
 
     processed = []
     included_count = 0
+    truncation_count = 0
     text_files = [f for f in files if f.is_text]
 
     for fi in files:
         status = determine_inclusion_status(fi, level, max_file_bytes)
         if status in ("full", "truncated"):
             included_count += 1
+        if status == "truncated":
+            truncation_count += 1
         processed.append((fi, status))
 
     coverage_pct = round((included_count / len(text_files)) * 100, 1) if text_files else 0.0
@@ -3467,8 +3596,19 @@ def generate_json_sidecar(
     }
 
     files_out = []
+    contact_list = []
+    lens_index = []
+
     for fi, status in processed:
         fid = _stable_file_id(fi)
+
+        # Populate lens index
+        if fi.lens:
+            lens_index.append({
+                "path": fi.rel_path.as_posix(),
+                "lens": fi.lens
+            })
+
         file_obj = {
             "id": fid,
             "path": fi.rel_path.as_posix(),
@@ -3486,6 +3626,36 @@ def generate_json_sidecar(
         }
         files_out.append(file_obj)
 
+        # Self Report Contact
+        evidence = "meta"
+        chars_seen = None
+
+        if status == "full":
+            evidence = "full"
+        elif status == "truncated":
+            evidence = "snippet"
+
+        if evidence in ("full", "snippet"):
+             # Read content to get truthful char count (Task T-Fix1)
+             content, _, _ = read_smart_content(fi, max_file_bytes)
+             chars_seen = len(content)
+
+             contact_entry = {
+                 "path": fi.rel_path.as_posix(),
+                 "evidence_type": evidence,
+                 "chars_seen": chars_seen
+             }
+             contact_list.append(contact_entry)
+
+    risk_level = "low"
+    if coverage_pct < 10:
+        risk_level = "high"
+    elif coverage_pct < 50:
+        risk_level = "medium"
+
+    if truncation_count > 0 and risk_level == "low":
+        risk_level = "medium"
+
     out = {
         "meta": meta,
         "reading_policy": {
@@ -3493,6 +3663,7 @@ def generate_json_sidecar(
             "md_required": True,
             "json_role": "index_and_metadata_only",
             "md_contains_full_information": True,
+            "lenses_applied": True
         },
         "artifacts": {
             # filled by writer (paths)
@@ -3506,6 +3677,17 @@ def generate_json_sidecar(
             "coverage_pct": coverage_pct,
         },
         "scope": scope_desc,
+        "reading_lenses": {
+            "active": lenses.LENS_IDS,
+            "file_index": lens_index,
+            "recommended_files": [], # Populated in MD, optional here
+        },
+        "self_report": {
+             "active_lenses": lenses.LENS_IDS,
+             "text_contact": contact_list,
+             "risk_level": risk_level,
+             "uncertainty_score": round(1.0 - (coverage_pct / 100.0), 2),
+        },
         "files": files_out,
         "delta": delta_meta or None,
     }
