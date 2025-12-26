@@ -1249,6 +1249,19 @@ HARDCODED_HUB_PATH = (
 
 HUB_PATH_FILENAME = ".repolens-hub-path.txt"
 
+# Constants
+# Load Epistemic Charter from assets or fallback
+_CHARTER_FALLBACK = """## Epistemic Reading Charter (Condensed)
+**Status:** Normative | **Applied:** true | **Scope:** report_header
+
+1. **Facts:** `full`/`snippet` = read. `meta` = unread/structure only.
+2. **Constraint:** Strong claims only with `full` contact. `meta` requires hypothetical language.
+3. **Duty:** If `risk_level != low`, explicitly flag uncertainty.
+4. **Guard:** Do not simulate knowledge you don't have.
+
+*Full Charter: merger/lenskit/assets/epistemic_reading_charter.md*
+"""
+
 # Semantische Use-Case-Beschreibung pro Profil.
 # Wichtig: das ersetzt NICHT den Repo-Zweck (Declared Purpose),
 # sondern ergänzt ihn um die Rolle des aktuellen Merges.
@@ -1937,6 +1950,80 @@ def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
     return snapshot
 
 
+def compute_epistemic_metrics(files: List[FileInfo], processed_files: List[Tuple[FileInfo, str]]) -> Dict[str, Any]:
+    """
+    Compute epistemic metrics (counts, ratios, risks) in one place.
+    Single Source of Truth for JSON and Markdown.
+    """
+    total_files_count = len(files)
+
+    # Calculate counts from processed status
+    full_count = sum(1 for _, s in processed_files if s == "full")
+    snippet_count = sum(1 for _, s in processed_files if s == "truncated")
+    # Meta is everything else (meta-only, omitted, etc)
+    meta_count = sum(1 for _, s in processed_files if s not in ("full", "truncated"))
+
+    # Text-Files specific metrics
+    text_files_total = sum(1 for f in files if f.is_text)
+    text_files_contact = sum(1 for f, s in processed_files if f.is_text and s in ("full", "truncated"))
+
+    # Ratios
+    contact_ratio = round(((full_count + snippet_count) / total_files_count) if total_files_count else 0.0, 2)
+    meta_ratio = round((meta_count / total_files_count) if total_files_count else 0.0, 2)
+    text_coverage_ratio = round((text_files_contact / text_files_total) if text_files_total else 0.0, 2)
+
+    # Risk Level Logic
+    risk_level = "low"
+    if text_files_total > 0:
+        if text_coverage_ratio < 0.1:
+            risk_level = "high"
+        elif text_coverage_ratio < 0.5:
+            risk_level = "medium"
+    else:
+        risk_level = "low" # No text files? Low risk of missing text.
+
+    if snippet_count > 0 and risk_level == "low":
+        risk_level = "medium"
+
+    risk_rationale = {
+        "low_if": "text_coverage_ratio >= 0.5 and snippet_count == 0",
+        "medium_if": "text_coverage_ratio < 0.5 or snippet_count > 0",
+        "high_if": "text_coverage_ratio < 0.1"
+    }
+
+    risk_inputs = {
+        "contact_ratio_all_files": contact_ratio,
+        "text_coverage_ratio": text_coverage_ratio,
+        "snippet_count": snippet_count
+    }
+
+    # Uncertainty Score: based on text coverage gap
+    # 1.0 - text_coverage_ratio
+    uncertainty_score = round(1.0 - text_coverage_ratio, 2)
+
+    return {
+        "counts": {
+            "total": total_files_count,
+            "full": full_count,
+            "snippet": snippet_count,
+            "meta": meta_count,
+            "text_total": text_files_total,
+            "text_contact": text_files_contact
+        },
+        "ratios": {
+            "contact_ratio": contact_ratio,
+            "meta_ratio": meta_ratio,
+            "text_coverage_ratio": text_coverage_ratio
+        },
+        "risk": {
+            "level": risk_level,
+            "rationale": risk_rationale,
+            "inputs": risk_inputs,
+            "uncertainty_score": uncertainty_score
+        }
+    }
+
+
 # --- Reporting Logic V2 ---
 
 def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
@@ -2376,7 +2463,11 @@ def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = Non
     lines.append("")
     return lines
 
-def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], included_count: int, text_files_count: int, truncation_count: int) -> List[str]:
+def _render_epistemic_status(
+    files: List[FileInfo],
+    active_lenses: List[str],
+    metrics: Dict[str, Any]
+) -> List[str]:
     """
     Renders 'Epistemic Status' block.
     Self-report on text contact and risks.
@@ -2385,36 +2476,30 @@ def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], in
     lines.append("## Epistemic Status")
     lines.append("")
 
-    # Calculate risk level
-    # High: < 10% coverage of text files
-    # Medium: < 50% coverage OR truncation happened
-    # Low: >= 50% coverage AND no truncation
+    counts = metrics["counts"]
+    ratios = metrics["ratios"]
+    risk = metrics["risk"]
 
-    risk_level = "low"
-    coverage_pct = 0.0
-    if text_files_count > 0:
-        coverage_pct = (included_count / text_files_count) * 100.0
-        if coverage_pct < 10:
-            risk_level = "high"
-        elif coverage_pct < 50:
-            risk_level = "medium"
-    else:
-        # No text files? Low risk of missing text.
-        risk_level = "low"
-
-    if truncation_count > 0 and risk_level == "low":
-        risk_level = "medium"
+    contact_ratio_pct = int(ratios["contact_ratio"] * 100)
+    text_coverage_pct = int(ratios["text_coverage_ratio"] * 100)
 
     lines.append(f"- **Active Lenses:** {', '.join(active_lenses) if active_lenses else 'none'}")
-    lines.append(f"- **Text Contact:** {included_count}/{text_files_count} files ({coverage_pct:.1f}%)")
-    if truncation_count > 0:
-        lines.append(f"- **Truncated Files:** {truncation_count}")
-    lines.append(f"- **Risk Level:** `{risk_level}`")
 
-    if risk_level == "high":
+    lines.append("- **Text Contact Breakdown:**")
+    lines.append(f"  - full: {counts['full']}")
+    lines.append(f"  - snippet: {counts['snippet']}")
+    lines.append(f"  - meta: {counts['meta']}")
+
+    lines.append(f"- **Contact Ratio (all files):** {contact_ratio_pct}%")
+    lines.append(f"- **Text Coverage (text files):** {text_coverage_pct}%")
+    lines.append(f"- **Truncated Files:** {counts['snippet']}")
+
+    lines.append(f"- **Risk Level:** `{risk['level']}`")
+
+    if risk["level"] == "high":
         lines.append("  - ⚠️ **High Risk:** Low text coverage. Relying heavily on metadata/structure.")
-    elif risk_level == "medium":
-         if truncation_count > 0:
+    elif risk["level"] == "medium":
+         if counts["snippet"] > 0:
              lines.append("  - ⚠️ **Medium Risk:** Truncation occurred. Some files are incomplete.")
          else:
              lines.append("  - ⚠️ **Medium Risk:** Partial text coverage. Some context might be missing.")
@@ -2708,6 +2793,10 @@ def iter_report_blocks(
     included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
     truncation_count = sum(1 for _, s in processed_files if s == "truncated")
 
+    # Calculate Epistemic Metrics (SR-Fix-5, 6, 7)
+    # Single Source of Truth
+    ep_metrics = compute_epistemic_metrics(files, processed_files)
+
     # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
     # um später im Plan pro Repo eine Coverage-Zeile auszugeben
     included_by_root: Dict[str, int] = {}
@@ -2996,6 +3085,29 @@ def iter_report_blocks(
         meta_lines.append("")
         header.extend(meta_lines)
 
+    # --- 3.1 Epistemic Charter & Declaration (T-Charter-1 + ED-1) ---
+    # Moved after Meta block as requested.
+    if not plan_only:
+        # User requested condensed version in report header.
+        # Full charter is available in assets/epistemic_reading_charter.md
+        header.append(_CHARTER_FALLBACK)
+        header.append("")
+
+        # Epistemic Declaration
+        # Use computed metrics
+        _risk_level = ep_metrics["risk"]["level"]
+        _contact_ratio_pct = int(ep_metrics["ratios"]["contact_ratio"] * 100)
+
+        decl = []
+        decl.append("## Epistemic Declaration")
+        decl.append("")
+        decl.append("- **Charter:** epistemic_reading_charter v1")
+        decl.append("- **Claim Language Guard:** active")
+        decl.append(f"- **Risk Level:** {_risk_level}")
+        decl.append(f"- **Contact Ratio:** {_contact_ratio_pct}%")
+        decl.append("")
+        header.extend(decl)
+
     # --- 3a. Reading Lenses & Epistemic Status (New in v2.4) ---
     if not plan_only:
         active_lenses = lenses.LENS_IDS # Default to all canonical
@@ -3004,13 +3116,7 @@ def iter_report_blocks(
         header.extend(_render_reading_lenses(files, active_lenses))
 
         # Epistemic Status
-        # Note: included_count and text_files might be calculated later in iter_report_blocks
-        # We need to rely on the variables calculated *before* header generation.
-        # Check logic above:
-        # text_files = [fi for fi in files if fi.is_text]
-        # included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
-        # Both are available before header block.
-        header.extend(_render_epistemic_status(files, active_lenses, included_count, len(text_files), truncation_count))
+        header.extend(_render_epistemic_status(files, active_lenses, ep_metrics))
 
     # --- 4. Profile Description ---
     header.append("## Profile Description")
@@ -3549,19 +3655,21 @@ def generate_json_sidecar(
     total_size = sum(fi.size for fi in files)
 
     processed = []
-    included_count = 0
-    truncation_count = 0
     text_files = [f for f in files if f.is_text]
-
     for fi in files:
         status = determine_inclusion_status(fi, level, max_file_bytes)
-        if status in ("full", "truncated"):
-            included_count += 1
-        if status == "truncated":
-            truncation_count += 1
         processed.append((fi, status))
 
-    coverage_pct = round((included_count / len(text_files)) * 100, 1) if text_files else 0.0
+    # Calculate metrics early (Single Source of Truth)
+    ep_metrics = compute_epistemic_metrics(files, processed)
+
+    # Extract values for legacy/existing fields
+    included_count = ep_metrics["counts"]["full"] + ep_metrics["counts"]["snippet"]
+    text_files_count = ep_metrics["counts"]["text_total"]
+
+    coverage_pct = 0.0
+    if text_files_count > 0:
+        coverage_pct = round((ep_metrics["counts"]["text_contact"] / text_files_count) * 100, 1)
 
     # Build meta block (agent-first contract)
     meta = {
@@ -3592,6 +3700,18 @@ def generate_json_sidecar(
             "excluded_globs": [],
             "binary_policy": "ignore",
             "content_policy": render_mode,
+        },
+        "epistemic_charter": {
+            "applied": True,
+            "location": "document_header",
+            "version": "1.0",
+            "claim_language_guard": "active"
+        },
+        "epistemic_declaration": {
+            "charter": "epistemic_reading_charter v1",
+            "claim_language_guard": "active",
+            "risk_level": ep_metrics["risk"]["level"],
+            "contact_ratio": ep_metrics["ratios"]["contact_ratio"]
         },
     }
 
@@ -3635,26 +3755,31 @@ def generate_json_sidecar(
         elif status == "truncated":
             evidence = "snippet"
 
+        contact_entry = {
+            "path": fi.rel_path.as_posix(),
+            "evidence_type": evidence,
+        }
+
         if evidence in ("full", "snippet"):
              # Read content to get truthful char count (Task T-Fix1)
              content, _, _ = read_smart_content(fi, max_file_bytes)
              chars_seen = len(content)
+             contact_entry["chars_seen"] = chars_seen
 
-             contact_entry = {
-                 "path": fi.rel_path.as_posix(),
-                 "evidence_type": evidence,
-                 "chars_seen": chars_seen
-             }
-             contact_list.append(contact_entry)
+        contact_list.append(contact_entry)
 
-    risk_level = "low"
-    if coverage_pct < 10:
-        risk_level = "high"
-    elif coverage_pct < 50:
-        risk_level = "medium"
-
-    if truncation_count > 0 and risk_level == "low":
-        risk_level = "medium"
+    # Metrics construction for self_report
+    contact_metrics = {
+        "total_files": ep_metrics["counts"]["total"],
+        "full": ep_metrics["counts"]["full"],
+        "snippet": ep_metrics["counts"]["snippet"],
+        "meta": ep_metrics["counts"]["meta"],
+        "contact_ratio": ep_metrics["ratios"]["contact_ratio"],
+        "meta_ratio": ep_metrics["ratios"]["meta_ratio"],
+        "text_files_total": ep_metrics["counts"]["text_total"],
+        "text_files_contact": ep_metrics["counts"]["text_contact"],
+        "text_coverage_ratio": ep_metrics["ratios"]["text_coverage_ratio"],
+    }
 
     out = {
         "meta": meta,
@@ -3685,8 +3810,11 @@ def generate_json_sidecar(
         "self_report": {
              "active_lenses": lenses.LENS_IDS,
              "text_contact": contact_list,
-             "risk_level": risk_level,
-             "uncertainty_score": round(1.0 - (coverage_pct / 100.0), 2),
+             "contact_metrics": contact_metrics,
+             "risk_level": ep_metrics["risk"]["level"],
+             "risk_rationale": ep_metrics["risk"]["rationale"],
+             "risk_inputs": ep_metrics["risk"]["inputs"],
+             "uncertainty_score": ep_metrics["risk"]["uncertainty_score"],
         },
         "files": files_out,
         "delta": delta_meta or None,
