@@ -2353,7 +2353,7 @@ def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = Non
     for lens_id in active_lenses:
         candidates = [f for f in files if f.lens == lens_id and f.inclusion_reason != "omitted"] # Include meta-only in recommendation? Maybe.
         # Focus mainly on content available files for reading
-        candidates = [f for f in candidates if hasattr(f, "anchor")]
+        candidates = [f for f in candidates if f.anchor]
 
         if not candidates:
             continue
@@ -2376,7 +2376,7 @@ def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = Non
     lines.append("")
     return lines
 
-def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], included_count: int, text_files_count: int) -> List[str]:
+def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], included_count: int, text_files_count: int, truncation_count: int) -> List[str]:
     """
     Renders 'Epistemic Status' block.
     Self-report on text contact and risks.
@@ -2387,8 +2387,8 @@ def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], in
 
     # Calculate risk level
     # High: < 10% coverage of text files
-    # Medium: < 50% coverage
-    # Low: >= 50% coverage
+    # Medium: < 50% coverage OR truncation happened
+    # Low: >= 50% coverage AND no truncation
 
     risk_level = "low"
     coverage_pct = 0.0
@@ -2402,14 +2402,22 @@ def _render_epistemic_status(files: List[FileInfo], active_lenses: List[str], in
         # No text files? Low risk of missing text.
         risk_level = "low"
 
+    if truncation_count > 0 and risk_level == "low":
+        risk_level = "medium"
+
     lines.append(f"- **Active Lenses:** {', '.join(active_lenses) if active_lenses else 'none'}")
     lines.append(f"- **Text Contact:** {included_count}/{text_files_count} files ({coverage_pct:.1f}%)")
+    if truncation_count > 0:
+        lines.append(f"- **Truncated Files:** {truncation_count}")
     lines.append(f"- **Risk Level:** `{risk_level}`")
 
     if risk_level == "high":
         lines.append("  - ⚠️ **High Risk:** Low text coverage. Relying heavily on metadata/structure.")
     elif risk_level == "medium":
-         lines.append("  - ⚠️ **Medium Risk:** Partial text coverage. Some context might be missing.")
+         if truncation_count > 0:
+             lines.append("  - ⚠️ **Medium Risk:** Truncation occurred. Some files are incomplete.")
+         else:
+             lines.append("  - ⚠️ **Medium Risk:** Partial text coverage. Some context might be missing.")
 
     lines.append("")
     return lines
@@ -2698,6 +2706,7 @@ def iter_report_blocks(
     total_size = sum(fi.size for fi in files)
     text_files = [fi for fi in files if fi.is_text]
     included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
+    truncation_count = sum(1 for _, s in processed_files if s == "truncated")
 
     # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
     # um später im Plan pro Repo eine Coverage-Zeile auszugeben
@@ -3001,7 +3010,7 @@ def iter_report_blocks(
         # text_files = [fi for fi in files if fi.is_text]
         # included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
         # Both are available before header block.
-        header.extend(_render_epistemic_status(files, active_lenses, included_count, len(text_files)))
+        header.extend(_render_epistemic_status(files, active_lenses, included_count, len(text_files), truncation_count))
 
     # --- 4. Profile Description ---
     header.append("## Profile Description")
@@ -3541,12 +3550,15 @@ def generate_json_sidecar(
 
     processed = []
     included_count = 0
+    truncation_count = 0
     text_files = [f for f in files if f.is_text]
 
     for fi in files:
         status = determine_inclusion_status(fi, level, max_file_bytes)
         if status in ("full", "truncated"):
             included_count += 1
+        if status == "truncated":
+            truncation_count += 1
         processed.append((fi, status))
 
     coverage_pct = round((included_count / len(text_files)) * 100, 1) if text_files else 0.0
@@ -3615,18 +3627,33 @@ def generate_json_sidecar(
         files_out.append(file_obj)
 
         # Self Report Contact
-        evidence = "full" if status in ("full", "truncated") else "meta"
-        if status in ("full", "truncated"):
-             contact_list.append({
+        evidence = "meta"
+        chars_seen = None
+
+        if status == "full":
+            evidence = "full"
+        elif status == "truncated":
+            evidence = "snippet"
+
+        if evidence in ("full", "snippet"):
+             # Read content to get truthful char count (Task T-Fix1)
+             content, _, _ = read_smart_content(fi, max_file_bytes)
+             chars_seen = len(content)
+
+             contact_entry = {
                  "path": fi.rel_path.as_posix(),
                  "evidence_type": evidence,
-                 "chars_seen": fi.size # approximation, exact char count requires reading
-             })
+                 "chars_seen": chars_seen
+             }
+             contact_list.append(contact_entry)
 
     risk_level = "low"
     if coverage_pct < 10:
         risk_level = "high"
     elif coverage_pct < 50:
+        risk_level = "medium"
+
+    if truncation_count > 0 and risk_level == "low":
         risk_level = "medium"
 
     out = {
