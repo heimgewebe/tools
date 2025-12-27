@@ -2728,6 +2728,14 @@ def iter_report_blocks(
     if extras is None:
         extras = ExtrasConfig.none()
 
+    # --- hard safety defaults (prevents UnboundLocalError even under refactors) ---
+    content_present = False
+    manifest_present = False
+    structure_present = False
+
+    if debug:
+        print("[lenskit] merge.py loaded from:", __file__)
+
     # Navigation style: default should be quiet.
     # You can later expose this as a UI toggle if desired.
     nav = NavStyle(emit_search_markers=False)
@@ -3010,6 +3018,9 @@ def iter_report_blocks(
         coverage_pct = round(coverage_raw, 1)
     else:
         coverage_pct = 0.0
+
+    if debug:
+        print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present)
 
     meta_dict: Dict[str, Any] = {
         "merge": {
