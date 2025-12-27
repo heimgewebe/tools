@@ -132,14 +132,13 @@ class TestMergeCore(unittest.TestCase):
         # Consume iterator to verify no crash
         # We catch UnboundLocalError specifically to fail with clarity,
         # but unittest will catch it anyway.
-        # Use debug=True to verify forensic logging in tests
         iterator = iter_report_blocks(
             files=files,
             level="dev",
             max_file_bytes=1000,
             sources=sources,
             plan_only=False,
-            debug=True
+            debug=False
         )
         try:
             # Consume only until @meta:end to avoid FS access (or full iteration)
