@@ -2732,7 +2732,7 @@ def iter_report_blocks(
     # You can later expose this as a UI toggle if desired.
     nav = NavStyle(emit_search_markers=False)
 
-    # UTC Timestamp
+    # UTC Timestamp - ensure strict UTC for Z-suffix validity
     now = datetime.datetime.now(datetime.timezone.utc)
 
     # Sort files according to strict multi-repo order and then path
@@ -2987,126 +2987,138 @@ def iter_report_blocks(
 
     # --- 3. Machine-readable Meta Block (für KIs) ---
     # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
-    if not plan_only:
-        meta_lines: List[str] = []
-        meta_lines.append("<!-- @meta:start -->")
-        meta_lines.append("```yaml")
+    # Spec v2.4 requirement: @meta is mandatory in all modes, including plan-only.
+    meta_lines: List[str] = []
+    meta_lines.append("<!-- @meta:start -->")
+    meta_lines.append("```yaml")
 
-        # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
-        total_files = len(files)
-        text_files_count = len(text_files)
-        if text_files_count:
-            coverage_raw = (included_count / text_files_count) * 100.0
-            coverage_pct = round(coverage_raw, 1)
+    # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
+    total_files = len(files)
+    text_files_count = len(text_files)
+    if text_files_count:
+        coverage_raw = (included_count / text_files_count) * 100.0
+        coverage_pct = round(coverage_raw, 1)
+    else:
+        coverage_pct = 0.0
+
+        # Flags for machine readability of content presence
+        # Plan-Only means NO content, NO manifest (usually), NO structure.
+        # Check actual logic below: plan_only causes early return before structure/manifest/content.
+        content_present = not plan_only
+        # Manifest is present unless plan_only (logic: if plan_only: return)
+        manifest_present = not plan_only
+        # Structure is present unless plan_only OR machine_lean
+        structure_present = (not plan_only) and (level != "machine-lean")
+
+    meta_dict: Dict[str, Any] = {
+        "merge": {
+            "spec_version": SPEC_VERSION,
+            "profile": level,
+            "contract": MERGE_CONTRACT_NAME,
+            "contract_version": MERGE_CONTRACT_VERSION,
+            "plan_only": plan_only,
+            "code_only": code_only,
+            "render_mode": render_mode,
+            "max_file_bytes": max_file_bytes,
+            "scope": scope_desc,
+            "source_repos": sorted([s.name for s in sources]) if sources else [],
+            "path_filter": path_filter,  # Use actual value, not description
+            "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
+            "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
+            "total_files": total_files,        # Total number of files in the merge
+            "total_size_bytes": total_size,    # Sum of all file sizes
+                "content_present": content_present,
+                "manifest_present": manifest_present,
+                "structure_present": structure_present,
+            "coverage": {
+                "included_files": included_count,
+                "text_files": text_files_count,
+                "coverage_pct": coverage_pct,
+            },
+        }
+    }
+
+    # Extras-Flags
+    if extras:
+        extras_meta = _build_extras_meta(extras, len(roots))
+        if extras_meta:
+            meta_dict["merge"]["extras"] = extras_meta
+
+    # Health-Status
+    if extras and extras.health and health_collector:
+        # Determine overall status from collector results
+        all_health = health_collector.get_all_health()
+        if any(h.status == "critical" for h in all_health):
+            overall = "critical"
+        elif any(h.status == "warn" for h in all_health):
+            overall = "warning"
         else:
-            coverage_pct = 0.0
+            overall = "ok"
 
-        meta_dict: Dict[str, Any] = {
-            "merge": {
-                "spec_version": SPEC_VERSION,
-                "profile": level,
-                "contract": MERGE_CONTRACT_NAME,
-                "contract_version": MERGE_CONTRACT_VERSION,
-                "plan_only": plan_only,
-                "code_only": code_only,
-                "render_mode": render_mode,
-                "max_file_bytes": max_file_bytes,
-                "scope": scope_desc,
-                "source_repos": sorted([s.name for s in sources]) if sources else [],
-                "path_filter": path_filter,  # Use actual value, not description
-                "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
-                "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
-                "total_files": total_files,        # Total number of files in the merge
-                "total_size_bytes": total_size,    # Sum of all file sizes
-                "coverage": {
-                    "included_files": included_count,
-                    "text_files": text_files_count,
-                    "coverage_pct": coverage_pct,
-                },
-            }
+        missing_set = set()
+        for h in all_health:
+            # Naive mapping logic for 'missing' based on recommendations/warnings
+            if not h.has_contracts: missing_set.add("contracts")
+            if not h.has_ci_workflows: missing_set.add("ci")
+            if not h.has_wgx_profile: missing_set.add("wgx-profile")
+
+        meta_dict["merge"]["health"] = {
+            "status": overall,
+            "missing": sorted(list(missing_set)),
         }
 
-        # Extras-Flags
-        if extras:
-            extras_meta = _build_extras_meta(extras, len(roots))
-            if extras_meta:
-                meta_dict["merge"]["extras"] = extras_meta
-
-        # Health-Status
-        if extras and extras.health and health_collector:
-            # Determine overall status from collector results
-            all_health = health_collector.get_all_health()
-            if any(h.status == "critical" for h in all_health):
-                overall = "critical"
-            elif any(h.status == "warn" for h in all_health):
-                overall = "warning"
-            else:
-                overall = "ok"
-
-            missing_set = set()
-            for h in all_health:
-                # Naive mapping logic for 'missing' based on recommendations/warnings
-                if not h.has_contracts: missing_set.add("contracts")
-                if not h.has_ci_workflows: missing_set.add("ci")
-                if not h.has_wgx_profile: missing_set.add("wgx-profile")
-
-            meta_dict["merge"]["health"] = {
-                "status": overall,
-                "missing": sorted(list(missing_set)),
+    # --- Delta Meta (NEW fully correct block) ---
+    if extras and extras.delta_reports:
+        if delta_meta:
+            # Use the real delta metadata if provided
+            meta_dict["merge"]["delta"] = delta_meta
+        else:
+            # Minimal enabling marker
+            meta_dict["merge"]["delta"] = {
+                "enabled": True
             }
 
-        # --- Delta Meta (NEW fully correct block) ---
-        if extras and extras.delta_reports:
-            if delta_meta:
-                # Use the real delta metadata if provided
-                meta_dict["merge"]["delta"] = delta_meta
-            else:
-                # Minimal enabling marker
-                meta_dict["merge"]["delta"] = {
-                    "enabled": True
-                }
+    # Augment-Metadaten
+    if extras and extras.augment_sidecar:
+        augment_meta = _build_augment_meta(sources)
+        if augment_meta:
+            meta_dict["merge"]["augment"] = augment_meta
 
-        # Augment-Metadaten
-        if extras and extras.augment_sidecar:
-            augment_meta = _build_augment_meta(sources)
-            if augment_meta:
-                meta_dict["merge"]["augment"] = augment_meta
+    # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
+    if yaml:
+        meta_yaml = yaml.safe_dump(meta_dict)
+        for line in meta_yaml.rstrip("\n").splitlines():
+            meta_lines.append(line)
+    else:
+        meta_lines.append("# YAML support missing")
 
-        # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
-        if yaml:
-            meta_yaml = yaml.safe_dump(meta_dict)
-            for line in meta_yaml.rstrip("\n").splitlines():
-                meta_lines.append(line)
-        else:
-             meta_lines.append("# YAML support missing")
-
-        meta_lines.append("```")
-        meta_lines.append("<!-- @meta:end -->")
-        meta_lines.append("")
-        header.extend(meta_lines)
+    meta_lines.append("```")
+    meta_lines.append("<!-- @meta:end -->")
+    meta_lines.append("")
+    header.extend(meta_lines)
 
     # --- 3.1 Epistemic Charter & Declaration (T-Charter-1 + ED-1) ---
     # Moved after Meta block as requested.
-    if not plan_only:
-        # User requested condensed version in report header.
-        # Full charter is available in assets/epistemic_reading_charter.md
-        header.append(_CHARTER_FALLBACK)
-        header.append("")
+    # Spec v2.4 requirement: Charter is mandatory in all modes, including plan-only.
+    # User requested condensed version in report header.
+    # Full charter is available in assets/epistemic_reading_charter.md
+    header.append(_CHARTER_FALLBACK)
+    header.append("")
 
-        # Epistemic Declaration
-        # Use computed metrics
-        _risk_level = ep_metrics["risk"]["level"]
-        _contact_ratio_pct = int(ep_metrics["ratios"]["contact_ratio"] * 100)
+    # Epistemic Declaration
+    # Use computed metrics
+    _risk_level = ep_metrics["risk"]["level"]
+    _contact_ratio_pct = int(ep_metrics["ratios"]["contact_ratio"] * 100)
 
-        decl = []
-        decl.append("## Epistemic Declaration")
-        decl.append("")
-        decl.append("- **Charter:** epistemic_reading_charter v1")
-        decl.append("- **Claim Language Guard:** active")
-        decl.append(f"- **Risk Level:** {_risk_level}")
-        decl.append(f"- **Contact Ratio:** {_contact_ratio_pct}%")
-        decl.append("")
-        header.extend(decl)
+    decl = []
+    decl.append("## Epistemic Declaration")
+    decl.append("")
+    decl.append("- **Charter:** epistemic_reading_charter v1")
+    decl.append("- **Claim Language Guard:** active")
+    decl.append(f"- **Risk Level:** {_risk_level}")
+    decl.append(f"- **Contact Ratio:** {_contact_ratio_pct}%")
+    decl.append("")
+    header.extend(decl)
 
     # --- 3a. Reading Lenses & Epistemic Status (New in v2.4) ---
     if not plan_only:

@@ -33,7 +33,41 @@ DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
-DEFAULT_EXTRAS = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
+# Default: augment_sidecar is auto-detected, no global default ON. delta_reports only enabled via Preset/CLI for safety.
+DEFAULT_EXTRAS = "health,organism_index,json_sidecar,fleet_panorama,augment_sidecar"
+
+# Whitelist of known extras keys to prevent accidental resets of unknown flags
+KNOWN_EXTRAS_KEYS = [
+    "health", "organism_index", "fleet_panorama",
+    "delta_reports", "augment_sidecar", "heatmap", "json_sidecar"
+]
+
+PRESETS = {
+    "Schnell-Index (Plan-Only)": {
+        "desc": "Nur Meta + Plan. Kein Content. Keine Struktur.",
+        "plan_only": True,
+        "code_only": False,
+        "extras": ["health", "organism_index", "json_sidecar"]
+    },
+    "Review (Standard)": {
+        "desc": "Content + Delta + Health + Organism + JSON.",
+        "plan_only": False,
+        "code_only": False,
+        "extras": ["health", "organism_index", "json_sidecar", "delta_reports", "augment_sidecar"]
+    },
+    "Archiv (Full)": {
+        "desc": "Voller Content + Health + JSON. (No Delta)",
+        "plan_only": False,
+        "code_only": False,
+        "extras": ["health", "json_sidecar"]
+    },
+    "Forensik (Max)": {
+        "desc": "Alles inkl. Heatmap & Full Content.",
+        "plan_only": False,
+        "code_only": False,
+        "extras": ["health", "organism_index", "json_sidecar", "delta_reports", "augment_sidecar", "heatmap", "fleet_panorama"]
+    }
+}
 
 try:
     import appex  # type: ignore
@@ -45,8 +79,10 @@ except Exception:
 # Deshalb JEGLICHEN Import-Fehler abfangen, nicht nur ImportError.
 try:
     import ui        # type: ignore
+    import dialogs   # type: ignore
 except Exception:
-    ui = None        # type: ignore
+    ui = None
+    dialogs = None
 
 try:
     TF_BORDER_NONE = ui.TEXT_FIELD_BORDER_NONE  # neuere Pythonista-Versionen
@@ -912,7 +948,13 @@ class MergerUI(object):
         # Titles & Actions
         # Extras, Load, Delta, PR-Schau
 
+        # 5 Buttons to fit Presets
+        count = 5
+        w_avail = w - (2 * margin)
+        btn_w = (w_avail - (count - 1) * gap) / count
+
         btns = [
+            ("Presets", self.show_presets_sheet, "#007aff"),       # Blue (High level)
             ("Extras", self.show_extras_sheet, "#333333"),
             ("Load", self.restore_last_state, "#333333"),
             ("Delta", self.run_delta_from_last_import, "#444444"), # Delta slightly different
@@ -923,7 +965,7 @@ class MergerUI(object):
         for title, action, color in btns:
             b = ui.Button()
             b.title = title
-            b.font = ("<System>", 13)
+            b.font = ("<System>", 12)  # Slightly smaller font to fit
             b.frame = (curr_x, y, btn_w, row1_h)
             b.flex = "W"
             b.background_color = color
@@ -2038,11 +2080,85 @@ class MergerUI(object):
                 print(f"[repoLens] {msg}")
             return
 
+    def show_presets_sheet(self, sender):
+        """Shows a sheet to select a preset configuration."""
+        if not dialogs:
+            if console:
+                # Use positional args only to be safe across Pythonista versions
+                console.alert("Error", "Module 'dialogs' not available", "OK")
+            return
+
+        items = list(PRESETS.keys())
+        # Use Pythonista's dialogs module directly
+        result = dialogs.list_dialog("Wähle Preset", items)
+        if result:
+            self.apply_preset(result)
+
+    def apply_preset(self, preset_name: str):
+        cfg = PRESETS.get(preset_name)
+        if not cfg:
+            return
+
+        # 1. Apply Mode flags
+        self.plan_only_switch.value = cfg["plan_only"]
+        if getattr(self, "code_only_switch", None):
+            self.code_only_switch.value = cfg["code_only"]
+
+        # 2. Apply Extras
+        target_extras = set(cfg["extras"])
+
+        # Use centralized whitelist
+        for k in KNOWN_EXTRAS_KEYS:
+            if hasattr(self.extras_config, k):
+                should_be_on = k in target_extras
+                setattr(self.extras_config, k, should_be_on)
+
+        # 3. Feedback
+        desc = cfg.get("desc", "")
+        if console:
+            console.hud_alert(f"Preset '{preset_name}' applied", "success")
+
+        # Show what will happen
+        msg = f"Aktiviert:\n\n{desc}\n\nPlan Only: {cfg['plan_only']}\nExtras: {', '.join(cfg['extras'])}"
+        if ui:
+            # Use minimal args for compatibility
+            ui.alert("Preset Applied", msg, "OK")
+
     def run_merge(self, sender) -> None:
         """
         UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
         sonst wirkt Pythonista "eingefroren" – besonders bei Multi-Repo.
         """
+        # Safety Check: Plan/Code Only Warning
+        is_plan = self.plan_only_switch.value
+        is_code = getattr(self, "code_only_switch", None) and self.code_only_switch.value
+
+        if is_plan or is_code:
+            if is_plan:
+                mode_str = "PLAN-ONLY"
+                msg = "⚠️ PLAN-ONLY MODE\n\nMeta + Plan.\nKein Content.\nKein Manifest.\nKeine Structure-Blöcke."
+            else:
+                mode_str = "CODE-ONLY"
+                msg = "⚠️ CODE-ONLY MODE\n\nCode-Auswahl ohne Voll-Text anderer Dateien (je nach Implementierung)."
+
+            # Modal alert blocking flow until confirmed
+            if console:
+                try:
+                    # console.alert throws exception if canceled (on some versions) or returns numeric index
+                    # Title, Message, Button1 (default), Button2 (cancel), Button3
+                    # We want "Confirm" to be explicit (Button 1).
+                    idx = console.alert(f"{mode_str} Warning", msg, "Verstanden (Starten)", "Abbrechen")
+                    # Check return value robustly (usually 1, but be strict)
+                    if idx != 1:
+                        return
+                except Exception:
+                    # If console.alert fails (e.g. Cancelled via 'X' or Exception), assume Cancel
+                    return
+            elif ui:
+                # ui.alert doesn't return value, it just shows OK. But we need Cancel.
+                # If console is missing, we proceed but log warning.
+                print(f"[repoLens] {mode_str} warning shown (console missing, auto-confirming).")
+
         try:
             import ui as _ui
             in_bg = getattr(_ui, "in_background", None)
@@ -2133,6 +2249,23 @@ class MergerUI(object):
             return
 
         merges_dir = get_merges_dir(self.hub)
+
+        # Delta Logic Injection (Port from CLI to UI)
+        # If delta_reports is enabled, try to find metadata to inject.
+        delta_meta = None
+        if self.extras_config.delta_reports and summaries and len(summaries) == 1:
+            repo_name = summaries[0]["name"]
+            try:
+                mod = _load_repolens_extractor_module()
+                if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
+                    diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
+                    if diff_path:
+                        delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+                        # Optionally notify user via HUD that delta was found?
+                        # if console: console.hud_alert("Delta found")
+            except Exception as e:
+                print(f"[repoLens] Warning: Could not extract delta metadata: {e}", file=sys.stderr)
+
         artifacts = write_reports_v2(
             merges_dir,
             self.hub,
@@ -2147,6 +2280,7 @@ class MergerUI(object):
             path_filter=path_contains,
             ext_filter=extensions or None,
             extras=self.extras_config,
+            delta_meta=delta_meta,
         )
 
         out_paths = artifacts.get_all_paths()
