@@ -12,6 +12,7 @@ from lenskit.core.merge import (
     classify_file_v2,
     _generate_run_id,
     determine_inclusion_status,
+    iter_report_blocks,
     FileInfo,
     DEBUG_CONFIG
 )
@@ -94,6 +95,48 @@ class TestMergeCore(unittest.TestCase):
         # Binary file
         fi.is_text = False
         self.assertEqual(determine_inclusion_status(fi, "max", 0), "omitted")
+
+    def test_unbound_local_error_regression(self):
+        """
+        Regression test for UnboundLocalError when text_files_count > 0.
+        Ensures content_present/manifest_present/structure_present are always defined.
+        """
+        fi = FileInfo(
+            root_label="test_repo",
+            abs_path=Path("/tmp/test.txt"),
+            rel_path=Path("test.txt"),
+            size=100,
+            is_text=True,
+            md5="abc",
+            category="source",
+            tags=[],
+            ext=".txt",
+            content="hello",
+            inclusion_reason="normal"
+        )
+
+        # We need at least one text file to trigger the else-branch avoidance in legacy code
+        files = [fi]
+        # sources expects List[Path] according to signature
+        sources = [Path("/tmp/test_repo")]
+
+        # Should not raise UnboundLocalError
+        iterator = iter_report_blocks(
+            files=files,
+            level="dev",
+            max_file_bytes=1000,
+            sources=sources,
+            plan_only=False
+        )
+
+        # Consume iterator to verify no crash
+        # We catch UnboundLocalError specifically to fail with clarity,
+        # but unittest will catch it anyway.
+        try:
+            for _ in iterator:
+                pass
+        except UnboundLocalError:
+            self.fail("iter_report_blocks raised UnboundLocalError! Fix is likely inactive or broken.")
 
 if __name__ == '__main__':
     unittest.main()
