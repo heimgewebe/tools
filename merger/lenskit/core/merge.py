@@ -2987,7 +2987,8 @@ def iter_report_blocks(
 
     # --- 3. Machine-readable Meta Block (für KIs) ---
     # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
-    if not plan_only:
+    # Spec update: @meta is required in plan-only mode too (v2.4).
+    if True:
         meta_lines: List[str] = []
         meta_lines.append("<!-- @meta:start -->")
         meta_lines.append("```yaml")
@@ -3087,7 +3088,8 @@ def iter_report_blocks(
 
     # --- 3.1 Epistemic Charter & Declaration (T-Charter-1 + ED-1) ---
     # Moved after Meta block as requested.
-    if not plan_only:
+    # Spec update: Charter required in plan-only mode (v2.4).
+    if True:
         # User requested condensed version in report header.
         # Full charter is available in assets/epistemic_reading_charter.md
         header.append(_CHARTER_FALLBACK)
