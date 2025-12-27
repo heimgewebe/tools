@@ -35,6 +35,12 @@ DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
 DEFAULT_EXTRAS = "health,organism_index,json_sidecar,delta_reports,augment_sidecar,fleet_panorama"
 
+# Whitelist of known extras keys to prevent accidental resets of unknown flags
+KNOWN_EXTRAS_KEYS = [
+    "health", "organism_index", "fleet_panorama",
+    "delta_reports", "augment_sidecar", "heatmap", "json_sidecar"
+]
+
 PRESETS = {
     "Schnell-Index (Plan-Only)": {
         "desc": "Nur Meta + Plan. Kein Content. Keine Struktur.",
@@ -2077,7 +2083,8 @@ class MergerUI(object):
         """Shows a sheet to select a preset configuration."""
         if not dialogs:
             if console:
-                console.alert("Error", "Module 'dialogs' not available", "OK", hide_cancel_button=True)
+                # Use positional args only to be safe across Pythonista versions
+                console.alert("Error", "Module 'dialogs' not available", "OK")
             return
 
         items = list(PRESETS.keys())
@@ -2099,13 +2106,8 @@ class MergerUI(object):
         # 2. Apply Extras
         target_extras = set(cfg["extras"])
 
-        # Explicit whitelist of known keys to avoid accidental resets
-        known_keys = [
-            "health", "organism_index", "fleet_panorama",
-            "delta_reports", "augment_sidecar", "heatmap", "json_sidecar"
-        ]
-
-        for k in known_keys:
+        # Use centralized whitelist
+        for k in KNOWN_EXTRAS_KEYS:
             if hasattr(self.extras_config, k):
                 should_be_on = k in target_extras
                 setattr(self.extras_config, k, should_be_on)
