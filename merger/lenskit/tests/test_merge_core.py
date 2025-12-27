@@ -132,13 +132,23 @@ class TestMergeCore(unittest.TestCase):
             plan_only=False,
             debug=False
         )
+
+        captured_meta = []
         try:
             # Consume only until @meta:end to avoid FS access (or full iteration)
             for block in iterator:
+                captured_meta.append(block)
                 if "@meta:end" in block:
                     break
         except UnboundLocalError:
             self.fail("iter_report_blocks raised UnboundLocalError! Fix is likely inactive or broken.")
+
+        # Verify content correctness (flags present in YAML)
+        full_output = "".join(captured_meta)
+        if "# YAML support missing" not in full_output:
+            self.assertRegex(full_output, r"content_present:\s*(true|True)")
+            self.assertRegex(full_output, r"manifest_present:\s*(true|True)")
+            self.assertRegex(full_output, r"structure_present:\s*(true|True)")
 
 if __name__ == '__main__':
     unittest.main()
