@@ -33,7 +33,8 @@ DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
-DEFAULT_EXTRAS = "health,organism_index,json_sidecar,delta_reports,augment_sidecar,fleet_panorama"
+# Default: augment_sidecar is auto-detected, no global default ON. delta_reports only enabled via Preset/CLI for safety.
+DEFAULT_EXTRAS = "health,organism_index,json_sidecar,fleet_panorama,augment_sidecar"
 
 # Whitelist of known extras keys to prevent accidental resets of unknown flags
 KNOWN_EXTRAS_KEYS = [
@@ -2120,7 +2121,8 @@ class MergerUI(object):
         # Show what will happen
         msg = f"Aktiviert:\n\n{desc}\n\nPlan Only: {cfg['plan_only']}\nExtras: {', '.join(cfg['extras'])}"
         if ui:
-            ui.alert("Preset Applied", msg, "OK", hide_cancel_button=True)
+            # Use minimal args for compatibility
+            ui.alert("Preset Applied", msg, "OK")
 
     def run_merge(self, sender) -> None:
         """
