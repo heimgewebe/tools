@@ -229,7 +229,8 @@ def _stable_file_id(fi: "FileInfo") -> str:
         or ""
     )
     raw = f"{repo}:{path}".encode("utf-8", errors="ignore")
-    return "f_" + hashlib.sha1(raw).hexdigest()[:12]
+    # Updated in v2.4 (PR1) to include FILE: prefix
+    return "FILE:f_" + hashlib.sha1(raw).hexdigest()[:12]
 
 
 def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = False) -> None:
@@ -2997,6 +2998,8 @@ def iter_report_blocks(
     # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
     # Spec v2.4 requirement: @meta is mandatory in all modes, including plan-only.
     meta_lines: List[str] = []
+    # Wrap in zone marker
+    meta_lines.append("<!-- zone:begin type=meta -->")
     meta_lines.append("<!-- @meta:start -->")
     meta_lines.append("```yaml")
 
@@ -3106,6 +3109,7 @@ def iter_report_blocks(
 
     meta_lines.append("```")
     meta_lines.append("<!-- @meta:end -->")
+    meta_lines.append("<!-- zone:end -->")
     meta_lines.append("")
     header.extend(meta_lines)
 
@@ -3383,10 +3387,12 @@ def iter_report_blocks(
     # --- 6. Structure --- (skipped for machine-lean)
     if level != "machine-lean":
         structure = []
+        structure.append("<!-- zone:begin type=structure -->")
         structure.append("## 📁 Structure")
         structure.append("")
         structure.append(build_tree(files))
         structure.append("")
+        structure.append("<!-- zone:end -->")
         yield "\n".join(structure) + "\n"
 
     # --- Index (Patch B) ---
@@ -3443,6 +3449,7 @@ def iter_report_blocks(
 
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
+    manifest.append("<!-- zone:begin type=manifest -->")
     manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
 
     roots_sorted = sorted(files_by_root.keys())
@@ -3501,6 +3508,7 @@ def iter_report_blocks(
                 )
             manifest.append("")
 
+        manifest.append("<!-- zone:end -->")
         yield "\n".join(manifest) + "\n"
 
     # --- Optional: Fleet Consistency ---
@@ -3552,6 +3560,16 @@ def iter_report_blocks(
             current_root = fi.root_label
 
         block = ["---"]
+
+        # 1. Stable File Marker (with path) - PR1
+        fid = _stable_file_id(fi) # Now returns FILE:f_...
+        block.append(f"<!-- file:id={fid} path={fi.rel_path} -->")
+
+        # 2. Stable Anchor (explicit) - PR1
+        # Extract short hash from fid "FILE:f_<hash>" -> "file-f_<hash>"
+        short_id_anchor = fid.replace("FILE:", "file-")
+        block.append(f'<a id="{short_id_anchor}"></a>')
+
         # Backwards-compatible alias anchor (old style without suffix)
         if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
             # Provide HTML id for alias too (quiet mode: no visible marker spam)
@@ -3570,8 +3588,6 @@ def iter_report_blocks(
         block.append(f"- MD5: {fi.md5}")
 
         content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
-        # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
-        block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
 
         # File Meta Block (Spec Patch)
         block.append("<!--")
@@ -3595,11 +3611,16 @@ def iter_report_blocks(
         fence = "`" * fence_len
 
         lang = lang_for(fi.ext)
+
+        # Zone wrapper for code content
+        block.append(f"<!-- zone:begin type=code lang={lang} file={fid} -->")
         block.append("")
         block.append(f"{fence}{lang}")
         block.append(content)
         block.append(f"{fence}")
         block.append("")
+        block.append("<!-- zone:end -->")
+
         # Backlinks: keep them simple
         block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
         yield "\n".join(block) + "\n\n"
@@ -3765,8 +3786,11 @@ def generate_json_sidecar(
             "inclusion_status": status,
             "content_ref": {
                 # Markdown marker search is more robust than anchors/links.
-                "marker": f"FILE:{fid}",
+                "marker": f"file:id={fid}", # Updated to match MD emitter
             },
+            "md_ref": {
+                "anchor": fid.replace("FILE:", "file-")
+            }
         }
         files_out.append(file_obj)
 
