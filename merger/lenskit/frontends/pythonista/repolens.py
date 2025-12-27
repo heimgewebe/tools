@@ -37,7 +37,7 @@ DEFAULT_EXTRAS = "health,organism_index,json_sidecar,delta_reports,augment_sidec
 
 PRESETS = {
     "Schnell-Index (Plan-Only)": {
-        "desc": "Nur Meta/Plan/Struktur. Kein Content. (Fast)",
+        "desc": "Nur Meta + Plan. Kein Content. Keine Struktur.",
         "plan_only": True,
         "code_only": False,
         "extras": ["health", "organism_index", "json_sidecar"]
@@ -72,8 +72,10 @@ except Exception:
 # Deshalb JEGLICHEN Import-Fehler abfangen, nicht nur ImportError.
 try:
     import ui        # type: ignore
+    import dialogs   # type: ignore
 except Exception:
-    ui = None        # type: ignore
+    ui = None
+    dialogs = None
 
 try:
     TF_BORDER_NONE = ui.TEXT_FIELD_BORDER_NONE  # neuere Pythonista-Versionen
@@ -2073,15 +2075,14 @@ class MergerUI(object):
 
     def show_presets_sheet(self, sender):
         """Shows a sheet to select a preset configuration."""
-        sheet = ui.ListDialog(title="Presets (Mode + Extras)")
-        items = []
-        for name, cfg in PRESETS.items():
-            items.append(name)
+        if not dialogs:
+            if console:
+                console.alert("Error", "Module 'dialogs' not available", "OK", hide_cancel_button=True)
+            return
 
-        # Sort or keep dict order (Python 3.7+ keeps insertion order)
-        # items = sorted(items)
-
-        result = ui.dialogs.list_dialog("Wähle Preset", items)
+        items = list(PRESETS.keys())
+        # Use Pythonista's dialogs module directly
+        result = dialogs.list_dialog("Wähle Preset", items)
         if result:
             self.apply_preset(result)
 
@@ -2097,15 +2098,17 @@ class MergerUI(object):
 
         # 2. Apply Extras
         target_extras = set(cfg["extras"])
-        # Reset all first? Or just set known ones?
-        # Let's reset known flags to False, then set targets to True
-        all_keys = [k for k in dir(self.extras_config) if not k.startswith("_") and isinstance(getattr(self.extras_config, k), bool)]
-        for k in all_keys:
-            setattr(self.extras_config, k, False)
 
-        for k in target_extras:
+        # Explicit whitelist of known keys to avoid accidental resets
+        known_keys = [
+            "health", "organism_index", "fleet_panorama",
+            "delta_reports", "augment_sidecar", "heatmap", "json_sidecar"
+        ]
+
+        for k in known_keys:
             if hasattr(self.extras_config, k):
-                setattr(self.extras_config, k, True)
+                should_be_on = k in target_extras
+                setattr(self.extras_config, k, should_be_on)
 
         # 3. Feedback
         desc = cfg.get("desc", "")
@@ -2127,26 +2130,30 @@ class MergerUI(object):
         is_code = getattr(self, "code_only_switch", None) and self.code_only_switch.value
 
         if is_plan or is_code:
-            mode_str = "PLAN-ONLY" if is_plan else "CODE-ONLY"
-            msg = f"⚠️ {mode_str} MODE\n\nDieser Export enthält keinen Content / keinen vollständigen Code.\n\nNur Metadaten, Struktur und ggf. Snippets."
+            if is_plan:
+                mode_str = "PLAN-ONLY"
+                msg = "⚠️ PLAN-ONLY MODE\n\nMeta + Plan.\nKein Content.\nKein Manifest.\nKeine Structure-Blöcke."
+            else:
+                mode_str = "CODE-ONLY"
+                msg = "⚠️ CODE-ONLY MODE\n\nCode-Auswahl ohne Voll-Text anderer Dateien (je nach Implementierung)."
 
             # Modal alert blocking flow until confirmed
             if console:
                 try:
                     # console.alert throws exception if canceled (on some versions) or returns numeric index
                     # Title, Message, Button1 (default), Button2 (cancel), Button3
-                    # We want "Confirm" to be explicit.
+                    # We want "Confirm" to be explicit (Button 1).
                     idx = console.alert(f"{mode_str} Warning", msg, "Verstanden (Starten)", "Abbrechen")
-                    if idx != 1: # 1 is the first button
+                    # Check return value robustly (usually 1, but be strict)
+                    if idx != 1:
                         return
                 except Exception:
-                    # If console.alert is not available or fails, fall back/proceed
-                    pass
+                    # If console.alert fails (e.g. Cancelled via 'X' or Exception), assume Cancel
+                    return
             elif ui:
                 # ui.alert doesn't return value, it just shows OK. But we need Cancel.
-                # ui module has no blocking confirm dialog easily.
-                # We assume console is available (standard in Pythonista).
-                pass
+                # If console is missing, we proceed but log warning.
+                print(f"[repoLens] {mode_str} warning shown (console missing, auto-confirming).")
 
         try:
             import ui as _ui
