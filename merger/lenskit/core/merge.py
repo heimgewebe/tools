@@ -23,6 +23,11 @@ try:
 except Exception:  # pragma: no cover
     yaml = None
 
+# Forensik für Deployment-Debugging (User Request)
+LENSKIT_BUILD_ID = "meta-flags-fix-2025-12-27-1"
+print("[lenskit] merge.py loaded from:", __file__)
+print("[lenskit] build:", LENSKIT_BUILD_ID)
+
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
@@ -3009,6 +3014,12 @@ def iter_report_blocks(
     manifest_present = not plan_only
     # Structure is present unless plan_only OR machine_lean
     structure_present = (not plan_only) and (level != "machine-lean")
+
+    # Forensik-Log für Debugging
+    print("[lenskit] meta flags:", plan_only, level, "->",
+          "content_present=", content_present,
+          "manifest_present=", manifest_present,
+          "structure_present=", structure_present)
 
     meta_dict: Dict[str, Any] = {
         "merge": {
