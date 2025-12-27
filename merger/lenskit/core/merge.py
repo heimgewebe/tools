@@ -2728,6 +2728,14 @@ def iter_report_blocks(
     if extras is None:
         extras = ExtrasConfig.none()
 
+    # --- hard safety defaults (prevents UnboundLocalError even under refactors) ---
+    content_present = False
+    manifest_present = False
+    structure_present = False
+
+    if debug:
+        print("[lenskit] merge.py loaded from:", __file__)
+
     # Navigation style: default should be quiet.
     # You can later expose this as a UI toggle if desired.
     nav = NavStyle(emit_search_markers=False)
@@ -2994,6 +3002,16 @@ def iter_report_blocks(
 
     # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
     total_files = len(files)
+
+    # Flags for machine readability of content presence
+    # Plan-Only means NO content, NO manifest (usually), NO structure.
+    # Check actual logic below: plan_only causes early return before structure/manifest/content.
+    content_present = not plan_only
+    # Manifest is present unless plan_only (logic: if plan_only: return)
+    manifest_present = not plan_only
+    # Structure is present unless plan_only OR machine_lean
+    structure_present = (not plan_only) and (level != "machine-lean")
+
     text_files_count = len(text_files)
     if text_files_count:
         coverage_raw = (included_count / text_files_count) * 100.0
@@ -3001,14 +3019,8 @@ def iter_report_blocks(
     else:
         coverage_pct = 0.0
 
-        # Flags for machine readability of content presence
-        # Plan-Only means NO content, NO manifest (usually), NO structure.
-        # Check actual logic below: plan_only causes early return before structure/manifest/content.
-        content_present = not plan_only
-        # Manifest is present unless plan_only (logic: if plan_only: return)
-        manifest_present = not plan_only
-        # Structure is present unless plan_only OR machine_lean
-        structure_present = (not plan_only) and (level != "machine-lean")
+    if debug:
+        print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present)
 
     meta_dict: Dict[str, Any] = {
         "merge": {
@@ -3027,9 +3039,9 @@ def iter_report_blocks(
             "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
             "total_files": total_files,        # Total number of files in the merge
             "total_size_bytes": total_size,    # Sum of all file sizes
-                "content_present": content_present,
-                "manifest_present": manifest_present,
-                "structure_present": structure_present,
+            "content_present": content_present,
+            "manifest_present": manifest_present,
+            "structure_present": structure_present,
             "coverage": {
                 "included_files": included_count,
                 "text_files": text_files_count,

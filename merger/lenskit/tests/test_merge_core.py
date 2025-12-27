@@ -12,6 +12,7 @@ from lenskit.core.merge import (
     classify_file_v2,
     _generate_run_id,
     determine_inclusion_status,
+    iter_report_blocks,
     FileInfo,
     DEBUG_CONFIG
 )
@@ -94,6 +95,60 @@ class TestMergeCore(unittest.TestCase):
         # Binary file
         fi.is_text = False
         self.assertEqual(determine_inclusion_status(fi, "max", 0), "omitted")
+
+    def test_unbound_local_error_regression(self):
+        """
+        Regression test for UnboundLocalError when text_files_count > 0.
+        Ensures content_present/manifest_present/structure_present are always defined.
+        """
+        fi = FileInfo(
+            root_label="test_repo",
+            abs_path=Path("/tmp/test.txt"),
+            rel_path=Path("test.txt"),
+            size=100,
+            is_text=True,
+            md5="abc",
+            category="source",
+            tags=[],
+            ext=".txt",
+            content="hello",
+            inclusion_reason="normal"
+        )
+
+        # We need at least one text file to trigger the else-branch avoidance in legacy code
+        files = [fi]
+        # sources expects List[Path] according to signature
+        sources = [Path("/tmp/test_repo")]
+
+        # Should not raise UnboundLocalError
+        # Consume iterator to verify no crash
+        # We catch UnboundLocalError specifically to fail with clarity,
+        # but unittest will catch it anyway.
+        iterator = iter_report_blocks(
+            files=files,
+            level="dev",
+            max_file_bytes=1000,
+            sources=sources,
+            plan_only=False,
+            debug=False
+        )
+
+        captured_meta = []
+        try:
+            # Consume only until @meta:end to avoid FS access (or full iteration)
+            for block in iterator:
+                captured_meta.append(block)
+                if "@meta:end" in block:
+                    break
+        except UnboundLocalError:
+            self.fail("iter_report_blocks raised UnboundLocalError! Fix is likely inactive or broken.")
+
+        # Verify content correctness (flags present in YAML)
+        full_output = "".join(captured_meta)
+        if "# YAML support missing" not in full_output:
+            self.assertRegex(full_output, r"content_present:\s*(true|True)")
+            self.assertRegex(full_output, r"manifest_present:\s*(true|True)")
+            self.assertRegex(full_output, r"structure_present:\s*(true|True)")
 
 if __name__ == '__main__':
     unittest.main()
