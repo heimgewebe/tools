@@ -121,14 +121,6 @@ class TestMergeCore(unittest.TestCase):
         sources = [Path("/tmp/test_repo")]
 
         # Should not raise UnboundLocalError
-        iterator = iter_report_blocks(
-            files=files,
-            level="dev",
-            max_file_bytes=1000,
-            sources=sources,
-            plan_only=False
-        )
-
         # Consume iterator to verify no crash
         # We catch UnboundLocalError specifically to fail with clarity,
         # but unittest will catch it anyway.
