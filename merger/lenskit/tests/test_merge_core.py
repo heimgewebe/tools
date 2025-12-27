@@ -12,7 +12,9 @@ from lenskit.core.merge import (
     classify_file_v2,
     _generate_run_id,
     determine_inclusion_status,
+    iter_report_blocks,
     FileInfo,
+    ExtrasConfig,
     DEBUG_CONFIG
 )
 
@@ -94,6 +96,55 @@ class TestMergeCore(unittest.TestCase):
         # Binary file
         fi.is_text = False
         self.assertEqual(determine_inclusion_status(fi, "max", 0), "omitted")
+
+    def test_iter_report_blocks_meta_flags_regression(self):
+        """
+        Regression test for UnboundLocalError when calculating meta flags.
+        Ensures content_present etc. are defined even when text_files_count > 0.
+        """
+        # Create a mock text file info
+        fi = FileInfo(
+            root_label="test-repo",
+            abs_path=Path("/tmp/fake/path.txt"),
+            rel_path=Path("path.txt"),
+            size=100,
+            is_text=True,
+            md5="dummy",
+            category="source",
+            tags=[],
+            ext=".txt",
+            skipped=False,
+            reason=None,
+            content=None,
+            inclusion_reason="normal"
+        )
+        files = [fi]
+        sources = [Path("/tmp/fake")]
+
+        # Capture output
+        output_blocks = []
+        try:
+            for block in iter_report_blocks(
+                files=files,
+                level="dev",
+                max_file_bytes=0,
+                sources=sources,
+                plan_only=False,
+                code_only=False,
+                debug=False,
+                extras=ExtrasConfig()
+            ):
+                output_blocks.append(block)
+        except UnboundLocalError:
+            self.fail("iter_report_blocks raised UnboundLocalError (meta flags scope bug)")
+
+        full_output = "".join(output_blocks)
+
+        # Verify keys are present in the YAML block
+        # We look for the strings in the markdown output
+        self.assertIn("content_present: true", full_output)
+        self.assertIn("manifest_present: true", full_output)
+        self.assertIn("structure_present: true", full_output)
 
 if __name__ == '__main__':
     unittest.main()

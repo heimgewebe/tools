@@ -3003,7 +3003,7 @@ def iter_report_blocks(
 
     # Flags for machine readability of content presence
     # Plan-Only means NO content, NO manifest (usually), NO structure.
-    # Check actual logic below: plan_only causes early return before structure/manifest/content.
+    # Check actual logic below: plan_only currently causes early return before structure/manifest/content.
     content_present = not plan_only
     # Manifest is present unless plan_only (logic: if plan_only: return)
     manifest_present = not plan_only
