@@ -3078,7 +3078,7 @@ def iter_report_blocks(
         for line in meta_yaml.rstrip("\n").splitlines():
             meta_lines.append(line)
     else:
-            meta_lines.append("# YAML support missing")
+        meta_lines.append("# YAML support missing")
 
     meta_lines.append("```")
     meta_lines.append("<!-- @meta:end -->")
