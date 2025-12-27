@@ -101,6 +101,7 @@ class TestMergeCore(unittest.TestCase):
         """
         Regression test for UnboundLocalError when calculating meta flags.
         Ensures content_present etc. are defined even when text_files_count > 0.
+        Hardened to be deterministic and FS-independent.
         """
         # Create a mock text file info
         fi = FileInfo(
@@ -121,7 +122,7 @@ class TestMergeCore(unittest.TestCase):
         files = [fi]
         sources = [Path("/tmp/fake")]
 
-        # Capture output
+        # Capture output until @meta block is complete (avoid FS access for content)
         output_blocks = []
         try:
             for block in iter_report_blocks(
@@ -132,19 +133,20 @@ class TestMergeCore(unittest.TestCase):
                 plan_only=False,
                 code_only=False,
                 debug=False,
-                extras=ExtrasConfig()
+                extras=ExtrasConfig.none()  # Ensure no side-effects
             ):
                 output_blocks.append(block)
+                if "<!-- @meta:end -->" in block:
+                    break
         except UnboundLocalError:
             self.fail("iter_report_blocks raised UnboundLocalError (meta flags scope bug)")
 
         full_output = "".join(output_blocks)
 
-        # Verify keys are present in the YAML block
-        # We look for the strings in the markdown output
-        self.assertIn("content_present: true", full_output)
-        self.assertIn("manifest_present: true", full_output)
-        self.assertIn("structure_present: true", full_output)
+        # Verify keys are present in the YAML block (robust regex check)
+        self.assertRegex(full_output, r"content_present:\s*(true|True)")
+        self.assertRegex(full_output, r"manifest_present:\s*(true|True)")
+        self.assertRegex(full_output, r"structure_present:\s*(true|True)")
 
 if __name__ == '__main__':
     unittest.main()
