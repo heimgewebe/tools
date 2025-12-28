@@ -72,9 +72,22 @@ To facilitate robust parsing of the human-readable Markdown by AI agents, the co
 Ethical guidelines are insufficient; physical constraints are required.
 
 1.  **"No-Truncate" Guard:** CI/CD or consumption tools **MUST** fail validation if the text "Content truncated at" (or similar generator-specific strings) appears in the Markdown content, UNLESS `completeness.policy` is explicitly set to `"truncate"` and `completeness.is_complete` is `false`.
-2.  **Integrity Guard:** Tools **MUST** verify that all files listed in `completeness.parts` exist and match their declared SHA256 checksums (if provided in artifacts).
+2.  **Integrity Guard:** Tools **MUST** verify that:
+    *   All files listed in `completeness.parts` exist.
+    *   `primary_part` is present in `parts`.
+    *   Every entry in `parts` has a corresponding artifact in `artifacts` with a matching `basename`.
+    *   All files match their declared SHA256 checksums (required for `canonical_md` and `part_md`).
 
-## 5. View Modes & Content Scope
+## 5. Byte Semantics
+
+To ensure rigorous completeness checks:
+
+*   **`emitted_bytes`**: The sum of the file sizes (in bytes) of all files listed in `parts`.
+*   **`expected_bytes`**: The theoretical total size of the content.
+    *   If `is_complete` is `true`: `emitted_bytes` MUST be effectively equal to `expected_bytes` (allowances for header/footer overhead in split parts are permitted, but the logical content payload must be complete).
+    *   If `policy` is `"truncate"`: `expected_bytes` (if known) > `emitted_bytes`.
+
+## 6. View Modes & Content Scope
 
 *   `view_mode`: High-level intent (`delta` vs `full`).
 *   `content_scope`: Precise content nature.
@@ -82,7 +95,11 @@ Ethical guidelines are insufficient; physical constraints are required.
     *   `fullfiles`: Full content of changed/added files.
     *   `mixed`: Combination (e.g., small files full, large files diffed).
 
-## 6. Versioning
+## 7. Future Directions (v2)
+
+*   **Decision Coverage:** A future evolution may introduce "Decision Coverage" – ensuring that while not *all* files are full, all *decision-critical* files (security, contracts, core logic) are present as `fullfiles`.
+
+## 8. Versioning
 
 This is **Version 1.0** of the PR-Schau Contract.
 Schema URI: `https://heimgewebe.local/schema/pr-schau.v1.schema.json`

@@ -91,6 +91,7 @@
         "parts": {
           "type": "array",
           "description": "Ordered list of filenames that make up the full content.",
+          "minItems": 1,
           "items": {
             "type": "string"
           }
@@ -144,6 +145,12 @@
           "mime": {
             "type": "string"
           }
+        },
+        "if": {
+          "properties": { "role": { "enum": ["canonical_md", "part_md"] } }
+        },
+        "then": {
+          "required": ["sha256"]
         }
       }
     }
