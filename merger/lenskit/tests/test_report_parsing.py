@@ -401,6 +401,21 @@ def test_json_marker_matches_markdown_marker(tmp_path):
     assert json_marker in md_content, \
         f"JSON marker '{json_marker}' not found in Markdown content."
 
+    # Harden: Ensure marker is unique (exactly once)
+    assert md_content.count(json_marker) == 1, \
+        f"JSON marker '{json_marker}' found {md_content.count(json_marker)} times, expected exactly 1."
+
     # Also verify it has quotes (anti-regression)
     assert 'file:id="' in json_marker or "file:id='" in json_marker, \
         f"JSON marker '{json_marker}' missing quotes around ID."
+
+    # Verify HTML Anchor existence
+    # json_file_obj["md_ref"]["anchor"] must be present as <a id="..."></a>
+    anchor = json_file_obj["md_ref"]["anchor"]
+    expected_anchor_tag = f'<a id="{anchor}"></a>'
+    assert expected_anchor_tag in md_content, \
+        f"HTML anchor tag '{expected_anchor_tag}' not found in Markdown."
+
+    # Verify Fragment (sanity check)
+    fragment = json_file_obj["md_ref"]["fragment"]
+    assert fragment == "#" + anchor

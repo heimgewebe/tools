@@ -62,7 +62,28 @@
           "tags": { "type": "array", "items": { "type": "string" } },
           "included": { "type": "boolean" },
           "inclusion_status": { "type": "string" },
-          "content_ref": { "type": "object" }
+          "content_ref": {
+            "type": "object",
+            "properties": {
+              "marker": { "type": "string" },
+              "selector": {
+                "type": "object",
+                "properties": {
+                  "kind": { "const": "html_comment_attr" },
+                  "tag": { "const": "file" },
+                  "attr": { "const": "id" },
+                  "value": { "type": "string" }
+                }
+              }
+            }
+          },
+          "md_ref": {
+            "type": "object",
+            "properties": {
+              "anchor": { "type": "string" },
+              "fragment": { "type": "string" }
+            }
+          }
         },
         "additionalProperties": true
       }
