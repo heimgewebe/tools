@@ -3039,13 +3039,19 @@ def iter_report_blocks(
     if debug:
         print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present)
 
+    # Determine if roles are actually present/computed
+    has_roles = any(fi.roles for fi in files)
+
     meta_dict: Dict[str, Any] = {
         "merge": {
             "spec_version": SPEC_VERSION,
             "profile": level,
             "contract": MERGE_CONTRACT_NAME,
             "contract_version": MERGE_CONTRACT_VERSION,
-            "role_semantics": "heuristic",
+            # Only declare semantics if roles are present (Empfehlung A)
+            **({"role_semantics": "heuristic"} if has_roles else {}),
+            # Declare Depends as placeholder (Empfehlung B)
+            "depends_semantics": "placeholder",
             "plan_only": plan_only,
             "code_only": code_only,
             "render_mode": render_mode,
@@ -3504,7 +3510,7 @@ def iter_report_blocks(
                 )
             manifest.append("")
             # Updated to include 'Role' column (Recommendation 5) and 'Depends'
-            manifest.append("| Path | Category | Tags | Role? | Depends | Size | Included | MD5 |")
+            manifest.append("| Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |")
             manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
 
             for fi, status in processed_files:
