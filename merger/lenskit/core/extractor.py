@@ -607,6 +607,10 @@ def generate_review_bundle(
     # Pre-calculate content to enable splitting (logical, un-splitted payload)
     content_chunks.append("<!-- zone:begin type=diff -->")
 
+    def _normalize_list(lst: List[str]) -> List[str]:
+        """Ensure all strings use strictly \n, removing potential \r."""
+        return [s.replace("\r\n", "\n").replace("\r", "\n") for s in lst]
+
     for item in review_files:
         path = item["path"]
         status = item["status"]
@@ -674,6 +678,10 @@ def generate_review_bundle(
         content_chunks.append("\n".join(block))
 
     content_chunks.append("<!-- zone:end -->")
+
+    # Harden: Normalize inputs to ensure byte-exactness holds across all potential input anomalies
+    header_lines = _normalize_list(header_lines)
+    content_chunks = _normalize_list(content_chunks)
 
     # Splitting Logic
     parts_created = []
