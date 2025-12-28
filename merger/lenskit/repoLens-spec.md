@@ -403,7 +403,7 @@ Fehler in der Grundstruktur → kein Merge wird geschrieben.
 
 ## 13. Agent Contract (JSON Sidecar)
 
-Falls ein JSON Sidecar generiert wird (`artifacts.index_json`), gelten folgende Feld-Definitionen für die stabile Navigation:
+Falls ein JSON Sidecar generiert wird (`artifacts.index_json`), gelten folgende Feld-Definitionen für die stabile Navigation (Contract v2):
 
 ### 13.1 Content References
 
