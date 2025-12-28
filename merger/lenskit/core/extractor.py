@@ -321,6 +321,19 @@ def diff_trees(
     return out_path
 
 
+def _construct_logical_payload(header_lines: List[str], content_chunks: List[str]) -> str:
+    """
+    Constructs the logical payload text from header and content chunks.
+
+    This function serves as the Single Source of Truth for:
+    1. Calculating expected_bytes
+    2. (Conceptually) Generating single-file content (though parts are flushed directly)
+
+    Logic: "\n".join(header_lines + content_chunks)
+    """
+    return "\n".join(header_lines + content_chunks)
+
+
 def _compute_sha256(path: Path) -> Optional[str]:
     """Computes SHA256 for a file. Returns None on failure."""
     try:
@@ -715,14 +728,7 @@ def generate_review_bundle(
     # Collect parts artifacts
     emitted_bytes = 0
     # expected_bytes must be exact: byte-size of the logical, un-splitted payload
-    # WARNING: This calculation MUST remain perfectly synchronized with the
-    # flush_part logic below (which uses "\n".join(lines)).
-    # Any change to how parts are constructed (e.g. adding headers to Part 1,
-    # or changing join behavior) must be reflected here.
-
-    # Logic: If we had one single part, it would be exactly:
-    # text = "\n".join(header_lines + content_chunks)
-    logical_text = "\n".join(header_lines + content_chunks)
+    logical_text = _construct_logical_payload(header_lines, content_chunks)
     expected_bytes = len(logical_text.encode("utf-8"))
 
     for pname in parts_created:
