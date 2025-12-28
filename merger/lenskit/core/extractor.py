@@ -321,6 +321,19 @@ def diff_trees(
     return out_path
 
 
+def _construct_logical_payload(header_lines: List[str], content_chunks: List[str]) -> str:
+    """
+    Constructs the logical payload text from header and content chunks.
+
+    This function serves as the Single Source of Truth for:
+    1. Calculating expected_bytes
+    2. (Conceptually) Generating single-file content (though parts are flushed directly)
+
+    Logic: "\n".join(header_lines + content_chunks)
+    """
+    return "\n".join(header_lines + content_chunks)
+
+
 def _compute_sha256(path: Path) -> Optional[str]:
     """Computes SHA256 for a file. Returns None on failure."""
     try:
@@ -591,8 +604,12 @@ def generate_review_bundle(
     # Calculate content for diffs
     content_chunks = [] # List of strings (blocks)
 
-    # Pre-calculate content to enable splitting
-    content_chunks.append("<!-- zone:begin type=diff -->\n")
+    # Pre-calculate content to enable splitting (logical, un-splitted payload)
+    content_chunks.append("<!-- zone:begin type=diff -->")
+
+    def _normalize_list(lst: List[str]) -> List[str]:
+        """Ensure all strings use strictly \n, removing potential \r."""
+        return [s.replace("\r\n", "\n").replace("\r", "\n") for s in lst]
 
     for item in review_files:
         path = item["path"]
@@ -660,7 +677,11 @@ def generate_review_bundle(
 
         content_chunks.append("\n".join(block))
 
-    content_chunks.append("<!-- zone:end -->\n")
+    content_chunks.append("<!-- zone:end -->")
+
+    # Harden: Normalize inputs to ensure byte-exactness holds across all potential input anomalies
+    header_lines = _normalize_list(header_lines)
+    content_chunks = _normalize_list(content_chunks)
 
     # Splitting Logic
     parts_created = []
@@ -673,10 +694,13 @@ def generate_review_bundle(
         fname = "review.md" if idx == 1 else f"review_part{idx}.md"
         out_path = bundle_dir / fname
         text = "\n".join(lines)
-        out_path.write_text(text, encoding="utf-8")
+        # Enforce LF for exact byte accounting across platforms
+        with out_path.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
         return fname
 
     for chunk in content_chunks:
+        # chunk is a multi-line block; we add it as one entry (with newline via join)
         chunk_size = len(chunk.encode('utf-8')) + 1
 
         # If adding this chunk exceeds limit and we have content (header excluded if part > 1), flush
@@ -688,8 +712,9 @@ def generate_review_bundle(
 
              # Start next part
              part_idx += 1
-             current_part_lines = [f"# PR-Review (Part {part_idx})\n"]
-             current_part_size = len(current_part_lines[0].encode('utf-8'))
+             # continuation header (counts as overhead by design)
+             current_part_lines = [f"# PR-Review (Part {part_idx})"]
+             current_part_size = len(current_part_lines[0].encode('utf-8')) + 1
 
         current_part_lines.append(chunk)
         current_part_size += chunk_size
@@ -712,14 +737,9 @@ def generate_review_bundle(
 
     # Collect parts artifacts
     emitted_bytes = 0
-    expected_bytes = 0 # Calculate based on logical payload
-
-    # Re-calculate expected_bytes (un-splitted payload)
-    # Header
-    expected_bytes += sum(len(l.encode('utf-8')) + 1 for l in header_lines)
-    # Content
-    expected_bytes += sum(len(c.encode('utf-8')) + 1 for c in content_chunks)
-    # Remove last newline overhead adjustment if needed, but approximation is fine for contract
+    # expected_bytes must be exact: byte-size of the logical, un-splitted payload
+    logical_text = _construct_logical_payload(header_lines, content_chunks)
+    expected_bytes = len(logical_text.encode("utf-8"))
 
     for pname in parts_created:
         ppath = bundle_dir / pname
@@ -727,12 +747,14 @@ def generate_review_bundle(
             psize = ppath.stat().st_size
             emitted_bytes += psize
             sha = _compute_sha256(ppath)
+            if not sha or len(sha) != 64:
+                raise RuntimeError(f"SHA256 computation failed for {ppath}")
             role = "canonical_md" if pname == "review.md" else "part_md"
             artifacts_list.append({
                 "role": role,
                 "basename": pname,
                 "mime": "text/markdown",
-                "sha256": sha or ""
+                "sha256": sha
             })
 
     bundle_meta = {

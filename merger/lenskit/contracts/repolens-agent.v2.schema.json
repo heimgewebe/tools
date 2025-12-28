@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://heimgewebe.local/contracts/repolens-agent.v1.schema.json",
-  "title": "repolens-agent.v1",
+  "$id": "https://heimgewebe.local/contracts/repolens-agent.v2.schema.json",
+  "title": "repolens-agent.v2",
   "type": "object",
   "required": ["reading_policy", "meta", "artifacts", "files"],
   "properties": {

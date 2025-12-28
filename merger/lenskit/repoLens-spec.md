@@ -138,7 +138,7 @@ Optional:
 
 ---
 
-## 3b. Merge-Contract
+## 3b. Merge-Contract & Rollout (Normative)
 
 Jeder repoLens-Report implementiert einen formalen „Merge-Contract“.
 Ziel:
@@ -147,7 +147,15 @@ Ziel:
 - maschinenlesbare Versionierung,
 - Basis für externe Validatoren und CI-Checks.
 
-Pflichtfelder:
+### Compatibility & Rollout Rule
+
+Contracts are strictly versioned. Therefore:
+
+1.  **Paired Change Rule:** Any change that introduces or tightens required fields in a schema **MUST** be merged together with an updated producer implementation and tests.
+2.  **No-Legacy Acceptance:** Consumers and validators **MUST NOT** accept legacy flat formats.
+3.  **CI as Gate:** The repository CI **MUST** fail if the current producer output does not validate against this schema.
+
+### Mandatory Fields
 
 Im Abschnitt **Source & Profile**:
 
