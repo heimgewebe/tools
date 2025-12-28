@@ -336,3 +336,97 @@ def test_no_roles_semantics(tmp_path):
     if yaml:
         assert "role_semantics" not in meta["merge"]
         assert meta["merge"]["depends_semantics"] == "placeholder"
+
+def test_json_marker_matches_markdown_marker(tmp_path):
+    """
+    Contract verification: JSON sidecar 'content_ref.marker' string must exist
+    EXACTLY in the Markdown report (including quotes).
+    """
+    import json
+
+    # Setup
+    root = tmp_path / "repo"
+    root.mkdir()
+    f1 = root / "script.py"
+    f1.write_text("print('hello')", encoding="utf-8")
+
+    fi = FileInfo(
+        root_label="repo",
+        abs_path=f1,
+        rel_path=Path("script.py"),
+        size=100,
+        is_text=True,
+        md5="abc",
+        category="source",
+        tags=[],
+        ext=".py",
+        content=None,
+        inclusion_reason="normal"
+    )
+
+    merges_dir = tmp_path / "merges"
+    merges_dir.mkdir()
+
+    # Enable JSON sidecar
+    extras = ExtrasConfig(json_sidecar=True)
+
+    # Generate
+    artifacts = merge.write_reports_v2(
+        merges_dir=merges_dir,
+        hub=tmp_path,
+        repo_summaries=[{"name": "repo", "files": [fi], "root": root}],
+        detail="dev",
+        mode="single",
+        max_bytes=1000,
+        plan_only=False,
+        extras=extras
+    )
+
+    # Read artifacts
+    assert artifacts.index_json and artifacts.index_json.exists()
+    assert artifacts.canonical_md and artifacts.canonical_md.exists()
+
+    md_content = artifacts.canonical_md.read_text(encoding="utf-8")
+    json_content = json.loads(artifacts.index_json.read_text(encoding="utf-8"))
+
+    # Get marker from JSON
+    # Assumption: files[0] corresponds to our file (it's the only one)
+    json_file_obj = json_content["files"][0]
+    json_marker = json_file_obj["content_ref"]["marker"]
+
+    # Verify string exact match in Markdown
+    # The JSON marker should be something like 'file:id="FILE:..."'
+    # It must appear inside the MD as <!-- file:id="FILE:..." ... -->
+    # so we search for the exact string.
+    assert json_marker in md_content, \
+        f"JSON marker '{json_marker}' not found in Markdown content."
+
+    # Harden: Ensure marker is unique (exactly once)
+    assert md_content.count(json_marker) == 1, \
+        f"JSON marker '{json_marker}' found {md_content.count(json_marker)} times, expected exactly 1."
+
+    # Also verify it has quotes (anti-regression)
+    assert 'file:id="' in json_marker or "file:id='" in json_marker, \
+        f"JSON marker '{json_marker}' missing quotes around ID."
+
+    # Verify HTML Anchor existence
+    # json_file_obj["md_ref"]["anchor"] must be present as <a id="..."></a>
+    anchor = json_file_obj["md_ref"]["anchor"]
+    expected_anchor_tag = f'<a id="{anchor}"></a>'
+    assert expected_anchor_tag in md_content, \
+        f"HTML anchor tag '{expected_anchor_tag}' not found in Markdown."
+
+    # Verify Fragment (sanity check)
+    fragment = json_file_obj["md_ref"]["fragment"]
+    assert fragment == "#" + anchor
+
+    # Validate against Schema (Contract Hardness)
+    # Ensure generated JSON complies with the strict schema
+    import jsonschema
+
+    # Contract v2
+    schema_path = Path(__file__).parent.parent / "contracts/repolens-agent.v2.schema.json"
+    assert schema_path.exists(), "Schema v2 file not found"
+
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=json_content, schema=schema)

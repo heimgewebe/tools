@@ -406,3 +406,31 @@ Jede Ausgabe wird auf folgende strukturelle Integrität geprüft:
 Erweiterte Prüfungen (z.B. unbekannte Tags/Kategorien, fehlende Anker) erfolgen im **Debug-Modus** oder als Warnungen und verhindern im Standardbetrieb nicht zwingend die Ausgabe, sollten aber behoben werden.
 
 Fehler in der Grundstruktur → kein Merge wird geschrieben.
+
+---
+
+## 13. Agent Contract (JSON Sidecar)
+
+Falls ein JSON Sidecar generiert wird (`artifacts.index_json`), gelten folgende Feld-Definitionen für die stabile Navigation (Contract v2):
+
+### 13.1 Content References
+
+`files[].content_ref`:
+- `marker` (string): Exakter Substring, der im Markdown vorkommt. Muss zwingend Anführungszeichen enthalten (z. B. `file:id="FILE:..."`).
+- `selector` (object, optional): Strukturierter Parser-Pfad.
+  - `kind`: `html_comment_attr`
+  - `tag`: `file`
+  - `attr`: `id`
+  - `value`: Die ID (z. B. `FILE:f_...`)
+
+### 13.2 Markdown References
+
+`files[].md_ref`:
+- `anchor` (string): Der HTML-ID-String ohne `#` (für `<a id="...">`).
+- `fragment` (string): Der vollständige Link-Fragment-Identifier inkl. `#` (für URL-Navigation).
+
+### 13.3 Rollout & Compatibility (Normative)
+
+- **Paired Change Rule**: Änderungen am Schema (`repolens-agent.v*.schema.json`) müssen zeitgleich mit Updates an `merge.py` (Producer) und den Regression-Tests erfolgen.
+- **No-Legacy Acceptance**: Consumers sollen strikt gegen die angegebene `contract_version` validieren. Veraltete Versionen (z. B. v1) werden nicht "best effort" unterstützt, sobald v2 etabliert ist.
+- **CI as Gate**: Die Einhaltung des Contracts (Schema-Validierung) ist Teil der CI-Pipeline und darf nicht fehlschlagen.
