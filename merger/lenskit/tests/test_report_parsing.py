@@ -419,3 +419,14 @@ def test_json_marker_matches_markdown_marker(tmp_path):
     # Verify Fragment (sanity check)
     fragment = json_file_obj["md_ref"]["fragment"]
     assert fragment == "#" + anchor
+
+    # Validate against Schema (Contract Hardness)
+    # Ensure generated JSON complies with the strict schema
+    try:
+        import jsonschema
+        schema_path = Path(__file__).parent.parent / "contracts/repolens-agent.v1.schema.json"
+        if schema_path.exists():
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            jsonschema.validate(instance=json_content, schema=schema)
+    except ImportError:
+        pass # Skip if jsonschema not installed

@@ -64,25 +64,31 @@
           "inclusion_status": { "type": "string" },
           "content_ref": {
             "type": "object",
+            "required": ["marker", "selector"],
             "properties": {
               "marker": { "type": "string" },
               "selector": {
                 "type": "object",
+                "required": ["kind", "tag", "attr", "value"],
                 "properties": {
                   "kind": { "const": "html_comment_attr" },
                   "tag": { "const": "file" },
                   "attr": { "const": "id" },
                   "value": { "type": "string" }
-                }
+                },
+                "additionalProperties": false
               }
-            }
+            },
+            "additionalProperties": false
           },
           "md_ref": {
             "type": "object",
+            "required": ["anchor", "fragment"],
             "properties": {
               "anchor": { "type": "string" },
               "fragment": { "type": "string" }
-            }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": true
