@@ -22,7 +22,7 @@ To prevent epistemic errors ("hallucination on partial data"), the generator mus
   "parts": ["review.md", "review_part2.md"],
   "primary_part": "review.md",
   "expected_bytes": 150000,
-  "emitted_bytes": 150000
+  "emitted_bytes": 150512
 }
 ```
 
@@ -78,16 +78,32 @@ Ethical guidelines are insufficient; physical constraints are required.
     *   Every entry in `parts` has a corresponding artifact in `artifacts` with a matching `basename`.
     *   All files match their declared SHA256 checksums (required for `canonical_md` and `part_md`).
 
-## 5. Byte Semantics
+## 5. Byte Semantics & Tolerances
 
 To ensure rigorous completeness checks:
 
 *   **`emitted_bytes`**: The sum of the file sizes (in bytes) of all files listed in `parts`.
-*   **`expected_bytes`**: The theoretical total size of the content.
-    *   If `is_complete` is `true`: `emitted_bytes` MUST be effectively equal to `expected_bytes` (allowances for header/footer overhead in split parts are permitted, but the logical content payload must be complete).
-    *   If `policy` is `"truncate"`: `expected_bytes` (if known) > `emitted_bytes`.
+*   **`expected_bytes`**: The theoretical total size of the logical content payload.
+*   **Overhead Tolerance:** When `is_complete` is `true`, `emitted_bytes` must be effectively equal to `expected_bytes`. Due to splitting overhead (repeated headers, newlines), a strict equality is not always possible.
+    *   **Normative Rule:** `emitted_bytes` MUST NOT exceed `expected_bytes` by more than **64KB** (or 5% of `expected_bytes`, whichever is larger). If the overhead is larger, it suggests content duplication or error.
 
-## 6. View Modes & Content Scope
+## 6. Verification Status
+
+To combat the assumption that "existence implies correctness", bundles MAY include a `verification` block stamped by a checking tool (e.g., `pr-schau-verify`).
+
+```json
+"verification": {
+  "checked_at": "2023-10-27T10:05:00Z",
+  "checker": { "name": "pr-schau-verify", "version": "1.0.0" },
+  "level": "full"
+}
+```
+
+*   `none`: No verification performed.
+*   `basic`: Structural schema validation passed.
+*   `full`: All Guards (Hashes, Parts Integrity, No-Truncate rules) passed.
+
+## 7. View Modes & Content Scope
 
 *   `view_mode`: High-level intent (`delta` vs `full`).
 *   `content_scope`: Precise content nature.
@@ -95,11 +111,11 @@ To ensure rigorous completeness checks:
     *   `fullfiles`: Full content of changed/added files.
     *   `mixed`: Combination (e.g., small files full, large files diffed).
 
-## 7. Future Directions (v2)
+## 8. Future Directions (v2)
 
 *   **Decision Coverage:** A future evolution may introduce "Decision Coverage" – ensuring that while not *all* files are full, all *decision-critical* files (security, contracts, core logic) are present as `fullfiles`.
 
-## 8. Versioning
+## 9. Versioning
 
 This is **Version 1.0** of the PR-Schau Contract.
 Schema URI: `https://heimgewebe.local/schema/pr-schau.v1.schema.json`
