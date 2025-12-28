@@ -27,7 +27,6 @@ import json
 import hashlib
 import fnmatch
 from dataclasses import dataclass
-from typing import Optional
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
 
@@ -716,21 +715,13 @@ def generate_review_bundle(
     # Collect parts artifacts
     emitted_bytes = 0
     # expected_bytes must be exact: byte-size of the logical, un-splitted payload
-    # Note: content_chunks might contain trailing newlines, and joining them with "\n" adds one in between.
-    # The final payload reconstruction logic:
-    # 1. header lines joined by \n
-    # 2. empty line separator
-    # 3. content chunks joined by \n (if chunks exist)
-    # 4. (Implicitly, flush_part logic joins everything with \n. Does it add a trailing newline? No, write_text doesn't.)
+    # WARNING: This calculation MUST remain perfectly synchronized with the
+    # flush_part logic below (which uses "\n".join(lines)).
+    # Any change to how parts are constructed (e.g. adding headers to Part 1,
+    # or changing join behavior) must be reflected here.
 
-    # We must match exactly what flush_part writes.
-    # flush_part writes: "\n".join(lines)
-    # where lines = header_lines + [chunk1, chunk2, ...] (roughly, but split)
-
-    # If we had one single part:
-    # lines = header_lines + content_chunks
-    # text = "\n".join(lines)
-
+    # Logic: If we had one single part, it would be exactly:
+    # text = "\n".join(header_lines + content_chunks)
     logical_text = "\n".join(header_lines + content_chunks)
     expected_bytes = len(logical_text.encode("utf-8"))
 

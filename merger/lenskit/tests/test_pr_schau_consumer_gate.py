@@ -32,6 +32,8 @@ ALLOW_CONTAINS: Tuple[str, ...] = (
     "tests/",
     "core/extractor.py",  # Allowed because it generates the bundle
     # Legacy / UI components that we haven't refactored yet:
+    # TEMP ALLOWLIST: must be removed once Pythonista frontend calls the canonical loader.
+    # Tracked by: TODO(issue): migrate pythonista consumer to load_pr_schau_bundle(...)
     "frontends/pythonista/repolens.py",
 )
 
