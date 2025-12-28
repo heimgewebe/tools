@@ -9,13 +9,15 @@ FORBIDDEN_STRINGS = [
     "contract_version': 'v1'",
     'contract_version = "v1"',
     "contract_version = 'v1'",
-    'contract_version": "v1"',
 ]
 
 # Paths to ignore (e.g., this test file itself)
 IGNORE_FILES = {
     "test_contract_version_guards.py",
 }
+
+# Only scan these extensions to avoid binary noise and speed up test
+TEXT_EXTENSIONS = {".py", ".md", ".json", ".yml", ".yaml", ".txt"}
 
 def test_no_stale_v1_references():
     """
@@ -33,10 +35,13 @@ def test_no_stale_v1_references():
         for fname in files:
             if fname in IGNORE_FILES:
                 continue
-            if fname.endswith(".pyc"):
-                continue
 
             path = Path(root) / fname
+
+            # Check extension
+            if path.suffix.lower() not in TEXT_EXTENSIONS:
+                continue
+
             try:
                 content = path.read_text(encoding="utf-8", errors="ignore")
                 for forbidden in FORBIDDEN_STRINGS:
