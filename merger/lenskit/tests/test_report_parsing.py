@@ -109,11 +109,14 @@ class ReportParser:
 
     def extract_file_markers(self):
         # <!-- file:id=... path=... -->
-        pattern = re.compile(r'<!-- file:id=(.*?)\s+path=(.*?) -->')
+        # Now supporting quoted paths: path="foo bar"
+        pattern = re.compile(r'<!-- file:id=([^\s]+)\s+path=(?:"([^"]+)"|(\S+)) -->')
         for match in pattern.finditer(self.content):
+            fid = match.group(1)
+            path = match.group(2) if match.group(2) else match.group(3)
             self.file_markers.append({
-                "id": match.group(1),
-                "path": match.group(2)
+                "id": fid,
+                "path": path
             })
         return self.file_markers
 
@@ -242,6 +245,52 @@ def test_generated_report_is_parsable(tmp_path):
     assert header is not None
     assert "Role?" in header
     assert "Depends?" in header
+
+def test_quoting_paths_with_spaces(tmp_path):
+    # Setup
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "my folder").mkdir()
+    f1 = root / "my folder/my file.py"
+    f1.write_text("print('hello')", encoding="utf-8")
+
+    fi = FileInfo(
+        root_label="repo",
+        abs_path=f1,
+        rel_path=Path("my folder/my file.py"),
+        size=100,
+        is_text=True,
+        md5="abc",
+        category="source",
+        tags=[],
+        ext=".py",
+        content=None,
+        inclusion_reason="normal"
+    )
+
+    merges_dir = tmp_path / "merges"
+    merges_dir.mkdir()
+
+    # Generate
+    artifacts = merge.write_reports_v2(
+        merges_dir=merges_dir,
+        hub=tmp_path,
+        repo_summaries=[{"name": "repo", "files": [fi], "root": root}],
+        detail="dev",
+        mode="single",
+        max_bytes=1000,
+        plan_only=False,
+        extras=ExtrasConfig.none()
+    )
+
+    md_content = artifacts.canonical_md.read_text(encoding="utf-8")
+    parser = ReportParser(md_content)
+    parser.extract_file_markers()
+
+    assert len(parser.file_markers) == 1
+    # Check that we correctly parsed the path "my folder/my file.py" despite spaces
+    # This implies the regex correctly handled quotes
+    assert parser.file_markers[0]['path'] == "my folder/my file.py"
 
 def test_no_roles_semantics(tmp_path):
     # Setup file without roles

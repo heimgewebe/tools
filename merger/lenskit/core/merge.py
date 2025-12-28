@@ -3041,6 +3041,10 @@ def iter_report_blocks(
         print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present)
 
     # Determine if roles are actually present/computed
+    # Security fix (PR12): Ensure roles are computed before consulting them for meta
+    for fi in files:
+        if fi.roles is None:
+            fi.roles = compute_file_roles(fi)
     has_roles = any(fi.roles for fi in files)
 
     meta_dict: Dict[str, Any] = {
@@ -3589,7 +3593,8 @@ def iter_report_blocks(
 
         # 1. Stable File Marker (with path) - PR1
         fid = _stable_file_id(fi) # Now returns FILE:f_...
-        block.append(f"<!-- file:id={fid} path={fi.rel_path} -->")
+        # Fix PR13: Quote attributes to handle paths with spaces
+        block.append(f'<!-- file:id={fid} path="{fi.rel_path}" -->')
 
         # 2. Stable Anchor (explicit) - PR1
         # Extract short hash from fid "FILE:f_<hash>" -> "file-f_<hash>"
@@ -3639,7 +3644,8 @@ def iter_report_blocks(
         lang = lang_for(fi.ext)
 
         # Zone wrapper for code content
-        block.append(f"<!-- zone:begin type=code lang={lang} id={fid} -->")
+        # Fix PR13: Quote attributes
+        block.append(f'<!-- zone:begin type=code lang="{lang}" id={fid} -->')
         block.append("")
         block.append(f"{fence}{lang}")
         block.append(content)
