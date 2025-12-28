@@ -1,6 +1,7 @@
 import json
 import shutil
 import tempfile
+from typing import Dict, Any
 import pytest
 from pathlib import Path
 from datetime import datetime, timezone
@@ -8,6 +9,29 @@ from merger.lenskit.core.extractor import generate_review_bundle, _compute_sha25
 
 # Path to the schema file
 SCHEMA_PATH = Path(__file__).parents[1] / "contracts" / "pr-schau.v1.schema.json"
+
+LEGACY_TOP_LEVEL_KEYS = {
+    # Historical/legacy flat bundle keys that must never reappear as top-level fields in v1
+    "repo",
+    "source",
+    "created_at",
+    "hub_rel",
+    "old_tree_hint",
+    "new_tree_hint",
+    "note",
+}
+
+def assert_not_legacy_flat_bundle(bundle_data: Dict[str, Any]) -> None:
+    """
+    Regression guard: ensure we don't slip back into the legacy flat bundle format.
+    """
+    # v1 requires nested meta/completeness/artifacts. If these exist, legacy keys must not.
+    for k in LEGACY_TOP_LEVEL_KEYS:
+        assert k not in bundle_data, f"Legacy top-level key '{k}' must not exist in v1 bundle"
+
+    # v1 version is a string constant "1.0"
+    assert isinstance(bundle_data.get("version"), str), "v1 bundle 'version' must be a string"
+    assert bundle_data.get("version") == "1.0", "v1 bundle 'version' must be '1.0'"
 
 @pytest.fixture
 def schema():
@@ -62,6 +86,9 @@ def test_generate_review_bundle_output_schema(schema):
 
         # Validate against schema
         jsonschema.validate(instance=bundle_data, schema=schema)
+
+        # Regression guard: ensure not legacy flat format
+        assert_not_legacy_flat_bundle(bundle_data)
 
         # Additional checks for values
         assert bundle_data["kind"] == "repolens.pr_schau.bundle"
@@ -128,6 +155,9 @@ def test_generate_review_bundle_splitting(schema):
 
         # Verify schema compliance for split bundle
         jsonschema.validate(instance=bundle_data, schema=schema)
+
+        # Regression guard: ensure not legacy flat format
+        assert_not_legacy_flat_bundle(bundle_data)
 
 if __name__ == "__main__":
     pytest.main([__file__])

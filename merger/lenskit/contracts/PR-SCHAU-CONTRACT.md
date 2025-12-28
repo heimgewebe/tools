@@ -2,6 +2,21 @@
 
 **Thesis:** PR-Schau must never silently truncate content. It must split or explicitly mark truncation in a machine-readable way.
 
+## 0. Compatibility & Rollout Rule (Normative)
+
+This schema is intentionally strict (`additionalProperties:false`). Therefore:
+
+1.  **Paired Change Rule:** Any change that introduces or tightens required fields in
+    `pr-schau.v1.schema.json` **MUST** be merged together with an updated producer implementation
+    (e.g. `generate_review_bundle`) and tests that validate real output against the schema.
+2.  **No-Legacy Acceptance:** Consumers and validators **MUST NOT** accept legacy flat bundle formats
+    (e.g. top-level `repo`, `created_at`, numeric `version`, `hub_rel`, etc.). Such acceptance would
+    reintroduce epistemic errors via silent drift.
+3.  **CI as Gate:** The repository CI **MUST** fail if the current producer output does not validate
+    against this schema (see regression guard tests).
+
+Rationale: A strict contract without a strict producer gate creates a false sense of safety.
+
 PR-Schau is a two-layer artifact:
 1.  **Index Layer (Portable Manifest / Index Entry Point):** A JSON sidecar (`bundle.json` conforming to `pr-schau.v1.schema.json`) that acts as the machine-readable map of the bundle. It is **NOT** the canonical content, but the guide to it.
 2.  **Content Layer (Canonical Content):** One or more Markdown files (`review.md`, `review_part2.md`, etc.) that contain the actual review content. These files are the authoritative source of human-readable information.

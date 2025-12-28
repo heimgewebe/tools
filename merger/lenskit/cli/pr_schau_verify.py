@@ -187,9 +187,17 @@ def verify_full(bundle_path: Path, data: Dict[str, Any]) -> None:
             if p_path.exists():
                 actual_emitted += p_path.stat().st_size
 
+        # expected must be meaningful for complete bundles
+        if expected <= 0 and len(parts) > 0:
+            _fail(f"Invalid expected_bytes for complete bundle: expected_bytes={expected}")
+
         # Check declared vs actual
         if actual_emitted != declared_emitted:
              _fail(f"Emitted bytes mismatch! Declared: {declared_emitted}, Actual on disk: {actual_emitted}")
+
+        # For complete bundles, emitted should never be smaller than expected (split overhead should increase emitted)
+        if actual_emitted < expected:
+            _fail(f"Emitted bytes smaller than expected_bytes! Expected: {expected}, Emitted: {actual_emitted}")
 
         # Contract: emitted_bytes must be roughly expected_bytes
         overhead = actual_emitted - expected

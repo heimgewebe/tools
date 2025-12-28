@@ -27,6 +27,7 @@ import json
 import hashlib
 import fnmatch
 from dataclasses import dataclass
+from typing import Optional
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
 
@@ -591,8 +592,8 @@ def generate_review_bundle(
     # Calculate content for diffs
     content_chunks = [] # List of strings (blocks)
 
-    # Pre-calculate content to enable splitting
-    content_chunks.append("<!-- zone:begin type=diff -->\n")
+    # Pre-calculate content to enable splitting (logical, un-splitted payload)
+    content_chunks.append("<!-- zone:begin type=diff -->")
 
     for item in review_files:
         path = item["path"]
@@ -660,7 +661,7 @@ def generate_review_bundle(
 
         content_chunks.append("\n".join(block))
 
-    content_chunks.append("<!-- zone:end -->\n")
+    content_chunks.append("<!-- zone:end -->")
 
     # Splitting Logic
     parts_created = []
@@ -677,6 +678,7 @@ def generate_review_bundle(
         return fname
 
     for chunk in content_chunks:
+        # chunk is a multi-line block; we add it as one entry (with newline via join)
         chunk_size = len(chunk.encode('utf-8')) + 1
 
         # If adding this chunk exceeds limit and we have content (header excluded if part > 1), flush
@@ -688,8 +690,9 @@ def generate_review_bundle(
 
              # Start next part
              part_idx += 1
-             current_part_lines = [f"# PR-Review (Part {part_idx})\n"]
-             current_part_size = len(current_part_lines[0].encode('utf-8'))
+             # continuation header (counts as overhead by design)
+             current_part_lines = [f"# PR-Review (Part {part_idx})"]
+             current_part_size = len(current_part_lines[0].encode('utf-8')) + 1
 
         current_part_lines.append(chunk)
         current_part_size += chunk_size
@@ -712,14 +715,24 @@ def generate_review_bundle(
 
     # Collect parts artifacts
     emitted_bytes = 0
-    expected_bytes = 0 # Calculate based on logical payload
+    # expected_bytes must be exact: byte-size of the logical, un-splitted payload
+    # Note: content_chunks might contain trailing newlines, and joining them with "\n" adds one in between.
+    # The final payload reconstruction logic:
+    # 1. header lines joined by \n
+    # 2. empty line separator
+    # 3. content chunks joined by \n (if chunks exist)
+    # 4. (Implicitly, flush_part logic joins everything with \n. Does it add a trailing newline? No, write_text doesn't.)
 
-    # Re-calculate expected_bytes (un-splitted payload)
-    # Header
-    expected_bytes += sum(len(l.encode('utf-8')) + 1 for l in header_lines)
-    # Content
-    expected_bytes += sum(len(c.encode('utf-8')) + 1 for c in content_chunks)
-    # Remove last newline overhead adjustment if needed, but approximation is fine for contract
+    # We must match exactly what flush_part writes.
+    # flush_part writes: "\n".join(lines)
+    # where lines = header_lines + [chunk1, chunk2, ...] (roughly, but split)
+
+    # If we had one single part:
+    # lines = header_lines + content_chunks
+    # text = "\n".join(lines)
+
+    logical_text = "\n".join(header_lines + content_chunks)
+    expected_bytes = len(logical_text.encode("utf-8"))
 
     for pname in parts_created:
         ppath = bundle_dir / pname
@@ -727,12 +740,14 @@ def generate_review_bundle(
             psize = ppath.stat().st_size
             emitted_bytes += psize
             sha = _compute_sha256(ppath)
+            if not sha or len(sha) != 64:
+                raise RuntimeError(f"SHA256 computation failed for {ppath}")
             role = "canonical_md" if pname == "review.md" else "part_md"
             artifacts_list.append({
                 "role": role,
                 "basename": pname,
                 "mime": "text/markdown",
-                "sha256": sha or ""
+                "sha256": sha
             })
 
     bundle_meta = {
