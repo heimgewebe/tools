@@ -420,3 +420,9 @@ Falls ein JSON Sidecar generiert wird (`artifacts.index_json`), gelten folgende 
 `files[].md_ref`:
 - `anchor` (string): Der HTML-ID-String ohne `#` (für `<a id="...">`).
 - `fragment` (string): Der vollständige Link-Fragment-Identifier inkl. `#` (für URL-Navigation).
+
+### 13.3 Rollout & Compatibility (Normative)
+
+- **Paired Change Rule**: Änderungen am Schema (`repolens-agent.v*.schema.json`) müssen zeitgleich mit Updates an `merge.py` (Producer) und den Regression-Tests erfolgen.
+- **No-Legacy Acceptance**: Consumers sollen strikt gegen die angegebene `contract_version` validieren. Veraltete Versionen (z. B. v1) werden nicht "best effort" unterstützt, sobald v2 etabliert ist.
+- **CI as Gate**: Die Einhaltung des Contracts (Schema-Validierung) ist Teil der CI-Pipeline und darf nicht fehlschlagen.
