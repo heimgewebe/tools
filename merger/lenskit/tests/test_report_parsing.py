@@ -21,7 +21,8 @@ from lenskit.core.merge import FileInfo, ExtrasConfig
 
 class ReportParser:
     """
-    A minimal parser to verify machine-readability of repoLens reports.
+    A robust, stack-based parser to verify machine-readability of repoLens reports.
+    Supports nested zones and strict start/end matching.
     """
     def __init__(self, content: str):
         self.content = content
@@ -32,44 +33,57 @@ class ReportParser:
         self._parse()
 
     def _parse(self):
-        # 1. Parse Zones
-        # Regex for <!-- zone:begin type=... attrs... -->
-        # We find all begin markers and match with end markers (nested zones not supported in this simple parser)
-        zone_pattern = re.compile(r'<!-- zone:begin type=(\w+)(.*?) -->', re.DOTALL)
-        # End pattern should match type if present
-        end_pattern = re.compile(r'<!-- zone:end(?:\s+type=(\w+))? -->')
+        # Combined regex for finding tags in order
+        # Group 1: begin type
+        # Group 2: begin attrs
+        # Group 3: end type (optional)
+        # Note: We match <!-- zone:begin ... --> OR <!-- zone:end ... -->
+        token_pattern = re.compile(
+            r'<!-- zone:begin type=([a-zA-Z0-9_-]+)(.*?) -->|<!-- zone:end(?:\s+type=([a-zA-Z0-9_-]+))? -->',
+            re.DOTALL
+        )
+
+        stack = [] # List of dicts: {type, start_content, attrs}
 
         pos = 0
-        while True:
-            match = zone_pattern.search(self.content, pos)
-            if not match:
-                break
+        for match in token_pattern.finditer(self.content):
+            is_begin = match.group(1) is not None
 
-            z_type = match.group(1)
-            z_attrs_str = match.group(2)
-            start_content = match.end()
+            if is_begin:
+                z_type = match.group(1)
+                z_attrs_str = match.group(2)
+                attrs = self._parse_attrs(z_attrs_str)
+                stack.append({
+                    "type": z_type,
+                    "attrs": attrs,
+                    "start_content": match.end(),
+                    "start_tag": match.start()
+                })
+            else:
+                # is end
+                end_type = match.group(3)
 
-            # Find matching end tag
-            end_match = end_pattern.search(self.content, start_content)
-            if not end_match:
-                break # Broken zone
+                if not stack:
+                    raise ValueError(f"Orphaned end tag at {match.start()}")
 
-            # If the end marker declares a type, it must match the begin type.
-            end_type = end_match.group(1)
-            if end_type and end_type != z_type:
-                raise AssertionError(f"Zone end type mismatch: begin={z_type} end={end_type}")
+                # Pop the last open zone
+                open_zone = stack.pop()
 
-            end_content = end_match.start()
+                # Verify type matching
+                if end_type and end_type != open_zone['type']:
+                    raise ValueError(f"Zone mismatch: Expected closing {open_zone['type']}, got {end_type} at {match.start()}")
 
-            attrs = self._parse_attrs(z_attrs_str)
-            self.zones.append({
-                "type": z_type,
-                "attrs": attrs,
-                "content": self.content[start_content:end_content],
-                "start": match.start(),
-                "end": end_match.end()
-            })
-            pos = end_match.end()
+                # Record the zone
+                self.zones.append({
+                    "type": open_zone['type'],
+                    "attrs": open_zone['attrs'],
+                    "content": self.content[open_zone['start_content']:match.start()],
+                    "start": open_zone['start_tag'],
+                    "end": match.end()
+                })
+
+        if stack:
+            raise ValueError(f"Unclosed zones: {[z['type'] for z in stack]}")
 
     def _parse_attrs(self, attr_str: str) -> Dict[str, str]:
         # Robust attribute parser: key=value or key="value with spaces"
@@ -132,7 +146,7 @@ def test_generated_report_is_parsable(tmp_path):
     root.mkdir()
     (root / "src").mkdir()
     f1 = root / "src/main.py"
-    f1.write_text("print('hello')", encoding="utf-8")
+    f1.write_text("print('hello')")
 
     fi = FileInfo(
         root_label="repo",
