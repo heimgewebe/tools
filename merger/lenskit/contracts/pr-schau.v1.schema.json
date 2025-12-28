@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/pr-schau.v1.schema.json",
+  "title": "PR-Schau Bundle Contract (pr-schau v1.0)",
+  "description": "Schema for the PR-Schau Bundle Index, ensuring completeness and artifact linkage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "meta",
+    "completeness",
+    "artifacts"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "repolens.pr_schau.bundle"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "repo",
+        "generated_at",
+        "generator"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Name of the repository."
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 UTC timestamp."
+        },
+        "generator": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "component": { "type": "string" },
+            "version": { "type": "string" }
+          },
+          "required": ["name"]
+        }
+      }
+    },
+    "view_mode": {
+      "type": "string",
+      "enum": ["delta", "full"],
+      "description": "High-level view mode: 'delta' (changes only) or 'full' (all relevant files)."
+    },
+    "content_scope": {
+      "type": "string",
+      "enum": ["diff", "fullfiles", "mixed"],
+      "description": "Precise scope of content: 'diff' (unified diffs), 'fullfiles' (full content of files), 'mixed' (some full, some diff/omitted)."
+    },
+    "completeness": {
+      "type": "object",
+      "description": "Guarantees regarding the completeness of the review content.",
+      "required": [
+        "is_complete",
+        "policy",
+        "parts",
+        "primary_part"
+      ],
+      "properties": {
+        "is_complete": {
+          "type": "boolean",
+          "description": "True if the full content is reachable via the listed parts without truncation."
+        },
+        "policy": {
+          "type": "string",
+          "enum": ["no-truncate", "split", "truncate"],
+          "description": "The strategy used for large content. 'no-truncate' or 'split' preferred."
+        },
+        "expected_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total size of the logical content in bytes."
+        },
+        "emitted_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total size of content actually emitted across all parts."
+        },
+        "parts": {
+          "type": "array",
+          "description": "Ordered list of filenames that make up the full content.",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "primary_part": {
+          "type": "string",
+          "description": "Filename of the primary/entry Markdown part (e.g., 'review.md')."
+        },
+        "sha256_sum": {
+          "type": "string",
+          "description": "SHA256 checksum of the primary part or logical concatenation (optional).",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "if": {
+        "properties": { "policy": { "const": "truncate" } }
+      },
+      "then": {
+        "properties": { "is_complete": { "const": false } }
+      },
+      "else": {
+        "if": { "properties": { "is_complete": { "const": true } } },
+        "then": {
+          "required": ["expected_bytes", "emitted_bytes"],
+          "properties": { "policy": { "not": { "const": "truncate" } } }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Portable list of artifacts included in this bundle.",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "basename",
+          "mime"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["canonical_md", "index_json", "diff_stat", "part_md", "asset"]
+          },
+          "basename": {
+            "type": "string",
+            "description": "Filename relative to the bundle directory."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mime": {
+            "type": "string"
+          }
+        },
+        "if": {
+          "properties": { "role": { "enum": ["canonical_md", "part_md"] } }
+        },
+        "then": {
+          "required": ["sha256"]
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Cryptographic and logical verification status of the bundle.",
+      "properties": {
+        "checked_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 timestamp of verification."
+        },
+        "checker": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          },
+          "required": ["name"]
+        },
+        "level": {
+          "type": "string",
+          "enum": ["none", "basic", "full"],
+          "description": "Verification level: 'none' (unchecked), 'basic' (structure only), 'full' (hashes and content rules validated)."
+        }
+      },
+      "required": ["checked_at", "checker", "level"]
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "kind": "repolens.pr_schau.bundle",
+  "version": "1.0",
+  "meta": {
+    "repo": "example-repo-overhead",
+    "generated_at": "2023-10-27T10:00:00Z",
+    "generator": {
+      "name": "repolens-extractor",
+      "component": "core",
+      "version": "2.4.0"
+    }
+  },
+  "view_mode": "full",
+  "content_scope": "fullfiles",
+  "completeness": {
+    "is_complete": true,
+    "policy": "split",
+    "parts": ["part1.md", "part2.md"],
+    "primary_part": "part1.md",
+    "expected_bytes": 100000,
+    "emitted_bytes": 200000,
+    "sha256_sum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "artifacts": [
+    { "role": "canonical_md", "basename": "part1.md", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "mime": "text/markdown" },
+    { "role": "part_md", "basename": "part2.md", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "mime": "text/markdown" }
+  ]
+}
