@@ -75,7 +75,8 @@ class ReportParser:
         # Robust attribute parser: key=value or key="value with spaces"
         attrs = {}
         # Regex matches key="value" or key=value
-        pattern = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
+        # Allow alphanumeric, underscore, and hyphens in keys (future-proofing)
+        pattern = re.compile(r'([a-zA-Z0-9_-]+)=(?:"([^"]*)"|(\S+))')
         for match in pattern.finditer(attr_str):
             key = match.group(1)
             val = match.group(2) if match.group(2) is not None else match.group(3)

@@ -1309,7 +1309,7 @@ class FileInfo(object):
         self.inclusion_reason = inclusion_reason
         self.anchor = "" # Will be set during report generation
         self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
-        self.roles = [] # Will be computed during report generation
+        self.roles = None # Will be computed during report generation (None = unset)
         self.lens = None # Assigned during scan or later
 
 
@@ -2769,7 +2769,7 @@ def iter_report_blocks(
         fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
 
         # Compute file roles if not already present
-        if not fi.roles:
+        if fi.roles is None:
             fi.roles = compute_file_roles(fi)
 
         # Debug checks
