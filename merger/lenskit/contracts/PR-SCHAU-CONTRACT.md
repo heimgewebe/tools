@@ -3,8 +3,8 @@
 **Thesis:** PR-Schau must never silently truncate content. It must split or explicitly mark truncation in a machine-readable way.
 
 PR-Schau is a two-layer artifact:
-1.  **Index Layer (Small, Fast, Robust):** A JSON sidecar (`bundle.json` conforming to `pr-schau.v1.schema.json`) that acts as the canonical entry point.
-2.  **Content Layer (Full, Canonical):** One or more Markdown files (`review.md`, `review_part2.md`, etc.) that contain the actual review content.
+1.  **Index Layer (Portable Manifest / Index Entry Point):** A JSON sidecar (`bundle.json` conforming to `pr-schau.v1.schema.json`) that acts as the machine-readable map of the bundle. It is **NOT** the canonical content, but the guide to it.
+2.  **Content Layer (Canonical Content):** One or more Markdown files (`review.md`, `review_part2.md`, etc.) that contain the actual review content. These files are the authoritative source of human-readable information.
 
 ## 1. Completeness Policy ("No-Truncate")
 
@@ -20,6 +20,7 @@ To prevent epistemic errors ("hallucination on partial data"), the generator mus
   "is_complete": true,
   "policy": "split",
   "parts": ["review.md", "review_part2.md"],
+  "primary_part": "review.md",
   "expected_bytes": 150000,
   "emitted_bytes": 150000
 }
@@ -61,32 +62,27 @@ To facilitate robust parsing of the human-readable Markdown by AI agents, the co
 
 **Standard Zones:**
 
-*   `summary`: High-level stats (added, removed, changed).
-*   `files_manifest`: The list/table of changed files.
+*   `summary`: High-level stats (added, removed, changed). **MUST** exist.
+*   `files_manifest`: The list/table of changed files. **MUST** exist.
 *   `diff`: The actual file content diffs or full content.
 *   `hotspots`: (Optional) List of critical files.
 
-**Example:**
-```markdown
-# PR-Review: my-repo
+## 4. Guards & Enforcement
 
-<!-- zone:begin type=summary -->
-- **Date:** 2023-10-27T10:00:00Z
-- **Stats:** +5 / ~2 / -1
-<!-- zone:end -->
+Ethical guidelines are insufficient; physical constraints are required.
 
-<!-- zone:begin type=files_manifest -->
-| Path | Status | ...
-| ... | ... | ...
-<!-- zone:end -->
+1.  **"No-Truncate" Guard:** CI/CD or consumption tools **MUST** fail validation if the text "Content truncated at" (or similar generator-specific strings) appears in the Markdown content, UNLESS `completeness.policy` is explicitly set to `"truncate"` and `completeness.is_complete` is `false`.
+2.  **Integrity Guard:** Tools **MUST** verify that all files listed in `completeness.parts` exist and match their declared SHA256 checksums (if provided in artifacts).
 
-<!-- zone:begin type=diff -->
-### 📝 `src/main.py`
-...
-<!-- zone:end -->
-```
+## 5. View Modes & Content Scope
 
-## 4. Versioning
+*   `view_mode`: High-level intent (`delta` vs `full`).
+*   `content_scope`: Precise content nature.
+    *   `diff`: Only unified diffs (no full files).
+    *   `fullfiles`: Full content of changed/added files.
+    *   `mixed`: Combination (e.g., small files full, large files diffed).
+
+## 6. Versioning
 
 This is **Version 1.0** of the PR-Schau Contract.
 Schema URI: `https://heimgewebe.local/schema/pr-schau.v1.schema.json`

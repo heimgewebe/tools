@@ -52,7 +52,12 @@
     "view_mode": {
       "type": "string",
       "enum": ["delta", "full"],
-      "description": "Indicates if this is a delta view (changes only) or a full view."
+      "description": "High-level view mode: 'delta' (changes only) or 'full' (all relevant files)."
+    },
+    "content_scope": {
+      "type": "string",
+      "enum": ["diff", "fullfiles", "mixed"],
+      "description": "Precise scope of content: 'diff' (unified diffs), 'fullfiles' (full content of files), 'mixed' (some full, some diff/omitted)."
     },
     "completeness": {
       "type": "object",
@@ -60,7 +65,8 @@
       "required": [
         "is_complete",
         "policy",
-        "parts"
+        "parts",
+        "primary_part"
       ],
       "properties": {
         "is_complete": {
@@ -89,9 +95,26 @@
             "type": "string"
           }
         },
+        "primary_part": {
+          "type": "string",
+          "description": "Filename of the primary/entry Markdown part (e.g., 'review.md')."
+        },
         "sha256_sum": {
           "type": "string",
           "description": "SHA256 checksum of the primary part or logical concatenation (optional)."
+        }
+      },
+      "if": {
+        "properties": { "policy": { "const": "truncate" } }
+      },
+      "then": {
+        "properties": { "is_complete": { "const": false } }
+      },
+      "else": {
+        "if": { "properties": { "is_complete": { "const": true } } },
+        "then": {
+          "required": ["expected_bytes", "emitted_bytes"],
+          "properties": { "policy": { "not": { "const": "truncate" } } }
         }
       }
     },
