@@ -22,7 +22,7 @@
     "primary_part": "review.md",
     "expected_bytes": 100000,
     "emitted_bytes": 100500,
-    "sha256_sum": "a"
+    "sha256_sum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "artifacts": [
     {

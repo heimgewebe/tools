@@ -102,7 +102,8 @@
         },
         "sha256_sum": {
           "type": "string",
-          "description": "SHA256 checksum of the primary part or logical concatenation (optional)."
+          "description": "SHA256 checksum of the primary part or logical concatenation (optional).",
+          "pattern": "^[a-f0-9]{64}$"
         }
       },
       "if": {
