@@ -647,18 +647,69 @@ def generate_review_bundle(
     (bundle_dir / "review.md").write_text("\n".join(lines), encoding="utf-8")
 
     # --- 3. bundle.json ---
+    # Construct artifacts list for v1 schema
+    artifacts_list = []
+
+    # Bundle itself (index)
+    artifacts_list.append({
+        "role": "index_json",
+        "basename": "bundle.json",
+        "mime": "application/json"
+    })
+
+    # Review Markdown (Canonical Content)
+    review_path = bundle_dir / "review.md"
+    if review_path.exists():
+        review_sha = _compute_sha256(review_path)
+        if review_sha:
+            artifacts_list.append({
+                "role": "canonical_md",
+                "basename": "review.md",
+                "mime": "text/markdown",
+                "sha256": review_sha
+            })
+
+    # Calculate bytes for completeness block
+    emitted_bytes = 0
+    if review_path.exists():
+        emitted_bytes = review_path.stat().st_size
+
+    # Expected bytes matches emitted for this single-file generation logic
+    expected_bytes = emitted_bytes
+
     bundle_meta = {
         "kind": "repolens.pr_schau.bundle",
-        "version": 1,
-        "repo": repo_name,
-        "source": "wc-hub",
-        "created_at": now_utc.isoformat(),
-        "hub_rel": str(PR_SCHAU_DIR / repo_name / ts_folder),
-        "old_tree_hint": str(old_repo.name),
-        "new_tree_hint": str(new_repo.name),
-        "generator": {"name": "repolens", "component": "extractor"},
-        "note": "auto PR-schau bundle"
+        "version": "1.0",
+        "meta": {
+            "repo": repo_name,
+            "generated_at": now_utc.isoformat(),
+            "generator": {
+                "name": "repolens-extractor",
+                "component": "core",
+                "version": "2.4.0" # Bumped to reflect v1 support
+            }
+        },
+        "view_mode": "full",
+        "content_scope": "mixed", # Default as we have heuristics for binary/size omission
+        "completeness": {
+            "is_complete": True,
+            "policy": "split", # Even if single file, split policy allows parts
+            "parts": ["review.md"],
+            "primary_part": "review.md",
+            "expected_bytes": expected_bytes,
+            "emitted_bytes": emitted_bytes
+        },
+        "artifacts": artifacts_list,
+        "verification": {
+            "checked_at": now_utc.isoformat(),
+            "checker": {
+                "name": "repolens-extractor",
+                "version": "2.4.0"
+            },
+            "level": "basic" # Generator self-certifies basic structure/existence
+        }
     }
+
     (bundle_dir / "bundle.json").write_text(
         json.dumps(bundle_meta, indent=2, ensure_ascii=False), encoding="utf-8"
     )
