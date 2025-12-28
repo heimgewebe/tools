@@ -2768,8 +2768,9 @@ def iter_report_blocks(
         fi.anchor_alias = base_anchor
         fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
 
-        # Compute file roles
-        fi.roles = compute_file_roles(fi)
+        # Compute file roles if not already present
+        if not fi.roles:
+            fi.roles = compute_file_roles(fi)
 
         # Debug checks
         # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).

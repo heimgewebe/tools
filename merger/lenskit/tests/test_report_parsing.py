@@ -72,16 +72,14 @@ class ReportParser:
             pos = end_match.end()
 
     def _parse_attrs(self, attr_str: str) -> Dict[str, str]:
-        # Simple attribute parser: key=value or key="value"
-        # Not robust for spaces in values unless quoted, but sufficient for our generator
+        # Robust attribute parser: key=value or key="value with spaces"
         attrs = {}
-        # Simple split by space, ignoring potential complexity for now as generator is controlled
-        parts = attr_str.strip().split()
-        for p in parts:
-            if '=' in p:
-                k, v = p.split('=', 1)
-                v = v.strip('"')
-                attrs[k] = v
+        # Regex matches key="value" or key=value
+        pattern = re.compile(r'(\w+)=(?:"([^"]*)"|(\S+))')
+        for match in pattern.finditer(attr_str):
+            key = match.group(1)
+            val = match.group(2) if match.group(2) is not None else match.group(3)
+            attrs[key] = val
         return attrs
 
     def extract_artifacts(self):
@@ -148,7 +146,8 @@ def test_generated_report_is_parsable(tmp_path):
         content=None,
         inclusion_reason="normal"
     )
-    # This should trigger role_semantics
+    # Explicitly set roles to trigger role_semantics deterministically
+    fi.roles = ["explicit_role"]
 
     files = [fi]
 
