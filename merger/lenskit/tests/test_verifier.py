@@ -96,5 +96,31 @@ def test_pr_schau_verify_tool():
         assert result_guard.returncode != 0, "Verifier should fail on forbidden truncation text"
         assert "Found truncation marker" in result_guard.stderr
 
+        # 6. Test missing zones
+        # Fix the guard violation first
+        review_md.write_text("Clean content without truncation.")
+        # Re-calc hash for clean content
+        clean_sha = hashlib.sha256(review_md.read_bytes()).hexdigest()
+
+        with open(bundle_json, "r") as f:
+            data = json.load(f)
+        for art in data["artifacts"]:
+            if art["basename"] == "review.md":
+                art["sha256"] = clean_sha
+        # Manually set emitted_bytes to match because we changed content length
+        data["completeness"]["emitted_bytes"] = review_md.stat().st_size
+        # Also fix expected_bytes to pass overhead check (since overhead is near 0 here)
+        data["completeness"]["expected_bytes"] = review_md.stat().st_size
+
+        with open(bundle_json, "w") as f:
+            json.dump(data, f)
+
+        # The content lacks zone markers now (generator added them, but we overwrote with "Clean content...")
+        cmd_zones = [sys.executable, str(VERIFIER_SCRIPT), str(bundle_json), "--level", "full"]
+        result_zones = subprocess.run(cmd_zones, capture_output=True, text=True)
+
+        assert result_zones.returncode != 0, "Verifier should fail on missing zones"
+        assert "missing mandatory 'summary' zone" in result_zones.stderr or "missing mandatory" in result_zones.stderr
+
 if __name__ == "__main__":
     pytest.main([__file__])

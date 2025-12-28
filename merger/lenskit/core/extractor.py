@@ -532,12 +532,27 @@ def generate_review_bundle(
         json.dumps(delta_json, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
-    # --- 2. review.md ---
-    lines = []
-    lines.append(f"# PR-Review: {repo_name}")
-    lines.append(f"- **Date:** {now_utc.isoformat()}")
-    lines.append(f"- **Summary:** +{len(added)} / ~{len(changed)} / -{len(removed)}")
-    lines.append("")
+    # --- 2. review.md (Content Splitting & Zones) ---
+    MAX_PART_SIZE = 200 * 1024 # 200 KB per part threshold
+    MAX_INLINE_SIZE = 200 * 1024 # 200 KB max file content size
+
+    # Sort files for review order
+    def review_sort_key(item):
+        cat = item.get("category", "other")
+        prio = cat_prio.get(cat, 99)
+        return (prio, item["path"])
+
+    review_files = sorted(all_entries, key=review_sort_key)
+
+    # -- Part 1 Header --
+    header_lines = []
+    header_lines.append(f"# PR-Review: {repo_name}")
+
+    header_lines.append("<!-- zone:begin type=summary -->")
+    header_lines.append(f"- **Date:** {now_utc.isoformat()}")
+    header_lines.append(f"- **Summary:** +{len(added)} / ~{len(changed)} / -{len(removed)}")
+    header_lines.append("<!-- zone:end -->")
+    header_lines.append("")
 
     # Hotspots check (extended heuristic)
     hotspots = []
@@ -546,105 +561,143 @@ def generate_review_bundle(
         if f.startswith(".github/") or f.startswith("contracts/") or f.endswith(".schema.json"):
             hotspots.append(f)
             continue
-
         # Extended
         if f.startswith("ci/") or f.startswith("scripts/") or f.startswith("config/"):
             hotspots.append(f)
             continue
 
     if hotspots:
-        lines.append("## 🔥 Hotspots")
+        header_lines.append("<!-- zone:begin type=hotspots -->")
+        header_lines.append("## 🔥 Hotspots")
         for h in sorted(hotspots)[:10]: # Limit list
-            lines.append(f"- `{h}`")
+            header_lines.append(f"- `{h}`")
         if len(hotspots) > 10:
-            lines.append(f"- ... ({len(hotspots)-10} more)")
-        lines.append("")
+            header_lines.append(f"- ... ({len(hotspots)-10} more)")
+        header_lines.append("<!-- zone:end -->")
+        header_lines.append("")
 
-    lines.append("## Details")
-    lines.append("")
+    # Files Manifest
+    header_lines.append("<!-- zone:begin type=files_manifest -->")
+    header_lines.append("## Details")
+    header_lines.append("")
+    for item in review_files:
+        path = item["path"]
+        status = item["status"]
+        icon = "❌" if status == "removed" else ("🆕" if status == "added" else "📝")
+        header_lines.append(f"- {icon} `{path}` ({item['size_bytes']} bytes)")
+    header_lines.append("<!-- zone:end -->")
+    header_lines.append("")
 
-    # Sort files for review.md: schema > ci > config > docs > code > other
-    def review_sort_key(item):
-        cat = item.get("category", "other")
-        prio = cat_prio.get(cat, 99)
-        return (prio, item["path"])
+    # Calculate content for diffs
+    content_chunks = [] # List of strings (blocks)
 
-    review_files = sorted(all_entries, key=review_sort_key)
-
-    # Content generation for added/changed
-    MAX_INLINE_SIZE = 200 * 1024 # 200 KB
+    # Pre-calculate content to enable splitting
+    content_chunks.append("<!-- zone:begin type=diff -->\n")
 
     for item in review_files:
         path = item["path"]
         status = item["status"]
 
+        block = []
         if status == "removed":
-            lines.append(f"### ❌ `{path}` (Removed)")
-            lines.append(f"- Size: {item['size_bytes']} bytes")
-            lines.append("")
-            continue
-
-        # Added or Changed
-        lines.append(f"### {'🆕' if status == 'added' else '📝'} `{path}`")
-        lines.append(f"- Status: {status}")
-        lines.append(f"- Size: {item['size_bytes']} bytes")
-        if item.get("sha256"):
-            lines.append(f"- SHA256: `{item['sha256']}`")
+            block.append(f"### ❌ `{path}` (Removed)")
+            block.append(f"- Size: {item['size_bytes']} bytes")
+            block.append("")
         else:
-            lines.append(f"- SHA256: (n/a)")
+            # Added or Changed
+            block.append(f"### {'🆕' if status == 'added' else '📝'} `{path}`")
+            block.append(f"- Status: {status}")
+            block.append(f"- Size: {item['size_bytes']} bytes")
+            if item.get("sha256"):
+                block.append(f"- SHA256: `{item['sha256']}`")
+            else:
+                block.append(f"- SHA256: (n/a)")
 
-        # Security / Binary / Size checks
-        if _is_secret_file(path):
-            lines.append("\n> 🔒 **REDACTED (filename rule)**\n")
-            lines.append("")
-            continue
+            # Security / Binary / Size checks
+            skip_content = False
+            if _is_secret_file(path):
+                block.append("\n> 🔒 **REDACTED (filename rule)**\n")
+                skip_content = True
+            elif item["size_bytes"] > MAX_INLINE_SIZE:
+                 block.append(f"\n> ⚠️ **Omitted (Size > {MAX_INLINE_SIZE/1024:.0f}KB)**\n")
+                 skip_content = True
 
-        if item["size_bytes"] > MAX_INLINE_SIZE:
-             lines.append(f"\n> ⚠️ **Omitted (Size > {MAX_INLINE_SIZE/1024:.0f}KB)**\n")
-             lines.append("")
-             continue
+            if not skip_content:
+                # Read Content
+                fpath = new_repo / path
+                try:
+                    # Check for binary content
+                    with fpath.open("rb") as bf:
+                        chunk = bf.read(4096)
+                        if b"\x00" in chunk:
+                            block.append("\n> 💾 **Binary File**\n")
+                            skip_content = True
 
-        # Read Content
-        fpath = new_repo / path
-        try:
-            # Check for binary content
-            with fpath.open("rb") as bf:
-                chunk = bf.read(4096)
-                if b"\x00" in chunk:
-                    lines.append("\n> 💾 **Binary File**\n")
-                    lines.append("")
-                    continue
+                    if not skip_content:
+                        # Read text
+                        text_content = fpath.read_text(encoding="utf-8", errors="replace")
 
-            # Read text
-            text_content = fpath.read_text(encoding="utf-8", errors="replace")
+                        # Check for secret content
+                        if _content_looks_like_secret(text_content):
+                            block.append("\n> 🔒 **REDACTED (content rule)**\n")
+                        else:
+                            # Extension for code block
+                            p_obj = Path(path)
+                            ext = p_obj.suffix.lstrip(".") or "txt"
+                            if p_obj.name.endswith(".schema.json") or ext == "json":
+                                ext = "json"
+                            elif ext in ("yml", "yaml"):
+                                ext = "yaml"
 
-            # Check for secret content
-            if _content_looks_like_secret(text_content):
-                lines.append("\n> 🔒 **REDACTED (content rule)**\n")
-                lines.append("")
-                continue
+                            block.append("")
+                            block.append(f"```{ext}")
+                            block.append(text_content)
+                            block.append("```")
+                except Exception as e:
+                    block.append(f"\n> ⚠️ Error reading content: {e}\n")
 
-            # Extension for code block
-            p_obj = Path(path)
-            ext = p_obj.suffix.lstrip(".") or "txt"
+            block.append("")
 
-            # Normalize common languages
-            if p_obj.name.endswith(".schema.json") or ext == "json":
-                ext = "json"
-            elif ext in ("yml", "yaml"):
-                ext = "yaml"
+        content_chunks.append("\n".join(block))
 
-            lines.append("")
-            lines.append(f"```{ext}")
-            lines.append(text_content)
-            lines.append("```")
-            lines.append("")
+    content_chunks.append("<!-- zone:end -->\n")
 
-        except Exception as e:
-            lines.append(f"\n> ⚠️ Error reading content: {e}\n")
-            lines.append("")
+    # Splitting Logic
+    parts_created = []
+    current_part_lines = list(header_lines)
+    current_part_size = sum(len(l.encode('utf-8')) + 1 for l in current_part_lines) # +1 for newline
+    part_idx = 1
 
-    (bundle_dir / "review.md").write_text("\n".join(lines), encoding="utf-8")
+    # Helper to flush current part
+    def flush_part(idx, lines):
+        fname = "review.md" if idx == 1 else f"review_part{idx}.md"
+        out_path = bundle_dir / fname
+        text = "\n".join(lines)
+        out_path.write_text(text, encoding="utf-8")
+        return fname
+
+    for chunk in content_chunks:
+        chunk_size = len(chunk.encode('utf-8')) + 1
+
+        # If adding this chunk exceeds limit and we have content (header excluded if part > 1), flush
+        # Note: header is always in part 1. Part 2+ start empty or with continuation header.
+        if current_part_size + chunk_size > MAX_PART_SIZE and len(current_part_lines) > 0:
+             # Flush current
+             pname = flush_part(part_idx, current_part_lines)
+             parts_created.append(pname)
+
+             # Start next part
+             part_idx += 1
+             current_part_lines = [f"# PR-Review (Part {part_idx})\n"]
+             current_part_size = len(current_part_lines[0].encode('utf-8'))
+
+        current_part_lines.append(chunk)
+        current_part_size += chunk_size
+
+    # Flush last part
+    if current_part_lines:
+        pname = flush_part(part_idx, current_part_lines)
+        parts_created.append(pname)
 
     # --- 3. bundle.json ---
     # Construct artifacts list for v1 schema
@@ -657,25 +710,30 @@ def generate_review_bundle(
         "mime": "application/json"
     })
 
-    # Review Markdown (Canonical Content)
-    review_path = bundle_dir / "review.md"
-    if review_path.exists():
-        review_sha = _compute_sha256(review_path)
-        if review_sha:
-            artifacts_list.append({
-                "role": "canonical_md",
-                "basename": "review.md",
-                "mime": "text/markdown",
-                "sha256": review_sha
-            })
-
-    # Calculate bytes for completeness block
+    # Collect parts artifacts
     emitted_bytes = 0
-    if review_path.exists():
-        emitted_bytes = review_path.stat().st_size
+    expected_bytes = 0 # Calculate based on logical payload
 
-    # Expected bytes matches emitted for this single-file generation logic
-    expected_bytes = emitted_bytes
+    # Re-calculate expected_bytes (un-splitted payload)
+    # Header
+    expected_bytes += sum(len(l.encode('utf-8')) + 1 for l in header_lines)
+    # Content
+    expected_bytes += sum(len(c.encode('utf-8')) + 1 for c in content_chunks)
+    # Remove last newline overhead adjustment if needed, but approximation is fine for contract
+
+    for pname in parts_created:
+        ppath = bundle_dir / pname
+        if ppath.exists():
+            psize = ppath.stat().st_size
+            emitted_bytes += psize
+            sha = _compute_sha256(ppath)
+            role = "canonical_md" if pname == "review.md" else "part_md"
+            artifacts_list.append({
+                "role": role,
+                "basename": pname,
+                "mime": "text/markdown",
+                "sha256": sha or ""
+            })
 
     bundle_meta = {
         "kind": "repolens.pr_schau.bundle",
@@ -686,15 +744,15 @@ def generate_review_bundle(
             "generator": {
                 "name": "repolens-extractor",
                 "component": "core",
-                "version": "2.4.0" # Bumped to reflect v1 support
+                "version": "2.4.0"
             }
         },
         "view_mode": "full",
-        "content_scope": "mixed", # Default as we have heuristics for binary/size omission
+        "content_scope": "mixed",
         "completeness": {
             "is_complete": True,
-            "policy": "split", # Even if single file, split policy allows parts
-            "parts": ["review.md"],
+            "policy": "split",
+            "parts": parts_created,
             "primary_part": "review.md",
             "expected_bytes": expected_bytes,
             "emitted_bytes": emitted_bytes
@@ -706,7 +764,7 @@ def generate_review_bundle(
                 "name": "repolens-extractor",
                 "version": "2.4.0"
             },
-            "level": "basic" # Generator self-certifies basic structure/existence
+            "level": "basic"
         }
     }
 

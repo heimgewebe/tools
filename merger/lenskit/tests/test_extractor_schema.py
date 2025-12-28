@@ -77,5 +77,57 @@ def test_generate_review_bundle_output_schema(schema):
         expected_sha = _compute_sha256(bundle_dir / "review.md")
         assert review_md_artifact["sha256"] == expected_sha
 
+def test_generate_review_bundle_splitting(schema):
+    """
+    Test that generate_review_bundle splits content when it exceeds 200KB.
+    """
+    try:
+        import jsonschema
+    except ImportError:
+        pytest.skip("jsonschema not installed")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        hub_dir = tmp_path / "hub"
+        hub_dir.mkdir()
+
+        old_repo = tmp_path / "old_repo"
+        old_repo.mkdir()
+
+        new_repo = tmp_path / "new_repo"
+        new_repo.mkdir()
+
+        # Create multiple files that collectively exceed 200KB but individually are < 200KB
+        # 2 files of 150KB each = 300KB total > 200KB limit
+        content1 = "A" * (150 * 1024)
+        content2 = "B" * (150 * 1024)
+
+        (new_repo / "file1.txt").write_text(content1)
+        (new_repo / "file2.txt").write_text(content2)
+
+        repo_name = "test-split-repo"
+
+        # Run generator
+        generate_review_bundle(old_repo, new_repo, repo_name, hub_dir)
+
+        pr_schau_dir = hub_dir / ".repolens" / "pr-schau" / repo_name
+        assert pr_schau_dir.exists()
+        bundle_dir = list(pr_schau_dir.iterdir())[0]
+        bundle_json_path = bundle_dir / "bundle.json"
+
+        with open(bundle_json_path, "r") as f:
+            bundle_data = json.load(f)
+
+        parts = bundle_data["completeness"]["parts"]
+        assert len(parts) >= 2, f"Should have split into at least 2 parts, got {len(parts)}"
+        assert "review.md" in parts
+        assert "review_part2.md" in parts
+
+        assert (bundle_dir / "review.md").exists()
+        assert (bundle_dir / "review_part2.md").exists()
+
+        # Verify schema compliance for split bundle
+        jsonschema.validate(instance=bundle_data, schema=schema)
+
 if __name__ == "__main__":
     pytest.main([__file__])

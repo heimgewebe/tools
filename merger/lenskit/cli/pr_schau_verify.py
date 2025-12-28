@@ -135,38 +135,68 @@ def verify_full(bundle_path: Path, data: Dict[str, Any]) -> None:
     # 4. Guard: No-Truncate
     # Scan all parts for forbidden text
     if not (policy == "truncate" and not is_complete):
-        forbidden_substrings = ["Content truncated at", "content truncated at"]
+        # Broader set of forbidden substrings
+        forbidden_substrings = [
+            "Content truncated at", "content truncated at",
+            "truncated at", "cut off", "omitted (size >",
+            "content omitted"
+        ]
+        # Allow "omitted (size >" if it's explicitly about binary or excluded files, not generic truncation.
+        # Wait, the contract says "No silent truncation". Binary omission is explicit.
+        # However, "content truncated at" usually implies the file reader gave up.
+        # Let's keep it robust but careful. The generator uses "Omitted (Size > ...)" for files > limit.
+        # This is allowed if it's a file-level omission (handled by 'mixed' scope), but 'truncation' usually means 'partial file'.
+        # For now, we strictly guard against 'truncated at' which implies partial read.
+        strict_forbidden = ["Content truncated at", "content truncated at", "truncated at"]
+
         for p in parts:
             p_path = bundle_dir / p
             if p_path.exists():
                 try:
                     text = p_path.read_text(encoding="utf-8", errors="ignore")
-                    for sub in forbidden_substrings:
+                    for sub in strict_forbidden:
                         if sub in text:
                             _fail(f"Found truncation marker '{sub}' in {p}, but policy is not 'truncate'")
                 except Exception as e:
                     print(f"⚠️  Could not read {p} for text scan: {e}")
         _pass("No silent truncation detected")
 
-    # 5. Semantics: Byte Overhead
+    # 5. Zone Verification (MUST)
+    # Primary part must contain summary and files_manifest zones
+    if primary:
+        p_path = bundle_dir / primary
+        if p_path.exists():
+            try:
+                text = p_path.read_text(encoding="utf-8", errors="ignore")
+                if "<!-- zone:begin type=summary -->" not in text:
+                    _fail(f"Primary part {primary} missing mandatory 'summary' zone")
+                if "<!-- zone:begin type=files_manifest -->" not in text:
+                    _fail(f"Primary part {primary} missing mandatory 'files_manifest' zone")
+                _pass("Mandatory zones (summary, files_manifest) present")
+            except Exception:
+                pass
+
+    # 6. Semantics: Byte Overhead & Consistency
     if is_complete:
         expected = comp.get("expected_bytes", 0)
-        emitted = 0
+        declared_emitted = comp.get("emitted_bytes", 0)
+
+        actual_emitted = 0
         for p in parts:
             p_path = bundle_dir / p
             if p_path.exists():
-                emitted += p_path.stat().st_size
+                actual_emitted += p_path.stat().st_size
+
+        # Check declared vs actual
+        if actual_emitted != declared_emitted:
+             _fail(f"Emitted bytes mismatch! Declared: {declared_emitted}, Actual on disk: {actual_emitted}")
 
         # Contract: emitted_bytes must be roughly expected_bytes
-        # emitted is usually >= expected due to overhead
-        # If emitted < expected, something is weird (compression? missing content?) but strict logic assumes text split.
-        # We focus on excessive overhead.
-
-        overhead = emitted - expected
+        overhead = actual_emitted - expected
         allowed_overhead = max(MAX_OVERHEAD_BYTES, int(expected * MAX_OVERHEAD_RATIO))
 
         if overhead > allowed_overhead:
-            _fail(f"Byte overhead excessive! Expected: {expected}, Emitted: {emitted}, Overhead: {overhead} (Allowed: {allowed_overhead})")
+            _fail(f"Byte overhead excessive! Expected: {expected}, Emitted: {actual_emitted}, Overhead: {overhead} (Allowed: {allowed_overhead})")
 
         _pass(f"Byte consistency check passed (Overhead: {overhead} bytes)")
 
