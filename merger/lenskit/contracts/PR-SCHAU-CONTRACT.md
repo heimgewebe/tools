@@ -82,10 +82,10 @@ Ethical guidelines are insufficient; physical constraints are required.
 
 To ensure rigorous completeness checks:
 
-*   **`emitted_bytes`**: The sum of the file sizes (in bytes) of all files listed in `parts`.
-*   **`expected_bytes`**: The theoretical total size of the logical content payload.
-*   **Overhead Tolerance:** When `is_complete` is `true`, `emitted_bytes` must be effectively equal to `expected_bytes`. Due to splitting overhead (repeated headers, newlines), a strict equality is not always possible.
-    *   **Normative Rule:** `emitted_bytes` MUST NOT exceed `expected_bytes` by more than **64KB** (or 5% of `expected_bytes`, whichever is larger). If the overhead is larger, it suggests content duplication or error.
+*   **`expected_bytes`**: The computed size of the logical content payload (un-splitted text) before any file splitting or header overhead is added.
+*   **`emitted_bytes`**: The sum of the actual file sizes (in bytes) of all files listed in `parts`.
+*   **Overhead Tolerance:** When `is_complete` is `true`, `emitted_bytes` must be effectively equal to `expected_bytes`.
+    *   **Normative Rule:** `emitted_bytes` MUST NOT exceed `expected_bytes` by more than **64KB** (or 5% of `expected_bytes`, whichever is larger). This allowance covers repeated headers and markdown metadata in split files.
 
 ## 6. Verification Status
 
@@ -99,9 +99,19 @@ To combat the assumption that "existence implies correctness", bundles MAY inclu
 }
 ```
 
-*   `none`: No verification performed.
-*   `basic`: Structural schema validation passed.
-*   `full`: All Guards (Hashes, Parts Integrity, No-Truncate rules) passed.
+### Verification Levels (Normative)
+
+*   **`none`** (or missing): No verification performed. Consumers **SHOULD** treat missing verification as `level='none'` (untrusted).
+*   **`basic`**:
+    *   JSON Schema validation passed.
+    *   All files listed in `parts` physically exist on disk.
+*   **`full`**:
+    *   **Includes `basic`.**
+    *   All file hashes (SHA256) match artifacts.
+    *   `primary_part` is confirmed present in `parts`.
+    *   Cross-reference check: Every part has a corresponding artifact entry.
+    *   "No-Truncate" guard passed (no truncation text found in MD).
+    *   Byte overhead tolerance check passed.
 
 ## 7. View Modes & Content Scope
 

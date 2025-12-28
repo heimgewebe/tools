@@ -1,0 +1,54 @@
+{
+  "kind": "repolens.pr_schau.bundle",
+  "version": "1.0",
+  "meta": {
+    "repo": "example-repo",
+    "generated_at": "2023-10-27T10:00:00Z",
+    "generator": {
+      "name": "repolens-extractor",
+      "component": "core",
+      "version": "2.4.0"
+    }
+  },
+  "view_mode": "full",
+  "content_scope": "fullfiles",
+  "completeness": {
+    "is_complete": true,
+    "policy": "split",
+    "parts": [
+      "review.md",
+      "review_part2.md"
+    ],
+    "primary_part": "review.md",
+    "expected_bytes": 100000,
+    "emitted_bytes": 100500,
+    "sha256_sum": "a"
+  },
+  "artifacts": [
+    {
+      "role": "index_json",
+      "basename": "bundle.json",
+      "mime": "application/json"
+    },
+    {
+      "role": "canonical_md",
+      "basename": "review.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mime": "text/markdown"
+    },
+    {
+      "role": "part_md",
+      "basename": "review_part2.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mime": "text/markdown"
+    }
+  ],
+  "verification": {
+    "checked_at": "2023-10-27T10:05:00Z",
+    "checker": {
+      "name": "pr-schau-verify",
+      "version": "1.0.0"
+    },
+    "level": "full"
+  }
+}
