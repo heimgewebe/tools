@@ -12,6 +12,7 @@ import json
 import hashlib
 import datetime
 import re
+import unicodedata
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
@@ -228,6 +229,11 @@ def _stable_file_id(fi: "FileInfo") -> str:
         or getattr(fi, "abs_path", None)
         or ""
     )
+
+    # Normalize paths to NFC to ensure stable IDs across platforms (macOS vs Linux)
+    repo = unicodedata.normalize("NFC", repo)
+    path = unicodedata.normalize("NFC", path)
+
     raw = f"{repo}:{path}".encode("utf-8", errors="ignore")
     # Updated in v2.4 (PR1) to include FILE: prefix
     return "FILE:f_" + hashlib.sha1(raw).hexdigest()[:12]
@@ -3594,7 +3600,8 @@ def iter_report_blocks(
         # 1. Stable File Marker (with path) - PR1
         fid = _stable_file_id(fi) # Now returns FILE:f_...
         # Fix PR13: Quote attributes to handle paths with spaces
-        block.append(f'<!-- file:id={fid} path="{fi.rel_path}" -->')
+        # Fix PR13-Followup: Quote id as well for consistency
+        block.append(f'<!-- file:id="{fid}" path="{fi.rel_path}" -->')
 
         # 2. Stable Anchor (explicit) - PR1
         # Extract short hash from fid "FILE:f_<hash>" -> "file-f_<hash>"

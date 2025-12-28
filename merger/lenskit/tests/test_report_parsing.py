@@ -109,11 +109,12 @@ class ReportParser:
 
     def extract_file_markers(self):
         # <!-- file:id=... path=... -->
-        # Now supporting quoted paths: path="foo bar"
-        pattern = re.compile(r'<!-- file:id=([^\s]+)\s+path=(?:"([^"]+)"|(\S+)) -->')
+        # Now supporting quoted paths: path="foo bar" and quoted id: id="FILE:..."
+        # Updated regex to handle both quoted and unquoted IDs for robustness
+        pattern = re.compile(r'<!-- file:id=(?:"([^"]+)"|([^\s]+))\s+path=(?:"([^"]+)"|(\S+)) -->')
         for match in pattern.finditer(self.content):
-            fid = match.group(1)
-            path = match.group(2) if match.group(2) else match.group(3)
+            fid = match.group(1) if match.group(1) else match.group(2)
+            path = match.group(3) if match.group(3) else match.group(4)
             self.file_markers.append({
                 "id": fid,
                 "path": path
