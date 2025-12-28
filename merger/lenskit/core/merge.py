@@ -3827,10 +3827,20 @@ def generate_json_sidecar(
             "inclusion_status": status,
             "content_ref": {
                 # Markdown marker search is more robust than anchors/links.
-                "marker": f"file:id={fid}", # Updated to match MD emitter
+                # Patch 1: align JSON marker with quoted MD emitter
+                "marker": f'file:id="{fid}"',
+                # Patch 2: Structured Selector (robust, future-proof)
+                "selector": {
+                    "kind": "html_comment_attr",
+                    "tag": "file",
+                    "attr": "id",
+                    "value": fid,
+                },
             },
             "md_ref": {
-                "anchor": fid.replace("FILE:", "file-")
+                "anchor": fid.replace("FILE:", "file-"),
+                # Patch 3: Full fragment (sanity)
+                "fragment": "#" + fid.replace("FILE:", "file-"),
             }
         }
         files_out.append(file_obj)
