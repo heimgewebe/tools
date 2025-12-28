@@ -3638,7 +3638,7 @@ def iter_report_blocks(
         lang = lang_for(fi.ext)
 
         # Zone wrapper for code content
-        block.append(f"<!-- zone:begin type=code lang={lang} file={fid} -->")
+        block.append(f"<!-- zone:begin type=code lang={lang} id={fid} -->")
         block.append("")
         block.append(f"{fence}{lang}")
         block.append(content)
