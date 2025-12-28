@@ -686,7 +686,9 @@ def generate_review_bundle(
         fname = "review.md" if idx == 1 else f"review_part{idx}.md"
         out_path = bundle_dir / fname
         text = "\n".join(lines)
-        out_path.write_text(text, encoding="utf-8")
+        # Enforce LF for exact byte accounting across platforms
+        with out_path.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
         return fname
 
     for chunk in content_chunks:
