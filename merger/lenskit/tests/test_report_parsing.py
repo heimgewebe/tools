@@ -36,10 +36,10 @@ class ReportParser:
         # Combined regex for finding tags in order
         # Group 1: begin type
         # Group 2: begin attrs
-        # Group 3: end type (optional)
+        # Group 3: end type (required)
         # Note: We match <!-- zone:begin ... --> OR <!-- zone:end ... -->
         token_pattern = re.compile(
-            r'<!-- zone:begin type=([a-zA-Z0-9_-]+)(.*?) -->|<!-- zone:end(?:\s+type=([a-zA-Z0-9_-]+))? -->',
+            r'<!-- zone:begin type=([a-zA-Z0-9_-]+)(.*?) -->|<!-- zone:end\s+type=([a-zA-Z0-9_-]+) -->',
             re.DOTALL
         )
 
@@ -70,7 +70,7 @@ class ReportParser:
                 open_zone = stack.pop()
 
                 # Verify type matching
-                if end_type and end_type != open_zone['type']:
+                if end_type != open_zone['type']:
                     raise ValueError(f"Zone mismatch: Expected closing {open_zone['type']}, got {end_type} at {match.start()}")
 
                 # Record the zone
@@ -146,7 +146,7 @@ def test_generated_report_is_parsable(tmp_path):
     root.mkdir()
     (root / "src").mkdir()
     f1 = root / "src/main.py"
-    f1.write_text("print('hello')")
+    f1.write_text("print('hello')", encoding="utf-8")
 
     fi = FileInfo(
         root_label="repo",
