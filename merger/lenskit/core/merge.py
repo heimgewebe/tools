@@ -12,6 +12,7 @@ import json
 import hashlib
 import datetime
 import re
+import unicodedata
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
@@ -228,8 +229,14 @@ def _stable_file_id(fi: "FileInfo") -> str:
         or getattr(fi, "abs_path", None)
         or ""
     )
+
+    # Normalize paths to NFC to ensure stable IDs across platforms (macOS vs Linux)
+    repo = unicodedata.normalize("NFC", repo)
+    path = unicodedata.normalize("NFC", path)
+
     raw = f"{repo}:{path}".encode("utf-8", errors="ignore")
-    return "f_" + hashlib.sha1(raw).hexdigest()[:12]
+    # Updated in v2.4 (PR1) to include FILE: prefix
+    return "FILE:f_" + hashlib.sha1(raw).hexdigest()[:12]
 
 
 def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = False) -> None:
@@ -1308,7 +1315,7 @@ class FileInfo(object):
         self.inclusion_reason = inclusion_reason
         self.anchor = "" # Will be set during report generation
         self.anchor_alias = "" # Backwards-compatible anchor (without hash suffix)
-        self.roles = [] # Will be computed during report generation
+        self.roles = None # Will be computed during report generation (None = unset)
         self.lens = None # Assigned during scan or later
 
 
@@ -2724,6 +2731,7 @@ def iter_report_blocks(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
+    artifact_refs: Optional[Dict[str, str]] = None,
 ) -> Iterator[str]:
     if extras is None:
         extras = ExtrasConfig.none()
@@ -2766,8 +2774,9 @@ def iter_report_blocks(
         fi.anchor_alias = base_anchor
         fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
 
-        # Compute file roles
-        fi.roles = compute_file_roles(fi)
+        # Compute file roles if not already present
+        if fi.roles is None:
+            fi.roles = compute_file_roles(fi)
 
         # Debug checks
         # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
@@ -2943,6 +2952,19 @@ def iter_report_blocks(
     header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
     header.append(f"- **Render Mode:** `{render_mode}`")
 
+    # Artifacts section (Recommendation 1: Portable Links)
+    if artifact_refs:
+        header.append("## 📦 Artifacts")
+        if artifact_refs.get("index_json_basename"):
+            bn = artifact_refs['index_json_basename']
+            header.append(f"<!-- artifact:index_json basename=\"{bn}\" -->")
+            header.append(f"- Index JSON: [{bn}]({bn})")
+        if artifact_refs.get("augment_sidecar_basename"):
+            bn = artifact_refs['augment_sidecar_basename']
+            header.append(f"<!-- artifact:augment_sidecar basename=\"{bn}\" -->")
+            header.append(f"- Augment Sidecar: [{bn}]({bn})")
+        header.append("")
+
     # One-time navigation note (no per-file chatter).
     header.append("### Navigation")
     header.append("- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)")
@@ -2997,6 +3019,8 @@ def iter_report_blocks(
     # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
     # Spec v2.4 requirement: @meta is mandatory in all modes, including plan-only.
     meta_lines: List[str] = []
+    # Wrap in zone marker
+    meta_lines.append("<!-- zone:begin type=meta id=meta -->")
     meta_lines.append("<!-- @meta:start -->")
     meta_lines.append("```yaml")
 
@@ -3022,12 +3046,23 @@ def iter_report_blocks(
     if debug:
         print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present)
 
+    # Determine if roles are actually present/computed
+    # Security fix (PR12): Ensure roles are computed before consulting them for meta
+    for fi in files:
+        if fi.roles is None:
+            fi.roles = compute_file_roles(fi)
+    has_roles = any(fi.roles for fi in files)
+
     meta_dict: Dict[str, Any] = {
         "merge": {
             "spec_version": SPEC_VERSION,
             "profile": level,
             "contract": MERGE_CONTRACT_NAME,
             "contract_version": MERGE_CONTRACT_VERSION,
+            # Only declare semantics if roles are present (Empfehlung A)
+            **({"role_semantics": "heuristic"} if has_roles else {}),
+            # Declare Depends as placeholder (Empfehlung B)
+            "depends_semantics": "placeholder",
             "plan_only": plan_only,
             "code_only": code_only,
             "render_mode": render_mode,
@@ -3106,6 +3141,7 @@ def iter_report_blocks(
 
     meta_lines.append("```")
     meta_lines.append("<!-- @meta:end -->")
+    meta_lines.append("<!-- zone:end type=meta -->")
     meta_lines.append("")
     header.extend(meta_lines)
 
@@ -3383,10 +3419,12 @@ def iter_report_blocks(
     # --- 6. Structure --- (skipped for machine-lean)
     if level != "machine-lean":
         structure = []
+        structure.append("<!-- zone:begin type=structure id=structure -->")
         structure.append("## 📁 Structure")
         structure.append("")
         structure.append(build_tree(files))
         structure.append("")
+        structure.append("<!-- zone:end type=structure -->")
         yield "\n".join(structure) + "\n"
 
     # --- Index (Patch B) ---
@@ -3443,6 +3481,7 @@ def iter_report_blocks(
 
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
+    manifest.append("<!-- zone:begin type=manifest id=manifest -->")
     manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
 
     roots_sorted = sorted(files_by_root.keys())
@@ -3481,26 +3520,31 @@ def iter_report_blocks(
                     f"Inhalt: {stats.get('included', 0)} mit Content"
                 )
             manifest.append("")
-            manifest.append("| Path | Category | Tags | Roles | Size | Included | MD5 |")
-            manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
+            # Updated to include 'Role' column (Recommendation 5) and 'Depends'
+            manifest.append("| Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |")
+            manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
 
             for fi, status in processed_files:
                 if fi.root_label != root:
                     continue
 
                 tags_str = ", ".join(fi.tags) if fi.tags else "-"
+                # Use joined roles or '-' for the new column
                 roles_str = ", ".join(fi.roles) if fi.roles else "-"
                 included_label = status
                 if is_noise_file(fi):
                     included_label = f"{status} (noise)"
 
-                path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
+                # Use stable ID anchor for Manifest links
+                stable_anchor = _stable_file_id(fi).replace("FILE:", "file-")
+                path_str = f"[`{fi.rel_path}`](#{stable_anchor})"
                 manifest.append(
-                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
+                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | - | "
                     f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
                 )
             manifest.append("")
 
+        manifest.append("<!-- zone:end type=manifest -->")
         yield "\n".join(manifest) + "\n"
 
     # --- Optional: Fleet Consistency ---
@@ -3552,6 +3596,18 @@ def iter_report_blocks(
             current_root = fi.root_label
 
         block = ["---"]
+
+        # 1. Stable File Marker (with path) - PR1
+        fid = _stable_file_id(fi) # Now returns FILE:f_...
+        # Fix PR13: Quote attributes to handle paths with spaces
+        # Fix PR13-Followup: Quote id as well for consistency
+        block.append(f'<!-- file:id="{fid}" path="{fi.rel_path}" -->')
+
+        # 2. Stable Anchor (explicit) - PR1
+        # Extract short hash from fid "FILE:f_<hash>" -> "file-f_<hash>"
+        short_id_anchor = fid.replace("FILE:", "file-")
+        block.append(f'<a id="{short_id_anchor}"></a>')
+
         # Backwards-compatible alias anchor (old style without suffix)
         if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
             # Provide HTML id for alias too (quiet mode: no visible marker spam)
@@ -3570,8 +3626,6 @@ def iter_report_blocks(
         block.append(f"- MD5: {fi.md5}")
 
         content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
-        # Stable marker for agents: find blocks without depending on headings/anchors/renderer.
-        block.append(f"<!-- FILE:{_stable_file_id(fi)} -->")
 
         # File Meta Block (Spec Patch)
         block.append("<!--")
@@ -3595,11 +3649,17 @@ def iter_report_blocks(
         fence = "`" * fence_len
 
         lang = lang_for(fi.ext)
+
+        # Zone wrapper for code content
+        # Fix PR13: Quote attributes
+        block.append(f'<!-- zone:begin type=code lang="{lang}" id={fid} -->')
         block.append("")
         block.append(f"{fence}{lang}")
         block.append(content)
         block.append(f"{fence}")
         block.append("")
+        block.append("<!-- zone:end type=code -->")
+
         # Backlinks: keep them simple
         block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
         yield "\n".join(block) + "\n\n"
@@ -3616,6 +3676,7 @@ def generate_report_content(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
+    artifact_refs: Optional[Dict[str, str]] = None,
 ) -> str:
     report = "".join(
         iter_report_blocks(
@@ -3630,6 +3691,7 @@ def generate_report_content(
             ext_filter,
             extras,
             delta_meta,
+            artifact_refs,
         )
     )
     if plan_only:
@@ -3765,8 +3827,11 @@ def generate_json_sidecar(
             "inclusion_status": status,
             "content_ref": {
                 # Markdown marker search is more robust than anchors/links.
-                "marker": f"FILE:{fid}",
+                "marker": f"file:id={fid}", # Updated to match MD emitter
             },
+            "md_ref": {
+                "anchor": fid.replace("FILE:", "file-")
+            }
         }
         files_out.append(file_obj)
 
@@ -3819,6 +3884,10 @@ def generate_json_sidecar(
             "index_json": None,
             "canonical_md": None,
             "md_parts": [],
+            # basenames for portable linking (filled by writer)
+            "index_json_basename": None,
+            "canonical_md_basename": None,
+            "md_parts_basenames": [],
         },
         "coverage": {
             "included_text_files": included_count,
@@ -3880,6 +3949,23 @@ def write_reports_v2(
 
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
+        # Pre-calculate artifacts basenames for linking in MD (Recommendation 1)
+        artifact_refs = {}
+        if extras and extras.json_sidecar:
+            # We predict the JSON filename
+            # Note: We rely on the fact that single-file mode uses part_suffix=""
+            # For split mode, JSON usually follows the base name.
+            # We use a dummy call to get the base path
+            _dummy_path = output_filename_base_func(part_suffix="")
+            _json_name = _dummy_path.with_suffix('.json').name
+            artifact_refs["index_json_basename"] = _json_name
+
+        if extras and extras.augment_sidecar:
+             # Find augment file to get name
+             _aug = _find_augment_file_for_sources(target_sources)
+             if _aug:
+                 artifact_refs["augment_sidecar_basename"] = _aug.name
+
         # Instantiate stream validator
         validator = ReportValidator(plan_only=plan_only, code_only=code_only, machine_lean=(detail=="machine-lean"))
 
@@ -3935,6 +4021,7 @@ def write_reports_v2(
                 ext_filter,
                 extras,
                 delta_meta,
+                artifact_refs=artifact_refs,
             )
 
             for block in iterator:
@@ -4049,6 +4136,7 @@ def write_reports_v2(
                 ext_filter,
                 extras,
                 delta_meta,
+                artifact_refs=artifact_refs,
             )
 
             # Spec v2.4: Always enforce Part N/M header, even for single files (1/1)
@@ -4131,9 +4219,15 @@ def write_reports_v2(
                 ).with_suffix('.json')
 
             json_data["artifacts"]["index_json"] = str(json_path)
+            json_data["artifacts"]["index_json_basename"] = json_path.name
+
             md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
             json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+            json_data["artifacts"]["md_parts_basenames"] = [p.name for p in md_parts]
+
             json_data["artifacts"]["canonical_md"] = str(md_parts[0]) if md_parts else None
+            json_data["artifacts"]["canonical_md_basename"] = md_parts[0].name if md_parts else None
+
             _validate_agent_json_dict(json_data)
             json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
             out_paths.append(json_path)
@@ -4207,12 +4301,22 @@ def write_reports_v2(
                     ).with_suffix('.json')
 
                 json_data["artifacts"]["index_json"] = str(json_path)
+                json_data["artifacts"]["index_json_basename"] = json_path.name
+
                 md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
                 # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
                 json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+                json_data["artifacts"]["md_parts_basenames"] = [p.name for p in md_parts]
+
                 json_data["artifacts"]["canonical_md"] = (
                     str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
                 )
+                if json_data["artifacts"]["canonical_md"]:
+                     # Re-derive basename from the chosen path
+                     json_data["artifacts"]["canonical_md_basename"] = Path(json_data["artifacts"]["canonical_md"]).name
+                else:
+                     json_data["artifacts"]["canonical_md_basename"] = None
+
                 _validate_agent_json_dict(json_data)
                 json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
                 out_paths.append(json_path)
