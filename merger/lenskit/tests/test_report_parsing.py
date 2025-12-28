@@ -50,11 +50,14 @@ class ReportParser:
             start_content = match.end()
 
             # Find matching end tag
-            # For simplicity, we just find the next one.
-            # In a real parser we might verify type matches if nested.
             end_match = end_pattern.search(self.content, start_content)
             if not end_match:
                 break # Broken zone
+
+            # If the end marker declares a type, it must match the begin type.
+            end_type = end_match.group(1)
+            if end_type and end_type != z_type:
+                raise AssertionError(f"Zone end type mismatch: begin={z_type} end={end_type}")
 
             end_content = end_match.start()
 
