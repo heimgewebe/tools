@@ -159,7 +159,7 @@ class DebugConfig:
 DEBUG_CONFIG = DebugConfig.defaults()
 
 AGENT_CONTRACT_NAME = "repolens-agent"
-AGENT_CONTRACT_VERSION = "v1"
+AGENT_CONTRACT_VERSION = "v2"
 
 # Delta Report configuration
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
