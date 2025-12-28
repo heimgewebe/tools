@@ -36,7 +36,8 @@ class ReportParser:
         # Regex for <!-- zone:begin type=... attrs... -->
         # We find all begin markers and match with end markers (nested zones not supported in this simple parser)
         zone_pattern = re.compile(r'<!-- zone:begin type=(\w+)(.*?) -->', re.DOTALL)
-        end_pattern = re.compile(r'<!-- zone:end -->')
+        # End pattern should match type if present
+        end_pattern = re.compile(r'<!-- zone:end(?:\s+type=(\w+))? -->')
 
         pos = 0
         while True:
@@ -48,6 +49,9 @@ class ReportParser:
             z_attrs_str = match.group(2)
             start_content = match.end()
 
+            # Find matching end tag
+            # For simplicity, we just find the next one.
+            # In a real parser we might verify type matches if nested.
             end_match = end_pattern.search(self.content, start_content)
             if not end_match:
                 break # Broken zone
@@ -171,9 +175,6 @@ def test_generated_report_is_parsable(tmp_path):
     zone_types = [z['type'] for z in parser.zones]
     assert "meta" in zone_types
     assert "manifest" in zone_types
-    # Code zone might not be detected by simple regex if nested code blocks exist,
-    # but our generator wraps code block in zone.
-    # Let's check if code zone is present
     assert "code" in zone_types
 
     # Verify code zone has id attribute
@@ -182,6 +183,24 @@ def test_generated_report_is_parsable(tmp_path):
             assert 'id' in z['attrs']
             assert z['attrs']['id'].startswith('FILE:')
             break
+
+    # Verify meta/manifest/structure have ids (same as type)
+    for ztype in ['meta', 'manifest', 'structure']:
+        # Structure is optional (skipped for machine-lean), but we use dev profile in test
+        # Structure is present in dev profile unless machine-lean
+        found = False
+        for z in parser.zones:
+            if z['type'] == ztype:
+                found = True
+                assert 'id' in z['attrs'], f"Zone {ztype} missing id"
+                assert z['attrs']['id'] == ztype
+                break
+        # manifest is mandatory unless code_only? dev has manifest.
+        # structure has id=structure
+        if ztype == 'structure' and 'structure' not in zone_types:
+             pass # might be skipped if logic changes, but dev has it
+        elif ztype == 'manifest':
+             assert found, "Manifest zone not found"
 
     # 2. Verify Meta
     meta = parser.parse_meta()

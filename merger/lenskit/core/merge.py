@@ -3013,7 +3013,7 @@ def iter_report_blocks(
     # Spec v2.4 requirement: @meta is mandatory in all modes, including plan-only.
     meta_lines: List[str] = []
     # Wrap in zone marker
-    meta_lines.append("<!-- zone:begin type=meta -->")
+    meta_lines.append("<!-- zone:begin type=meta id=meta -->")
     meta_lines.append("<!-- @meta:start -->")
     meta_lines.append("```yaml")
 
@@ -3130,7 +3130,7 @@ def iter_report_blocks(
 
     meta_lines.append("```")
     meta_lines.append("<!-- @meta:end -->")
-    meta_lines.append("<!-- zone:end -->")
+    meta_lines.append("<!-- zone:end type=meta -->")
     meta_lines.append("")
     header.extend(meta_lines)
 
@@ -3408,12 +3408,12 @@ def iter_report_blocks(
     # --- 6. Structure --- (skipped for machine-lean)
     if level != "machine-lean":
         structure = []
-        structure.append("<!-- zone:begin type=structure -->")
+        structure.append("<!-- zone:begin type=structure id=structure -->")
         structure.append("## 📁 Structure")
         structure.append("")
         structure.append(build_tree(files))
         structure.append("")
-        structure.append("<!-- zone:end -->")
+        structure.append("<!-- zone:end type=structure -->")
         yield "\n".join(structure) + "\n"
 
     # --- Index (Patch B) ---
@@ -3470,7 +3470,7 @@ def iter_report_blocks(
 
     # --- 7. Manifest (Patch A) ---
     manifest: List[str] = []
-    manifest.append("<!-- zone:begin type=manifest -->")
+    manifest.append("<!-- zone:begin type=manifest id=manifest -->")
     manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
 
     roots_sorted = sorted(files_by_root.keys())
@@ -3533,7 +3533,7 @@ def iter_report_blocks(
                 )
             manifest.append("")
 
-        manifest.append("<!-- zone:end -->")
+        manifest.append("<!-- zone:end type=manifest -->")
         yield "\n".join(manifest) + "\n"
 
     # --- Optional: Fleet Consistency ---
@@ -3644,7 +3644,7 @@ def iter_report_blocks(
         block.append(content)
         block.append(f"{fence}")
         block.append("")
-        block.append("<!-- zone:end -->")
+        block.append("<!-- zone:end type=code -->")
 
         # Backlinks: keep them simple
         block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
