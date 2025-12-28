@@ -90,6 +90,12 @@ class JobRunner:
         if not job:
             return
 
+        if job.status in ("canceled", "canceling"):
+            job.status = "canceled"
+            job.finished_at = datetime.utcnow().isoformat()
+            self.job_store.update_job(job)
+            return
+
         # Update status to running
         job.status = "running"
         job.started_at = datetime.utcnow().isoformat()
@@ -151,8 +157,11 @@ class JobRunner:
             for i, src in enumerate(sources, 1):
                 # Refresh job status from store to detect external cancel
                 current_job = self.job_store.get_job(job_id)
-                if current_job and current_job.status == "canceled":
-                    log("Job canceled during scan.")
+                if current_job and current_job.status in ("canceled", "canceling"):
+                    log("Job canceled by user during scan.")
+                    current_job.status = "canceled"
+                    current_job.finished_at = datetime.utcnow().isoformat()
+                    self.job_store.update_job(current_job)
                     return
 
                 # Defense in depth: validate each src before scanning
@@ -175,8 +184,11 @@ class JobRunner:
 
             # Re-check cancel status before write (expensive operation)
             job = self.job_store.get_job(job_id)
-            if job.status == "canceled":
-                log("Job canceled before write.")
+            if job.status in ("canceled", "canceling"):
+                log("Job canceled by user before write.")
+                job.status = "canceled"
+                job.finished_at = datetime.utcnow().isoformat()
+                self.job_store.update_job(job)
                 return
 
             split_size = parse_human_size(req.split_size or "25MB")
