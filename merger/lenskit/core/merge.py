@@ -2950,9 +2950,11 @@ def iter_report_blocks(
         header.append("## 📦 Artifacts")
         if artifact_refs.get("index_json_basename"):
             bn = artifact_refs['index_json_basename']
+            header.append(f"<!-- artifact:index_json basename=\"{bn}\" -->")
             header.append(f"- Index JSON: [{bn}]({bn})")
         if artifact_refs.get("augment_sidecar_basename"):
             bn = artifact_refs['augment_sidecar_basename']
+            header.append(f"<!-- artifact:augment_sidecar basename=\"{bn}\" -->")
             header.append(f"- Augment Sidecar: [{bn}]({bn})")
         header.append("")
 
@@ -3043,6 +3045,7 @@ def iter_report_blocks(
             "profile": level,
             "contract": MERGE_CONTRACT_NAME,
             "contract_version": MERGE_CONTRACT_VERSION,
+            "role_semantics": "heuristic",
             "plan_only": plan_only,
             "code_only": code_only,
             "render_mode": render_mode,
@@ -3501,7 +3504,7 @@ def iter_report_blocks(
                 )
             manifest.append("")
             # Updated to include 'Role' column (Recommendation 5) and 'Depends'
-            manifest.append("| Path | Category | Tags | Role | Depends | Size | Included | MD5 |")
+            manifest.append("| Path | Category | Tags | Role? | Depends | Size | Included | MD5 |")
             manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
 
             for fi, status in processed_files:
@@ -3515,7 +3518,9 @@ def iter_report_blocks(
                 if is_noise_file(fi):
                     included_label = f"{status} (noise)"
 
-                path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
+                # Use stable ID anchor for Manifest links
+                stable_anchor = _stable_file_id(fi).replace("FILE:", "file-")
+                path_str = f"[`{fi.rel_path}`](#{stable_anchor})"
                 manifest.append(
                     f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | - | "
                     f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
