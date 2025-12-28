@@ -2725,6 +2725,7 @@ def iter_report_blocks(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
+    artifact_refs: Optional[Dict[str, str]] = None,
 ) -> Iterator[str]:
     if extras is None:
         extras = ExtrasConfig.none()
@@ -2943,6 +2944,17 @@ def iter_report_blocks(
     header.append(f"- **Plan Only:** {str(bool(plan_only)).lower()}")
     header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
     header.append(f"- **Render Mode:** `{render_mode}`")
+
+    # Artifacts section (Recommendation 1: Portable Links)
+    if artifact_refs:
+        header.append("## 📦 Artifacts")
+        if artifact_refs.get("index_json_basename"):
+            bn = artifact_refs['index_json_basename']
+            header.append(f"- Index JSON: [{bn}]({bn})")
+        if artifact_refs.get("augment_sidecar_basename"):
+            bn = artifact_refs['augment_sidecar_basename']
+            header.append(f"- Augment Sidecar: [{bn}]({bn})")
+        header.append("")
 
     # One-time navigation note (no per-file chatter).
     header.append("### Navigation")
@@ -3488,14 +3500,16 @@ def iter_report_blocks(
                     f"Inhalt: {stats.get('included', 0)} mit Content"
                 )
             manifest.append("")
-            manifest.append("| Path | Category | Tags | Roles | Size | Included | MD5 |")
-            manifest.append("| --- | --- | --- | --- | ---: | --- | --- |")
+            # Updated to include 'Role' column (Recommendation 5) and 'Depends'
+            manifest.append("| Path | Category | Tags | Role | Depends | Size | Included | MD5 |")
+            manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
 
             for fi, status in processed_files:
                 if fi.root_label != root:
                     continue
 
                 tags_str = ", ".join(fi.tags) if fi.tags else "-"
+                # Use joined roles or '-' for the new column
                 roles_str = ", ".join(fi.roles) if fi.roles else "-"
                 included_label = status
                 if is_noise_file(fi):
@@ -3503,7 +3517,7 @@ def iter_report_blocks(
 
                 path_str = f"[`{fi.rel_path}`](#{fi.anchor})"
                 manifest.append(
-                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | "
+                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | - | "
                     f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
                 )
             manifest.append("")
@@ -3637,6 +3651,7 @@ def generate_report_content(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
+    artifact_refs: Optional[Dict[str, str]] = None,
 ) -> str:
     report = "".join(
         iter_report_blocks(
@@ -3651,6 +3666,7 @@ def generate_report_content(
             ext_filter,
             extras,
             delta_meta,
+            artifact_refs,
         )
     )
     if plan_only:
@@ -3843,6 +3859,10 @@ def generate_json_sidecar(
             "index_json": None,
             "canonical_md": None,
             "md_parts": [],
+            # basenames for portable linking (filled by writer)
+            "index_json_basename": None,
+            "canonical_md_basename": None,
+            "md_parts_basenames": [],
         },
         "coverage": {
             "included_text_files": included_count,
@@ -3904,6 +3924,23 @@ def write_reports_v2(
 
     # Helper for writing logic
     def process_and_write(target_files, target_sources, output_filename_base_func):
+        # Pre-calculate artifacts basenames for linking in MD (Recommendation 1)
+        artifact_refs = {}
+        if extras and extras.json_sidecar:
+            # We predict the JSON filename
+            # Note: We rely on the fact that single-file mode uses part_suffix=""
+            # For split mode, JSON usually follows the base name.
+            # We use a dummy call to get the base path
+            _dummy_path = output_filename_base_func(part_suffix="")
+            _json_name = _dummy_path.with_suffix('.json').name
+            artifact_refs["index_json_basename"] = _json_name
+
+        if extras and extras.augment_sidecar:
+             # Find augment file to get name
+             _aug = _find_augment_file_for_sources(target_sources)
+             if _aug:
+                 artifact_refs["augment_sidecar_basename"] = _aug.name
+
         # Instantiate stream validator
         validator = ReportValidator(plan_only=plan_only, code_only=code_only, machine_lean=(detail=="machine-lean"))
 
@@ -3959,6 +3996,7 @@ def write_reports_v2(
                 ext_filter,
                 extras,
                 delta_meta,
+                artifact_refs=artifact_refs,
             )
 
             for block in iterator:
@@ -4073,6 +4111,7 @@ def write_reports_v2(
                 ext_filter,
                 extras,
                 delta_meta,
+                artifact_refs=artifact_refs,
             )
 
             # Spec v2.4: Always enforce Part N/M header, even for single files (1/1)
@@ -4155,9 +4194,15 @@ def write_reports_v2(
                 ).with_suffix('.json')
 
             json_data["artifacts"]["index_json"] = str(json_path)
+            json_data["artifacts"]["index_json_basename"] = json_path.name
+
             md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
             json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+            json_data["artifacts"]["md_parts_basenames"] = [p.name for p in md_parts]
+
             json_data["artifacts"]["canonical_md"] = str(md_parts[0]) if md_parts else None
+            json_data["artifacts"]["canonical_md_basename"] = md_parts[0].name if md_parts else None
+
             _validate_agent_json_dict(json_data)
             json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
             out_paths.append(json_path)
@@ -4231,12 +4276,22 @@ def write_reports_v2(
                     ).with_suffix('.json')
 
                 json_data["artifacts"]["index_json"] = str(json_path)
+                json_data["artifacts"]["index_json_basename"] = json_path.name
+
                 md_parts = [p for p in out_paths if p.suffix.lower() == ".md"]
                 # for per-repo mode, md_parts typically ends with this repo's report; we still record all md parts.
                 json_data["artifacts"]["md_parts"] = [str(p) for p in md_parts]
+                json_data["artifacts"]["md_parts_basenames"] = [p.name for p in md_parts]
+
                 json_data["artifacts"]["canonical_md"] = (
                     str(out_paths[-1]) if out_paths[-1].suffix.lower() == ".md" else (str(md_parts[-1]) if md_parts else None)
                 )
+                if json_data["artifacts"]["canonical_md"]:
+                     # Re-derive basename from the chosen path
+                     json_data["artifacts"]["canonical_md_basename"] = Path(json_data["artifacts"]["canonical_md"]).name
+                else:
+                     json_data["artifacts"]["canonical_md_basename"] = None
+
                 _validate_agent_json_dict(json_data)
                 json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
                 out_paths.append(json_path)
