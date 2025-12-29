@@ -16,7 +16,7 @@ def test_sse_contract(service_client, monkeypatch):
     job = Job(
         id=job_id,
         status="succeeded", # Important: ensures stream ends immediately after logs
-        created_at="2024-01-01T00:00:00Z",
+        created_at="2024-01-01T00:00:00+00:00",
         request=req,
         hub_resolved=str(ctx.hub_path),
         logs=["line1", "line2", "line3"]
