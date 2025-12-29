@@ -2142,6 +2142,11 @@ class MergerUI(object):
         UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
         sonst wirkt Pythonista "eingefroren" – besonders bei Multi-Repo.
         """
+        # Snapshot UI state on main thread to avoid thread-safety issues in background
+        self._pending_plan_only = self.plan_only_switch.value
+        # Use getattr for code_only just in case (legacy robustness)
+        self._pending_code_only = getattr(self, "code_only_switch", None) and self.code_only_switch.value
+
         try:
             import ui as _ui
             in_bg = getattr(_ui, "in_background", None)
@@ -2158,8 +2163,9 @@ class MergerUI(object):
         try:
             # Safety Check: Plan/Code Only Warning
             # Running in background thread, so console.alert is safe (blocking this thread, not UI).
-            is_plan = self.plan_only_switch.value
-            is_code = getattr(self, "code_only_switch", None) and self.code_only_switch.value
+            # Use snapshotted values from main thread
+            is_plan = getattr(self, "_pending_plan_only", False)
+            is_code = getattr(self, "_pending_code_only", False)
 
             if is_plan or is_code:
                 if is_plan:
