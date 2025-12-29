@@ -316,7 +316,7 @@ def create_job(request: JobRequest):
     state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
 
     existing = state.job_store.find_job_by_hash(content_hash)
-    if existing:
+    if existing and not request.force_new:
         # Check if we should reuse
         if existing.status in ("queued", "running", "canceling"):
              logger.info(f"Reusing existing active job {existing.id}")
