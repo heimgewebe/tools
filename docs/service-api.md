@@ -7,3 +7,4 @@ The server guarantees:
 - monotonic event ids starting at 1
 - resume from id + 1
 - final `event: end`
+- Last-Event-ID header overrides last_id query param.
