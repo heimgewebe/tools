@@ -2161,38 +2161,6 @@ class MergerUI(object):
 
     def _run_merge_safe(self) -> None:
         try:
-            # Safety Check: Plan/Code Only Warning
-            # Running in background thread, so console.alert is safe (blocking this thread, not UI).
-            # Use snapshotted values from main thread
-            is_plan = getattr(self, "_pending_plan_only", False)
-            is_code = getattr(self, "_pending_code_only", False)
-
-            if is_plan or is_code:
-                if is_plan:
-                    mode_str = "PLAN-ONLY"
-                    msg = "⚠️ PLAN-ONLY MODE\n\nMeta + Plan.\nKein Content.\nKein Manifest.\nKeine Structure-Blöcke."
-                else:
-                    mode_str = "CODE-ONLY"
-                    msg = "⚠️ CODE-ONLY MODE\n\nCode-Auswahl ohne Voll-Text anderer Dateien (je nach Implementierung)."
-
-                # Modal alert blocking flow until confirmed
-                if console:
-                    try:
-                        # console.alert throws exception if canceled (on some versions) or returns numeric index
-                        # Title, Message, Button1 (default), Button2 (cancel), Button3
-                        # We want "Confirm" to be explicit (Button 1).
-                        idx = console.alert(f"{mode_str} Warning", msg, "Verstanden (Starten)", "Abbrechen")
-                        # Check return value robustly (usually 1, but be strict)
-                        if idx != 1:
-                            return
-                    except Exception:
-                        # If console.alert fails (e.g. Cancelled via 'X' or Exception), assume Cancel
-                        return
-                elif ui:
-                    # ui.alert doesn't return value, it just shows OK. But we need Cancel.
-                    # If console is missing, we proceed but log warning.
-                    print(f"[repoLens] {mode_str} warning shown (console missing, auto-confirming).")
-
             # Aktuellen Zustand merken
             self.save_last_state()
             self._run_merge_inner()
@@ -2231,12 +2199,18 @@ class MergerUI(object):
         max_bytes = self._parse_max_bytes()
         split_size = self._parse_split_size()
 
-        # Plan-only wird aus dem Switch gelesen; falls Switch nicht existiert,
-        # bleibt der Modus aus.
-        plan_switch = getattr(self, "plan_only_switch", None)
-        plan_only = bool(plan_switch and plan_switch.value)
-        code_switch = getattr(self, "code_only_switch", None)
-        code_only = bool(code_switch and code_switch.value)
+        # Use snapshotted values from main thread if available (thread-safe), else fallback
+        if hasattr(self, "_pending_plan_only"):
+            plan_only = self._pending_plan_only
+        else:
+            plan_switch = getattr(self, "plan_only_switch", None)
+            plan_only = bool(plan_switch and plan_switch.value)
+
+        if hasattr(self, "_pending_code_only"):
+            code_only = self._pending_code_only
+        else:
+            code_switch = getattr(self, "code_only_switch", None)
+            code_only = bool(code_switch and code_switch.value)
 
         # Mutual exclusion: plan_only wins to avoid ambiguous semantics.
         if plan_only and code_only:
