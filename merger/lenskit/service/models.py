@@ -110,12 +110,13 @@ class Job(BaseModel):
     request: JobRequest
     hub_resolved: Optional[str] = None
     content_hash: Optional[str] = None
+    job_key: Optional[str] = None
     logs: List[str] = []
     artifact_ids: List[str] = []
     error: Optional[str] = None
 
     @classmethod
-    def create(cls, request: JobRequest, content_hash: Optional[str] = None) -> "Job":
+    def create(cls, request: JobRequest, content_hash: Optional[str] = None, job_key: Optional[str] = None) -> "Job":
         now = datetime.utcnow().isoformat()
         return cls(
             id=str(uuid.uuid4()),
@@ -123,6 +124,7 @@ class Job(BaseModel):
             created_at=now,
             request=request,
             content_hash=content_hash,
+            job_key=job_key,
             logs=[],
             artifact_ids=[]
         )

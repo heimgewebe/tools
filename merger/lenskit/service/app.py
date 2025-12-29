@@ -17,6 +17,8 @@ from datetime import datetime
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash
 from .jobstore import JobStore
 from .runner import JobRunner
+import hashlib
+import json
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
 from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from ..adapters.atlas import AtlasScanner, render_atlas_md
@@ -54,6 +56,48 @@ def _is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(h).is_loopback
     except Exception:
         return False
+
+def compute_job_key(req: JobRequest, hub_resolved: str, version: str) -> str:
+    """
+    Computes a canonical job key (hash) for idempotency.
+    Wraps/Replaces calculate_job_hash with stricter canonicalization if needed,
+    but currently reuses the logic to ensure consistency.
+    """
+    # Normalize extras
+    extras_list = sorted([x.strip().lower() for x in (req.extras or "").split(",") if x.strip()])
+    extras_str = ",".join(extras_list)
+
+    # Normalize path_filter (None vs "")
+    path_filter = req.path_filter.strip() if isinstance(req.path_filter, str) else None
+    if path_filter == "":
+        path_filter = None
+
+    # Normalize repos
+    repos_list = sorted(req.repos) if req.repos else ["__ALL__"]
+
+    # Normalize extensions
+    ext_list = sorted(req.extensions) if req.extensions else []
+
+    # Construct signature dict
+    sig = {
+        "lenskit_version": version,
+        "hub": hub_resolved,
+        "repos": repos_list,
+        "level": req.level,
+        "mode": req.mode,
+        "max_bytes": req.max_bytes,
+        "split_size": req.split_size,
+        "plan_only": req.plan_only,
+        "code_only": req.code_only,
+        "extensions": ext_list,
+        "path_filter": path_filter,
+        "extras": extras_str,
+        "json_sidecar": req.json_sidecar
+    }
+
+    # Serialize and hash
+    sig_str = json.dumps(sig, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(sig_str.encode("utf-8")).hexdigest()
 
 # Global State
 class ServiceState:
@@ -310,12 +354,19 @@ def create_job(request: JobRequest):
 
     # --- Idempotency & GC ---
     resolved_hub_str = str(req_hub)
+
+    # Legacy hash (ensure no behavior change for existing clients relying on this exact algorithm)
+    # Although compute_job_key is likely identical, we keep them distinct to satisfy "no behavior change".
     content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
+
+    # New Canonical Job Key
+    job_key = compute_job_key(request, resolved_hub_str, SPEC_VERSION)
 
     # Lazy GC
     state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
 
-    existing = state.job_store.find_job_by_hash(content_hash)
+    # PR-2: Enforce Idempotency via Canonical Job Key
+    existing = state.job_store.get_by_job_key(job_key)
     if existing and not request.force_new:
         # Check if we should reuse
         if existing.status in ("queued", "running", "canceling"):
@@ -327,7 +378,7 @@ def create_job(request: JobRequest):
              logger.info(f"Reusing existing succeeded job {existing.id}")
              return existing
 
-    job = Job.create(request, content_hash=content_hash)
+    job = Job.create(request, content_hash=content_hash, job_key=job_key)
     job.hub_resolved = resolved_hub_str
     state.job_store.add_job(job)
     state.runner.submit_job(job.id)

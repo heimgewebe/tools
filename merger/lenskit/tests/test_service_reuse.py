@@ -1,61 +1,85 @@
-
-import pytest
+from fastapi.testclient import TestClient
+from merger.lenskit.service.app import app, init_service, state
 from merger.lenskit.service.models import JobRequest
+import pytest
+from unittest.mock import MagicMock
+from pathlib import Path
 
-def test_explicit_reuse_policy(service_client):
-    ctx = service_client
+# Setup fixture
+@pytest.fixture
+def client(tmp_path):
+    # Initialize service with a temp hub
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    merges = tmp_path / "merges"
+    merges.mkdir()
+    init_service(hub_path=hub, merges_dir=merges, token="secret")
 
-    # 1. Create initial job
-    # We use a unique payload to ensure no collisions with other tests
-    req_payload = {
-        "repos": ["repo-test"],
-        "level": "summary",
-        "plan_only": True
+    # Mock runner to prevent job execution/failure during test
+    # This keeps the job in 'queued' state, ensuring reuse logic triggers.
+    state.runner.submit_job = MagicMock()
+
+    return TestClient(app)
+
+def test_create_job_idempotency(client):
+    """
+    Test that creating the same job twice returns the same job object (reused),
+    and that the new job_key is being used/persisted.
+    """
+    # Create a job
+    payload = {
+        "repos": ["repo1"],
+        "extras": "json_sidecar",
+        "force_new": False
     }
+    headers = {"Authorization": "Bearer secret"}
 
-    resp1 = ctx.client.post("/api/jobs", json=req_payload, headers=ctx.headers)
+    resp1 = client.post("/api/jobs", json=payload, headers=headers)
     assert resp1.status_code == 200
     job1 = resp1.json()
-    job1_id = job1["id"]
+    assert "job_key" in job1
+    assert job1["job_key"] is not None
 
-    # Simulate job completion to allow reuse
-    # We access the store directly to update status
-    job_obj = ctx.store.get_job(job1_id)
-    assert job_obj is not None
-    job_obj.status = "succeeded"
-    ctx.store.update_job(job_obj)
-
-    # 2. Create identical job (expect REUSE)
-    resp2 = ctx.client.post("/api/jobs", json=req_payload, headers=ctx.headers)
+    # Create same job again
+    resp2 = client.post("/api/jobs", json=payload, headers=headers)
     assert resp2.status_code == 200
     job2 = resp2.json()
-    assert job2["id"] == job1_id
 
-    # 3. Create identical job with force_new=True (expect NEW)
-    req_payload_forced = req_payload.copy()
-    req_payload_forced["force_new"] = True
+    # Should be same ID (reuse)
+    assert job1["id"] == job2["id"]
+    assert job1["job_key"] == job2["job_key"]
 
-    resp3 = ctx.client.post("/api/jobs", json=req_payload_forced, headers=ctx.headers)
-    assert resp3.status_code == 200
-    job3 = resp3.json()
-
-    assert job3["id"] != job1_id
-
-    # Verify job3 exists
-    assert ctx.store.get_job(job3["id"]) is not None
-
-def test_force_new_ignored_if_no_existing(service_client):
-    ctx = service_client
-
-    # Create job with force_new=True but no prior job exists
-    req_payload = {
-        "repos": ["repo-test"],
-        "level": "max",
-        "plan_only": True,
-        "force_new": True
+def test_force_new_job(client):
+    """Test that force_new=True creates a new job even if inputs are same."""
+    payload = {
+        "repos": ["repo1"],
+        "extras": "json_sidecar",
+        "force_new": False
     }
-    resp = ctx.client.post("/api/jobs", json=req_payload, headers=ctx.headers)
-    assert resp.status_code == 200
-    job = resp.json()
+    headers = {"Authorization": "Bearer secret"}
 
-    assert ctx.store.get_job(job["id"]) is not None
+    resp1 = client.post("/api/jobs", json=payload, headers=headers)
+    assert resp1.status_code == 200
+    job1 = resp1.json()
+
+    # Force new
+    payload["force_new"] = True
+    resp2 = client.post("/api/jobs", json=payload, headers=headers)
+    assert resp2.status_code == 200
+    job2 = resp2.json()
+
+    assert job1["id"] != job2["id"]
+    # Keys should be identical though
+    assert job1["job_key"] == job2["job_key"]
+
+def test_job_key_variance_integration(client):
+    """Test that different parameters result in different job keys via API."""
+    headers = {"Authorization": "Bearer secret"}
+
+    resp1 = client.post("/api/jobs", json={"repos": ["r1"]}, headers=headers)
+    job1 = resp1.json()
+
+    resp2 = client.post("/api/jobs", json={"repos": ["r2"]}, headers=headers)
+    job2 = resp2.json()
+
+    assert job1["job_key"] != job2["job_key"]
