@@ -66,6 +66,7 @@ def _parse_extras_csv(extras_csv: str) -> ExtrasConfig:
     items = [x.strip().lower() for x in (extras_csv or "").split(",") if x.strip()]
     for item in items:
         if item == "ai_heatmap":
+            print("[Warning] Deprecated: 'ai_heatmap' is now 'heatmap'. Please update your config.", file=sys.stderr)
             item = "heatmap"
         if hasattr(config, item):
             setattr(config, item, True)
