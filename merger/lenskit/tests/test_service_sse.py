@@ -91,3 +91,72 @@ def test_sse_contract(service_client, monkeypatch):
         assert "id: 1" not in decoded
         assert "id: 2" not in decoded
         assert "id: 3" in decoded
+
+def test_sse_edge_cases(service_client, monkeypatch):
+    """
+    Validates explicit edge-case handling for SSE.
+    """
+    ctx = service_client
+    job_id = "test-job-sse-edge"
+    req = JobRequest(repos=["repo-test"])
+
+    # 3 lines of logs
+    job = Job(
+        id=job_id,
+        status="succeeded",
+        created_at="2024-01-01T00:00:00+00:00",
+        request=req,
+        hub_resolved=str(ctx.hub_path),
+        logs=["line1", "line2", "line3"]
+    )
+
+    def fake_get_job(jid):
+        if jid == job_id:
+            return job
+        return None
+
+    def fake_read_log_lines(jid):
+        if jid == job_id:
+            return job.logs
+        return []
+
+    monkeypatch.setattr(ctx.store, "get_job", fake_get_job)
+    monkeypatch.setattr(ctx.store, "read_log_lines", fake_read_log_lines)
+
+    url = f"/api/jobs/{job_id}/logs"
+
+    # EDGE CASE 1: Last-Event-ID = garbage -> HTTP 400
+    bad_headers = ctx.headers.copy()
+    bad_headers["Last-Event-ID"] = "garbage-value"
+
+    # Note: Using stream=True but checking status_code before iterating
+    response = ctx.client.get(url, headers=bad_headers)
+    assert response.status_code == 400
+    assert "Invalid Last-Event-ID" in response.text
+
+    # EDGE CASE 2: Last-Event-ID > len(logs) -> event: end (no logs)
+    headers_future = ctx.headers.copy()
+    headers_future["Last-Event-ID"] = "100"
+
+    with ctx.client.stream("GET", url, headers=headers_future) as response:
+        lines = list(response.iter_lines())
+        decoded = [l for l in lines if l]
+
+        # No log data should be emitted
+        assert not any("data: line" in l for l in decoded)
+        # Should finish gracefully
+        assert "event: end" in decoded
+
+    # EDGE CASE 3: Reconnect after end -> event: end (no logs)
+    # If we have 3 logs, requesting ID 3 means "I have 3, give me next".
+    # Since there is no next and job is done, it should send end.
+    headers_done = ctx.headers.copy()
+    headers_done["Last-Event-ID"] = "3"
+
+    with ctx.client.stream("GET", url, headers=headers_done) as response:
+        lines = list(response.iter_lines())
+        decoded = [l for l in lines if l]
+
+        # Should not resend line 3
+        assert not any("data: line" in l for l in decoded)
+        assert "event: end" in decoded
