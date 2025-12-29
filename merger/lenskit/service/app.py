@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 import os
@@ -13,7 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash
 from .jobstore import JobStore
 from .runner import JobRunner
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
@@ -33,6 +34,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="rLens", version="1.0.0")
+
+# GC Configuration
+GC_MAX_JOBS = int(os.getenv("RLENS_GC_MAX_JOBS", "100"))
+GC_MAX_AGE_HOURS = int(os.getenv("RLENS_GC_MAX_AGE_HOURS", "24"))
+# SSE polling (seconds)
+SSE_POLL_SEC = float(os.getenv("RLENS_SSE_POLL_SEC", "0.25"))
 
 # Security: Root Jail for File System Browsing
 # Set to system root to allow full access, but preventing traversal above it (which is impossible anyway).
@@ -301,8 +308,27 @@ def create_job(request: JobRequest):
     if request.repos:
         request.repos = [validate_repo_name(r) for r in request.repos]
 
-    job = Job.create(request)
-    job.hub_resolved = str(req_hub)
+    # --- Idempotency & GC ---
+    resolved_hub_str = str(req_hub)
+    content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
+
+    # Lazy GC
+    state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
+
+    existing = state.job_store.find_job_by_hash(content_hash)
+    if existing:
+        # Check if we should reuse
+        if existing.status in ("queued", "running", "canceling"):
+             logger.info(f"Reusing existing active job {existing.id}")
+             return existing
+
+        # Policy: Reuse succeeded jobs (server-side default: yes)
+        if existing.status == "succeeded":
+             logger.info(f"Reusing existing succeeded job {existing.id}")
+             return existing
+
+    job = Job.create(request, content_hash=content_hash)
+    job.hub_resolved = resolved_hub_str
     state.job_store.add_job(job)
     state.runner.submit_job(job.id)
     return job
@@ -326,46 +352,68 @@ def cancel_job(job_id: str):
     job = state.job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status in ["succeeded", "failed", "canceled"]:
+        return {"status": job.status, "message": "Job already finished"}
+
     if job.status in ["queued", "running"]:
-        job.status = "canceled"
+        job.status = "canceling"
         state.job_store.update_job(job)
-    return {"status": "canceled"}
+    return {"status": job.status}
 
 @app.get("/api/jobs/{job_id}/logs", dependencies=[Depends(verify_token)])
-def stream_logs(job_id: str):
+async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Query(None)):
     # SSE Stream
     job = state.job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    # Determine start index
+    # Prioritize Last-Event-ID header if present
+    start_idx = 0
+    if request.headers.get("Last-Event-ID"):
+        try:
+            start_idx = int(request.headers.get("Last-Event-ID"))
+        except ValueError:
+            pass
+    elif last_id is not None:
+        start_idx = last_id
+
     async def log_generator():
-        last_idx = 0
+        last_idx = start_idx
         while True:
-            # Read logs from file
-            # Optimized to read full file then slice. In production, seek() would be better.
-            logs = state.job_store.read_log_lines(job_id)
+            # Stop work if client disconnected (prevents zombie generators)
+            try:
+                if await request.is_disconnected():
+                    break
+            except Exception:
+                pass
+
+            # Read logs from file (async safe)
+            logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
 
             if len(logs) > last_idx:
-                for line in logs[last_idx:]:
-                    yield f"data: {line}\n\n"
+                for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
+                    yield f"id: {i}\ndata: {line}\n\n"
                 last_idx = len(logs)
 
             # Check status for completion
-            current_job = state.job_store.get_job(job_id)
+            current_job = await run_in_threadpool(state.job_store.get_job, job_id)
             if not current_job:
                 break
 
             if current_job.status in ["succeeded", "failed", "canceled"]:
                 # Ensure we sent everything
-                logs = state.job_store.read_log_lines(job_id)
+                logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
                 if len(logs) > last_idx:
-                    for line in logs[last_idx:]:
-                        yield f"data: {line}\n\n"
+                    for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
+                        yield f"id: {i}\ndata: {line}\n\n"
 
                 yield "event: end\ndata: end\n\n"
                 break
 
-            await asyncio.sleep(0.5)
+            # Throttle polling (avoid busy-loop CPU burn)
+            await asyncio.sleep(SSE_POLL_SEC)
 
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
