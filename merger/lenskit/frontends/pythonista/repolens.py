@@ -2142,35 +2142,10 @@ class MergerUI(object):
         UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
         sonst wirkt Pythonista "eingefroren" – besonders bei Multi-Repo.
         """
-        # Safety Check: Plan/Code Only Warning
-        is_plan = self.plan_only_switch.value
-        is_code = getattr(self, "code_only_switch", None) and self.code_only_switch.value
-
-        if is_plan or is_code:
-            if is_plan:
-                mode_str = "PLAN-ONLY"
-                msg = "⚠️ PLAN-ONLY MODE\n\nMeta + Plan.\nKein Content.\nKein Manifest.\nKeine Structure-Blöcke."
-            else:
-                mode_str = "CODE-ONLY"
-                msg = "⚠️ CODE-ONLY MODE\n\nCode-Auswahl ohne Voll-Text anderer Dateien (je nach Implementierung)."
-
-            # Modal alert blocking flow until confirmed
-            if console:
-                try:
-                    # console.alert throws exception if canceled (on some versions) or returns numeric index
-                    # Title, Message, Button1 (default), Button2 (cancel), Button3
-                    # We want "Confirm" to be explicit (Button 1).
-                    idx = console.alert(f"{mode_str} Warning", msg, "Verstanden (Starten)", "Abbrechen")
-                    # Check return value robustly (usually 1, but be strict)
-                    if idx != 1:
-                        return
-                except Exception:
-                    # If console.alert fails (e.g. Cancelled via 'X' or Exception), assume Cancel
-                    return
-            elif ui:
-                # ui.alert doesn't return value, it just shows OK. But we need Cancel.
-                # If console is missing, we proceed but log warning.
-                print(f"[repoLens] {mode_str} warning shown (console missing, auto-confirming).")
+        # Snapshot UI state on main thread to avoid thread-safety issues in background
+        self._pending_plan_only = self.plan_only_switch.value
+        # Use getattr for code_only just in case (legacy robustness)
+        self._pending_code_only = getattr(self, "code_only_switch", None) and self.code_only_switch.value
 
         try:
             import ui as _ui
@@ -2186,6 +2161,38 @@ class MergerUI(object):
 
     def _run_merge_safe(self) -> None:
         try:
+            # Safety Check: Plan/Code Only Warning
+            # Running in background thread, so console.alert is safe (blocking this thread, not UI).
+            # Use snapshotted values from main thread
+            is_plan = getattr(self, "_pending_plan_only", False)
+            is_code = getattr(self, "_pending_code_only", False)
+
+            if is_plan or is_code:
+                if is_plan:
+                    mode_str = "PLAN-ONLY"
+                    msg = "⚠️ PLAN-ONLY MODE\n\nMeta + Plan.\nKein Content.\nKein Manifest.\nKeine Structure-Blöcke."
+                else:
+                    mode_str = "CODE-ONLY"
+                    msg = "⚠️ CODE-ONLY MODE\n\nCode-Auswahl ohne Voll-Text anderer Dateien (je nach Implementierung)."
+
+                # Modal alert blocking flow until confirmed
+                if console:
+                    try:
+                        # console.alert throws exception if canceled (on some versions) or returns numeric index
+                        # Title, Message, Button1 (default), Button2 (cancel), Button3
+                        # We want "Confirm" to be explicit (Button 1).
+                        idx = console.alert(f"{mode_str} Warning", msg, "Verstanden (Starten)", "Abbrechen")
+                        # Check return value robustly (usually 1, but be strict)
+                        if idx != 1:
+                            return
+                    except Exception:
+                        # If console.alert fails (e.g. Cancelled via 'X' or Exception), assume Cancel
+                        return
+                elif ui:
+                    # ui.alert doesn't return value, it just shows OK. But we need Cancel.
+                    # If console is missing, we proceed but log warning.
+                    print(f"[repoLens] {mode_str} warning shown (console missing, auto-confirming).")
+
             # Aktuellen Zustand merken
             self.save_last_state()
             self._run_merge_inner()
