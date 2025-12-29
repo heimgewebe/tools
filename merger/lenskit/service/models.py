@@ -63,6 +63,7 @@ class JobRequest(BaseModel):
     path_filter: Optional[str] = None
     extras: Optional[str] = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
     json_sidecar: bool = True  # Default true for service
+    force_new: bool = False
 
 class AtlasRequest(BaseModel):
     # Canonical: token from FS picker (opaque, HMAC-signed by server).
