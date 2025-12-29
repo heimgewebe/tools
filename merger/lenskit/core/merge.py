@@ -3563,6 +3563,10 @@ def iter_report_blocks(
     # However, legacy "Lean hierarchy" used # Content.
     # We adopt ## 📄 Content for strict compliance and shift sub-levels.
 
+    # Fix: Agent noise reduction (v2.4 Patch D)
+    # Insert strict start-of-content marker before the content header.
+    yield "<!-- START_OF_CONTENT -->\n"
+
     content_header: List[str] = ["## 📄 Content", ""]
     # Only list repos that actually have visible content blocks (full/truncated).
     # meta-only/omitted files don't generate file blocks, so their repo header might be skipped if *all* files are skipped.

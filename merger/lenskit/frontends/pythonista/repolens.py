@@ -12,7 +12,7 @@ Default-Config (Dec 2025)
 - split: ON via split-size default (25MB)
 - max-bytes: 0 (keine Kürzung einzelner Dateien)
 - extras default ON:
-  health, augment_sidecar, organism_index, fleet_panorama, json_sidecar, ai_heatmap
+  json_sidecar, augment_sidecar
 
 Rationale:
 - max-bytes auf Dateiebene ist semantisch riskant (halbe Datei = halbe Wahrheit).
@@ -33,8 +33,8 @@ DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
-# Default: augment_sidecar is auto-detected, no global default ON. delta_reports only enabled via Preset/CLI for safety.
-DEFAULT_EXTRAS = "health,organism_index,json_sidecar,fleet_panorama,augment_sidecar"
+# Default: Minimal (Agent-fokussiert). Nur Sidecars.
+DEFAULT_EXTRAS = "json_sidecar,augment_sidecar"
 
 # Whitelist of known extras keys to prevent accidental resets of unknown flags
 KNOWN_EXTRAS_KEYS = [
@@ -43,17 +43,29 @@ KNOWN_EXTRAS_KEYS = [
 ]
 
 PRESETS = {
+    "Minimal (Agent)": {
+        "desc": "Minimaler Rauschpegel. Nur Content + Sidecars.",
+        "plan_only": False,
+        "code_only": False,
+        "extras": ["json_sidecar", "augment_sidecar"]
+    },
+    "Diagnose (Reich)": {
+        "desc": "Health + Organism + Panorama + Sidecars + Heatmap.",
+        "plan_only": False,
+        "code_only": False,
+        "extras": ["health", "organism_index", "fleet_panorama", "json_sidecar", "augment_sidecar", "heatmap"]
+    },
+    "Review": {
+        "desc": "Content + Delta + Health + Organism + JSON.",
+        "plan_only": False,
+        "code_only": False,
+        "extras": ["health", "organism_index", "json_sidecar", "delta_reports", "augment_sidecar"]
+    },
     "Schnell-Index (Plan-Only)": {
         "desc": "Nur Meta + Plan. Kein Content. Keine Struktur.",
         "plan_only": True,
         "code_only": False,
         "extras": ["health", "organism_index", "json_sidecar"]
-    },
-    "Review (Standard)": {
-        "desc": "Content + Delta + Health + Organism + JSON.",
-        "plan_only": False,
-        "code_only": False,
-        "extras": ["health", "organism_index", "json_sidecar", "delta_reports", "augment_sidecar"]
     },
     "Archiv (Full)": {
         "desc": "Voller Content + Health + JSON. (No Delta)",

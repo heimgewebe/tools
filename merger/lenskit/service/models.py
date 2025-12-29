@@ -61,7 +61,9 @@ class JobRequest(BaseModel):
     code_only: bool = False
     extensions: Optional[List[str]] = None
     path_filter: Optional[str] = None
-    extras: Optional[str] = "health,augment_sidecar,organism_index,fleet_panorama,json_sidecar,heatmap"
+    # Default: Minimal (Agent-fokussiert). Nur Sidecars.
+    # Aligning with repolens.py logic to prevent drift.
+    extras: Optional[str] = "json_sidecar,augment_sidecar"
     json_sidecar: bool = True  # Default true for service
     force_new: bool = False
 
