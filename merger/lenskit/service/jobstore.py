@@ -79,9 +79,41 @@ class JobStore:
     def read_log_lines(self, job_id: str) -> List[str]:
         with self._lock:
             p = self.logs_dir / f"{job_id}.log"
-            if not p.exists():
+            try:
+                if not p.exists():
+                    return []
+                return p.read_text(encoding="utf-8", errors="replace").splitlines()
+            except FileNotFoundError:
                 return []
-            return p.read_text(encoding="utf-8", errors="replace").splitlines()
+
+    def remove_job(self, job_id: str):
+        with self._lock:
+            self._remove_job_internal(job_id)
+            self._save_jobs()
+            self._save_artifacts()
+
+    def _remove_job_internal(self, job_id: str):
+        # Internal helper, expects lock
+        job = self._jobs_cache.get(job_id)
+        if not job:
+            return
+
+        # Remove artifacts from cache (metadata consistency)
+        for art_id in job.artifact_ids:
+            if art_id in self._artifacts_cache:
+                del self._artifacts_cache[art_id]
+
+        # Remove logs
+        log_p = self.logs_dir / f"{job_id}.log"
+        try:
+            if log_p.exists():
+                log_p.unlink()
+        except Exception:
+            pass
+
+        # Remove job
+        if job_id in self._jobs_cache:
+            del self._jobs_cache[job_id]
 
     def get_job(self, job_id: str) -> Optional[Job]:
         with self._lock:
@@ -141,18 +173,11 @@ class JobStore:
                 return
 
             for job_id in to_remove:
-                if job_id in self._jobs_cache:
-                    del self._jobs_cache[job_id]
+                self._remove_job_internal(job_id)
 
-                # remove log file
-                log_p = self.logs_dir / f"{job_id}.log"
-                if log_p.exists():
-                    try:
-                        log_p.unlink()
-                    except Exception:
-                        pass
-
-            self._save_jobs()
+            if to_remove:
+                self._save_jobs()
+                self._save_artifacts()
 
     def add_artifact(self, artifact: Artifact):
         with self._lock:

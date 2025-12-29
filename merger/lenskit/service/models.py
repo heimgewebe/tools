@@ -34,10 +34,10 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         "extensions": ext_list,
         "path_filter": req.path_filter,
         "extras": extras_str,
-        "json_sidecar": req.json_sidecar,
-        # Merges dir is effectively an output config, usually doesn't change logical content,
-        # but if two jobs write to different dirs, they are different jobs.
-        "merges_dir": req.merges_dir
+        "json_sidecar": req.json_sidecar
+        # Merges dir excluded from content hash:
+        # Same content, different output path = same logical job.
+        # Client must check returned artifact for actual path.
     }
 
     # Serialize and hash

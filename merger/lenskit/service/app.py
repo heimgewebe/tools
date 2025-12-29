@@ -345,10 +345,14 @@ def cancel_job(job_id: str):
     job = state.job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.status in ["succeeded", "failed", "canceled"]:
+        return {"status": job.status, "message": "Job already finished"}
+
     if job.status in ["queued", "running"]:
         job.status = "canceling"
         state.job_store.update_job(job)
-    return {"status": "canceling"}
+    return {"status": job.status}
 
 @app.get("/api/jobs/{job_id}/logs", dependencies=[Depends(verify_token)])
 async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Query(None)):
