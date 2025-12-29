@@ -2145,7 +2145,7 @@ class MergerUI(object):
         # Snapshot UI state on main thread to avoid thread-safety issues in background
         self._pending_plan_only = self.plan_only_switch.value
         # Use getattr for code_only just in case (legacy robustness)
-        self._pending_code_only = getattr(self, "code_only_switch", None) and self.code_only_switch.value
+        self._pending_code_only = bool(getattr(self, "code_only_switch", None) and self.code_only_switch.value)
 
         try:
             import ui as _ui
@@ -2177,6 +2177,12 @@ class MergerUI(object):
                 console.alert("repoLens", msg, "OK", hide_cancel_button=True)
             else:
                 print(msg, file=sys.stderr)
+        finally:
+            # Cleanup snapshotted state to prevent stale values in future runs
+            if hasattr(self, "_pending_plan_only"):
+                del self._pending_plan_only
+            if hasattr(self, "_pending_code_only"):
+                del self._pending_code_only
 
     def _run_merge_inner(self) -> None:
         selected = self._get_selected_repos()
