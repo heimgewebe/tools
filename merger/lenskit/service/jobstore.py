@@ -6,9 +6,9 @@ from typing import List, Optional, Dict
 from .models import Job, Artifact
 
 try:
-    from ..core.merge import MERGES_DIR_NAME
+    from ..core.merge import MERGES_DIR_NAME, get_merges_dir
 except ImportError:
-    from merger.lenskit.core.merge import MERGES_DIR_NAME
+    from merger.lenskit.core.merge import MERGES_DIR_NAME, get_merges_dir
 
 class JobStore:
     def __init__(self, hub_path: Path):
@@ -98,9 +98,26 @@ class JobStore:
         if not job:
             return
 
-        # Remove artifacts from cache (metadata consistency)
+        # Remove artifacts and physical files
         for art_id in job.artifact_ids:
-            if art_id in self._artifacts_cache:
+            art = self._artifacts_cache.get(art_id)
+            if art:
+                # Attempt physical deletion (best effort)
+                try:
+                    merges_dir = None
+                    if art.params.merges_dir:
+                        merges_dir = Path(art.params.merges_dir)
+                    else:
+                        merges_dir = get_merges_dir(Path(art.hub))
+
+                    if merges_dir.exists():
+                        for fname in art.paths.values():
+                            p = merges_dir / fname
+                            if p.exists():
+                                p.unlink()
+                except Exception:
+                    pass
+
                 del self._artifacts_cache[art_id]
 
         # Remove logs
