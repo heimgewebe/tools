@@ -6,14 +6,9 @@ import uuid
 from pathlib import Path
 from fastapi.testclient import TestClient
 
-# Adjust imports based on your project structure
-try:
-    from merger.lenskit.service.app import app, init_service, state
-    from merger.lenskit.service.models import JobRequest
-except ImportError:
-    # Fallback if running from a different root
-    from lenskit.service.app import app, init_service, state
-    from lenskit.service.models import JobRequest
+# Canonical imports only - strict environment check
+from merger.lenskit.service.app import app, init_service, state
+from merger.lenskit.service.models import JobRequest
 
 @pytest.fixture
 def service_client():
