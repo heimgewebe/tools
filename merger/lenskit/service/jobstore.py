@@ -2,6 +2,7 @@ import json
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
+import os
 from typing import List, Optional, Dict
 from .models import Job, Artifact
 
@@ -98,6 +99,29 @@ class JobStore:
         if not job:
             return
 
+        def _safe_unlink(base: Path, rel: str) -> None:
+            """
+            Best-effort deletion but never outside base directory.
+            Reject absolute paths and traversal.
+            """
+            if not rel:
+                return
+            # Disallow absolute paths
+            if os.path.isabs(rel):
+                return
+            try:
+                target = (base / rel).resolve()
+                base_r = base.resolve()
+                # Ensure target is within base
+                target.relative_to(base_r)
+            except Exception:
+                return
+            try:
+                if target.exists():
+                    target.unlink()
+            except Exception:
+                pass
+
         # Remove artifacts and physical files
         for art_id in job.artifact_ids:
             art = self._artifacts_cache.get(art_id)
@@ -112,9 +136,7 @@ class JobStore:
 
                     if merges_dir.exists():
                         for fname in art.paths.values():
-                            p = merges_dir / fname
-                            if p.exists():
-                                p.unlink()
+                            _safe_unlink(merges_dir, fname)
                 except Exception:
                     pass
 

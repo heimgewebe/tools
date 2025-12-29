@@ -14,6 +14,11 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
     extras_list = sorted([x.strip().lower() for x in (req.extras or "").split(",") if x.strip()])
     extras_str = ",".join(extras_list)
 
+    # Normalize path_filter (None vs "")
+    path_filter = req.path_filter.strip() if isinstance(req.path_filter, str) else None
+    if path_filter == "":
+        path_filter = None
+
     # Normalize repos
     repos_list = sorted(req.repos) if req.repos else ["__ALL__"]
 
@@ -32,7 +37,7 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         "plan_only": req.plan_only,
         "code_only": req.code_only,
         "extensions": ext_list,
-        "path_filter": req.path_filter,
+        "path_filter": path_filter,
         "extras": extras_str,
         "json_sidecar": req.json_sidecar
         # Merges dir excluded from content hash:
@@ -41,7 +46,7 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
     }
 
     # Serialize and hash
-    sig_str = json.dumps(sig, sort_keys=True)
+    sig_str = json.dumps(sig, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(sig_str.encode("utf-8")).hexdigest()
 
 class JobRequest(BaseModel):

@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
+import os
 import tempfile
 import time
 from merger.lenskit.service.app import app, init_service, state
@@ -142,3 +143,33 @@ def test_gc_artifacts_physical(client_and_hub):
     assert state.job_store.get_artifact(art_id) is None
     # Verify physical file gone
     assert not fpath.exists(), "Physical file should be deleted"
+
+def test_gc_artifacts_physical_safe_join(client_and_hub):
+    # Ensure GC cannot delete outside merges dir via traversal
+    client, hub_path = client_and_hub
+    headers = {"Authorization": "Bearer test-token"}
+    req = {"hub": hub_path, "repos": ["repo_safe"]}
+    resp = client.post("/api/jobs", json=req, headers=headers)
+    job_id = resp.json()["id"]
+
+    hub_p = Path(hub_path)
+    merges_dir = hub_p / "merges"
+    merges_dir.mkdir(parents=True, exist_ok=True)
+    outside = hub_p / "DO_NOT_DELETE.txt"
+    outside.write_text("nope")
+
+    art_id = str(uuid.uuid4())
+    req_obj = JobRequest(**req)
+    art = Artifact(
+        id=art_id, job_id=job_id, hub=hub_path, repos=["repo_safe"],
+        created_at=datetime.utcnow().isoformat(),
+        paths={"md": "../DO_NOT_DELETE.txt"},
+        params=req_obj
+    )
+    state.job_store.add_artifact(art)
+    job = state.job_store.get_job(job_id)
+    job.artifact_ids.append(art_id)
+    state.job_store.update_job(job)
+
+    state.job_store.remove_job(job_id)
+    assert outside.exists(), "Traversal path must not be deleted"

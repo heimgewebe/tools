@@ -38,6 +38,8 @@ app = FastAPI(title="rLens", version="1.0.0")
 # GC Configuration
 GC_MAX_JOBS = int(os.getenv("RLENS_GC_MAX_JOBS", "100"))
 GC_MAX_AGE_HOURS = int(os.getenv("RLENS_GC_MAX_AGE_HOURS", "24"))
+# SSE polling (seconds)
+SSE_POLL_SEC = float(os.getenv("RLENS_SSE_POLL_SEC", "0.25"))
 
 # Security: Root Jail for File System Browsing
 # Set to system root to allow full access, but preventing traversal above it (which is impossible anyway).
@@ -380,6 +382,13 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
     async def log_generator():
         last_idx = start_idx
         while True:
+            # Stop work if client disconnected (prevents zombie generators)
+            try:
+                if await request.is_disconnected():
+                    break
+            except Exception:
+                pass
+
             # Read logs from file (async safe)
             logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
 
@@ -403,7 +412,8 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
                 yield "event: end\ndata: end\n\n"
                 break
 
-            await asyncio.sleep(0.5)
+            # Throttle polling (avoid busy-loop CPU burn)
+            await asyncio.sleep(SSE_POLL_SEC)
 
     return StreamingResponse(log_generator(), media_type="text/event-stream")
 
