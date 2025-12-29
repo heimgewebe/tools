@@ -374,6 +374,8 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
     if request.headers.get("Last-Event-ID"):
         try:
             start_idx = int(request.headers.get("Last-Event-ID"))
+            if start_idx < 0:
+                raise ValueError("Negative ID")
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid Last-Event-ID")
     elif last_id is not None:

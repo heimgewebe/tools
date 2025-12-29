@@ -134,6 +134,14 @@ def test_sse_edge_cases(service_client, monkeypatch):
     assert response.status_code == 400
     assert "Invalid Last-Event-ID" in response.text
 
+    # EDGE CASE 1.5: Last-Event-ID = negative -> HTTP 400
+    neg_headers = ctx.headers.copy()
+    neg_headers["Last-Event-ID"] = "-1"
+
+    response = ctx.client.get(url, headers=neg_headers)
+    assert response.status_code == 400
+    assert "Invalid Last-Event-ID" in response.text
+
     # EDGE CASE 2: Last-Event-ID > len(logs) -> event: end (no logs)
     headers_future = ctx.headers.copy()
     headers_future["Last-Event-ID"] = "100"
