@@ -351,6 +351,7 @@ def _parse_extras_csv(extras_csv: str) -> List[str]:
     normalized = []
     for item in items:
         if item == "ai_heatmap":
+            _notify("Deprecated: 'ai_heatmap' is now 'heatmap'. Please update your config.", "info")
             item = "heatmap"
         normalized.append(item)
     return normalized

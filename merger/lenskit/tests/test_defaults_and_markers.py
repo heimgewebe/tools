@@ -1,5 +1,6 @@
 
 import unittest
+import tempfile
 from pathlib import Path
 from merger.lenskit.frontends.pythonista import repolens
 from merger.lenskit.service.models import JobRequest
@@ -34,55 +35,73 @@ class TestDefaultsAndMarkers(unittest.TestCase):
         self.assertEqual(service_defaults, frontend_defaults,
                          f"Service defaults {service_defaults} do not match frontend {frontend_defaults}")
 
-    def test_start_of_content_marker(self):
+    def test_start_of_content_marker_robust(self):
         """
         Verify that the generated report contains the <!-- START_OF_CONTENT --> marker
-        before the first file content.
+        before the first file content, using a real scan.
         """
-        # Setup dummy file info
-        fi = merge.FileInfo(
-            root_label="test_repo",
-            abs_path=Path("/tmp/test/foo.py"),
-            rel_path=Path("foo.py"),
-            size=100,
-            is_text=True,
-            md5="abc",
-            category="source",
-            tags=[],
-            ext=".py"
-        )
-        # Manually compute roles as the scanner would
-        fi.roles = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
 
-        # Generate blocks
-        iterator = merge.iter_report_blocks(
-            files=[fi],
-            level="max",
-            max_file_bytes=0,
-            sources=[Path("/tmp/test")],
-            plan_only=False,
-            code_only=False,
-            debug=False
-        )
+            # Create a dummy repo structure
+            repo_dir = tmp_path / "test_repo"
+            repo_dir.mkdir()
+            (repo_dir / "foo.py").write_text("print('hello')", encoding="utf-8")
 
-        report_content = "".join(iterator)
+            # Scan repo
+            scan_result = merge.scan_repo(repo_dir)
+            files = scan_result["files"]
 
-        self.assertIn("<!-- START_OF_CONTENT -->", report_content)
+            # Generate blocks (plan_only=False)
+            iterator = merge.iter_report_blocks(
+                files=files,
+                level="max",
+                max_file_bytes=0,
+                sources=[repo_dir],
+                plan_only=False,
+                code_only=False,
+                debug=False
+            )
 
-        # Ensure it appears before the first file ID
-        marker_pos = report_content.find("<!-- START_OF_CONTENT -->")
-        file_id_pos = report_content.find("<!-- file:id=")
+            report_content = "".join(iterator)
 
-        # Note: if plan_only=False, we expect content.
-        # But dummy file path /tmp/test/foo.py likely doesn't exist, so read_smart_content returns error msg.
-        # The file block is still generated.
+            # Check for marker
+            self.assertIn("<!-- START_OF_CONTENT -->", report_content)
 
-        self.assertNotEqual(marker_pos, -1, "Marker not found")
-        # In case file block is skipped due to error or other logic, check if we at least have marker.
-        # But we want to ensure it is BEFORE content.
+            # Ensure it appears before the Content Header
+            marker_pos = report_content.find("<!-- START_OF_CONTENT -->")
+            header_pos = report_content.find("## 📄 Content")
 
-        if file_id_pos != -1:
-             self.assertLess(marker_pos, file_id_pos, "Marker should appear before file content")
+            self.assertNotEqual(marker_pos, -1, "Marker not found")
+            self.assertNotEqual(header_pos, -1, "Content Header not found")
+            self.assertLess(marker_pos, header_pos, "Marker should appear before Content Header")
+
+    def test_start_of_content_marker_absent_in_plan_only(self):
+        """
+        Verify that the generated report DOES NOT contain the marker in plan-only mode.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            repo_dir = tmp_path / "test_repo"
+            repo_dir.mkdir()
+            (repo_dir / "foo.py").write_text("print('hello')", encoding="utf-8")
+
+            scan_result = merge.scan_repo(repo_dir)
+            files = scan_result["files"]
+
+            iterator = merge.iter_report_blocks(
+                files=files,
+                level="max",
+                max_file_bytes=0,
+                sources=[repo_dir],
+                plan_only=True,
+                code_only=False,
+                debug=False
+            )
+
+            report_content = "".join(iterator)
+
+            self.assertNotIn("<!-- START_OF_CONTENT -->", report_content)
 
 if __name__ == "__main__":
     unittest.main()

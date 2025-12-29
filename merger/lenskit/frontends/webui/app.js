@@ -25,10 +25,8 @@ const EXTRAS_OPTIONS = [
 
 // Default selected extras (based on existing logic/user preference)
 const DEFAULT_EXTRAS = [
-    'health',
     'augment_sidecar',
-    'json_sidecar',
-    'heatmap'
+    'json_sidecar'
 ];
 
 function getToken() {

@@ -3565,6 +3565,8 @@ def iter_report_blocks(
 
     # Fix: Agent noise reduction (v2.4 Patch D)
     # Insert strict start-of-content marker before the content header.
+    # Logic note: This block is reached only if plan_only is False (checked above).
+    # Thus, the marker correctly signals the start of the content section when it exists.
     yield "<!-- START_OF_CONTENT -->\n"
 
     content_header: List[str] = ["## 📄 Content", ""]
