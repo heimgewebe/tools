@@ -1,5 +1,5 @@
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uuid
 import hashlib
 import json
@@ -66,8 +66,8 @@ class Job(BaseModel):
     request: JobRequest
     hub_resolved: Optional[str] = None
     # content_hash is deprecated, aliased to job_key for backward compatibility
-    content_hash: Optional[str] = None
-    job_key: Optional[str] = None
+    content_hash: Optional[str] = Field(None, description="Deprecated. Aliased to job_key. Use job_key for identity.", deprecated=True)
+    job_key: Optional[str] = Field(None, description="Canonical deterministic job identifier.")
     logs: List[str] = []
     artifact_ids: List[str] = []
     error: Optional[str] = None

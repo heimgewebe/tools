@@ -1,6 +1,6 @@
 import unittest
 from merger.lenskit.service.models import JobRequest, Job
-from merger.lenskit.service.app import compute_job_key
+from merger.lenskit.service.identity import compute_job_key
 from merger.lenskit.core.merge import SPEC_VERSION
 
 class TestServiceReuse(unittest.TestCase):
