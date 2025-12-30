@@ -2176,11 +2176,31 @@ class MergerUI(object):
 
         traverse(root_node, 0)
 
-        # Initially select all? Or none?
-        # User requested: "Struktur + Heuristik ... Baum + sinnvolle Default-Selektion"
-        # Let's implement basic heuristic: Select All by default, user deselects noise.
+        # Initially select based on Recommended heuristic
+        # Start with None, then run heuristic
         for item in flat_items:
-            item["selected"] = True
+            item["selected"] = False
+
+        # Run heuristic logic (same as prescanRecommended)
+        def is_recommended(path_str):
+            path = path_str.lower()
+            # Critical
+            if "readme" in path or path.endswith(".ai-context.yml"):
+                return True
+            # Code
+            parts = path.split('/')
+            if "src" in parts or "contracts" in parts or "docs" in parts:
+                if "test" not in path:
+                     return True
+            return False
+
+        for item in flat_items:
+            if item["type"] == "file":
+                if is_recommended(item["path"]):
+                    item["selected"] = True
+
+        # Update directory selection state based on files (bottom-up propagation isn't strictly needed for flat list if we check children on render, but let's be consistent)
+        # Actually, for presentation we just check items.
 
         # Create Sheet
         sheet = ui.View()
@@ -2284,37 +2304,48 @@ class MergerUI(object):
         btn_merge.corner_radius = 6
 
         def do_merge(sender):
-            # Collect selected paths
-            # We filter for files only or pass directories?
-            # Core logic `scan_repo(include_paths=...)` handles explicit paths.
-            # If we pass a directory, it includes everything under it?
-            # My core implementation checks `startswith`.
-            # So passing a directory is efficient.
-            # But the user might have deselected a subdirectory.
-            # To be safe and precise, we collect all selected paths (files and dirs).
-            # Core logic: if path starts with ANY include_path, it's included.
-            # If we pass parent dir, everything is included.
-            # If we uncheck a child, we must NOT pass the parent dir.
+            # Path Compression
+            # If a dir is fully selected, pass dir. Else pass selected files.
 
-            # Optimization:
-            # If a dir is fully selected, pass dir.
-            # If partial, pass individual selected children.
+            # Helper to check directory completeness against FLAT items
+            # This is tricky without tree traversal.
+            # Let's rely on the tree structure we traversed earlier?
+            # 'root_node' is available in closure.
 
-            # For simplicity now: Pass ALL selected items (files).
-            # Dirs are just containers in this view.
-            # Actually, `scan_repo` checks `rel_path_str == ip or rel_path_str.startswith(ip + "/")`.
-            # So if we pass file paths, it works.
+            compressed_paths = []
 
-            # Fix: Only pass files. If we pass directories, they act as wildcards including deselected children.
-            selected_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
+            # Create a map for quick lookup of selection status by path
+            selection_map = {item["path"]: item["selected"] for item in flat_items}
 
-            # Inject into main UI flow?
-            # We can override `path_contains`? No, `include_paths` is separate.
-            # `repolens.py` doesn't expose `include_paths` in UI yet.
-            # We need to add it to `_run_merge_inner`.
+            def is_dir_fully_selected(node):
+                if node["type"] == "file":
+                    return selection_map.get(node["path"], False)
+                if node.get("children"):
+                    return all(is_dir_fully_selected(c) for c in node["children"])
+                return True # Empty dir considered selected? Or false? Let's say false for safety unless explicitly selected (which dirs aren't directly in this map logic except implicitly)
+                # Actually, empty dirs don't matter for file inclusion.
 
-            # HACK: attach to instance to be picked up
-            self._temp_include_paths = selected_paths
+            def collect(node):
+                if node["type"] == "file":
+                    if selection_map.get(node["path"], False):
+                        compressed_paths.append(node["path"])
+                elif node["type"] == "dir":
+                    if is_dir_fully_selected(node):
+                        compressed_paths.append(node["path"])
+                        # Stop traversing
+                    else:
+                        if node.get("children"):
+                            for c in node["children"]:
+                                collect(c)
+
+            collect(root_node)
+
+            # Fallback
+            if not compressed_paths and any(selection_map.values()):
+                 # Should not happen if logic is correct, but safety net:
+                 compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
+
+            self._temp_include_paths = compressed_paths
 
             sheet.close()
             # Trigger merge

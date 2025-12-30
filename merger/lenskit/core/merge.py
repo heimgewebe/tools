@@ -1831,6 +1831,8 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
 
     total_files = 0
     total_bytes = 0
+    node_count = 0
+    MAX_NODES = 50000
 
     def _is_ignored(name: str) -> bool:
         if name in ignore_set or name in SKIP_FILES:
@@ -1844,7 +1846,12 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
         return False
 
     def _walk(path: Path, depth: int) -> Dict[str, Any]:
-        nonlocal total_files, total_bytes
+        nonlocal total_files, total_bytes, node_count
+        node_count += 1
+        if node_count > MAX_NODES:
+            # Hard abort signal
+            raise RuntimeError(f"Prescan limit reached ({MAX_NODES} nodes). Repo too large.")
+
         node = {
             "path": path.relative_to(repo_root).as_posix() if path != repo_root else ".",
             "type": "dir",
@@ -1865,6 +1872,11 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
                 continue
 
             full = path / name
+
+            # Symlink Check (Security/Recursion)
+            if full.is_symlink():
+                continue
+
             try:
                 st = full.stat()
             except OSError:
@@ -1876,6 +1888,10 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
             else:
                  # File
                  total_files += 1
+                 node_count += 1
+                 if node_count > MAX_NODES:
+                     raise RuntimeError(f"Prescan limit reached ({MAX_NODES} nodes). Repo too large.")
+
                  total_bytes += st.st_size
                  file_node = {
                      "path": full.relative_to(repo_root).as_posix(),
@@ -1890,8 +1906,22 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
 
     # Compute a signature (hash of file paths + total bytes)
     # This helps detecting drift between prescan and merge.
-    sig_raw = f"{root_label}:{total_files}:{total_bytes}"
-    signature = hashlib.md5(sig_raw.encode("utf-8")).hexdigest()
+    # Collect all file paths and sizes for signature
+    sig_items = []
+
+    def _collect_for_sig(node):
+        if node["type"] == "file":
+            # relpath:size
+            sig_items.append(f"{node['path']}:{node.get('size', 0)}")
+        if node.get("children"):
+            for c in node["children"]:
+                _collect_for_sig(c)
+
+    _collect_for_sig(tree)
+    sig_items.sort()
+
+    sig_raw = "\n".join(sig_items)
+    signature = hashlib.sha256(sig_raw.encode("utf-8")).hexdigest()
 
     return {
         "root": root_label,

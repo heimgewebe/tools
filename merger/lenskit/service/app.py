@@ -17,9 +17,6 @@ from datetime import datetime
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
 from .jobstore import JobStore
 from .runner import JobRunner
-from .identity import compute_job_key
-import hashlib
-import json
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
 from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
 from ..adapters.atlas import AtlasScanner, render_atlas_md
@@ -344,18 +341,12 @@ def create_job(request: JobRequest):
 
     # --- Idempotency & GC ---
     resolved_hub_str = str(req_hub)
-
-    # Canonical Job Key
-    job_key = compute_job_key(request, resolved_hub_str, SPEC_VERSION)
-
-    # Legacy Alias: content_hash is now strictly identical to job_key
-    content_hash = job_key
+    content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
 
     # Lazy GC
     state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
 
-    # PR-2: Enforce Idempotency via Canonical Job Key
-    existing = state.job_store.get_by_job_key(job_key)
+    existing = state.job_store.find_job_by_hash(content_hash)
     if existing and not request.force_new:
         # Check if we should reuse
         if existing.status in ("queued", "running", "canceling"):
@@ -367,7 +358,7 @@ def create_job(request: JobRequest):
              logger.info(f"Reusing existing succeeded job {existing.id}")
              return existing
 
-    job = Job.create(request, content_hash=content_hash, job_key=job_key)
+    job = Job.create(request, content_hash=content_hash)
     job.hub_resolved = resolved_hub_str
     state.job_store.add_job(job)
     state.runner.submit_job(job.id)

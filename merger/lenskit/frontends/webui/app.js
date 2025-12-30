@@ -887,8 +887,8 @@ async function startPrescan() {
 
         document.getElementById('prescanStats').innerText = `${data.root} • ${data.file_count} files • ${(data.total_bytes / 1024 / 1024).toFixed(2)} MB`;
 
-        // Initial Select All
-        prescanToggleAll(true);
+        // Initial Selection: Recommended (instead of All)
+        prescanRecommended();
         renderPrescanTree();
 
     } catch (e) {
@@ -1089,7 +1089,36 @@ async function runMergeFromPrescan() {
     const extensions = extRaw ? extRaw.split(',').map(s => s.trim()) : null;
     const extrasCsv = Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).join(',');
 
-    const includePaths = Array.from(prescanSelection);
+    // Path Compression Logic
+    // If a directory is fully selected (all known children in tree selected), pass dir path.
+    // Else pass individual file paths.
+    // We can iterate the tree structure.
+
+    const compressedPaths = [];
+
+    function collectPaths(node) {
+        if (node.type === 'file') {
+            if (prescanSelection.has(node.path)) {
+                compressedPaths.push(node.path);
+            }
+        } else if (node.type === 'dir') {
+            if (isDirSelected(node)) {
+                // Whole dir selected -> add dir path
+                compressedPaths.push(node.path);
+                // Do not traverse children
+            } else {
+                // Partial -> traverse children
+                if (node.children) {
+                    node.children.forEach(collectPaths);
+                }
+            }
+        }
+    }
+
+    collectPaths(prescanCurrentTree.tree);
+
+    // Fallback: if root is fully selected, compressedPaths might be ['.'].
+    // scan_repo handles explicit paths. '.' matches everything.
 
     const payload = {
         hub: document.getElementById('hubPath').value,
@@ -1105,7 +1134,7 @@ async function runMergeFromPrescan() {
         path_filter: pathFilter,
         extensions: extensions,
         extras: extrasCsv,
-        include_paths: includePaths
+        include_paths: compressedPaths
     };
 
     try {

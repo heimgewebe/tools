@@ -163,14 +163,9 @@ class JobStore:
             # Sort by created_at desc
             return sorted(self._jobs_cache.values(), key=lambda x: x.created_at, reverse=True)
 
-    def get_by_job_key(self, job_key: str) -> Optional[Job]:
-        """
-        Retrieves a job by its canonical job_key.
-        Strict lookup: no fallback to content_hash to ensure invariant hardness.
-        """
+    def find_job_by_hash(self, content_hash: str) -> Optional[Job]:
         with self._lock:
-            candidates = [j for j in self._jobs_cache.values() if j.job_key == job_key]
-
+            candidates = [j for j in self._jobs_cache.values() if j.content_hash == content_hash]
             if not candidates:
                 return None
 
@@ -182,9 +177,6 @@ class JobStore:
                 return sorted(active, key=lambda x: x.created_at, reverse=True)[0]
 
             return sorted(candidates, key=lambda x: x.created_at, reverse=True)[0]
-
-    def find_job_by_hash(self, content_hash: str) -> Optional[Job]:
-        return self.get_by_job_key(content_hash)
 
     def cleanup_jobs(self, max_jobs: int = 100, max_age_hours: int = 24):
         now = datetime.utcnow()
