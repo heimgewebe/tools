@@ -7,11 +7,17 @@ const TOKEN_KEY = 'rlens_token';
 const SETS_KEY = 'rlens_sets';
 const CONFIG_KEY = 'rlens_config';
 const ATLAS_CONFIG_KEY = 'rlens_atlas_config';
+const PRESCAN_SAVED_KEY = "lenskit.prescan.savedSelections.v1";
 
-// Picker state
+// Global State
 let currentPickerTarget = null;
 let currentPickerPath = null;
 let currentPickerToken = null; // For token-based navigation
+
+let prescanCurrentTree = null;
+let prescanSelection = new Set(); // Stores paths of selected files (and implicitly dirs)
+let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
+let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set, compressed: Array }
 
 // Available Extras
 const EXTRAS_OPTIONS = [
@@ -28,6 +34,30 @@ const DEFAULT_EXTRAS = [
     'augment_sidecar',
     'json_sidecar'
 ];
+
+// --- Prescan saved selections persistence ---
+function loadSavedPrescanSelections() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(PRESCAN_SAVED_KEY) || "{}");
+        const m = new Map();
+        for (const [repo, obj] of Object.entries(raw)) {
+            const rawSet = new Set(Array.isArray(obj.raw) ? obj.raw : []);
+            const compressed = Array.isArray(obj.compressed) ? obj.compressed : [];
+            m.set(repo, { raw: rawSet, compressed });
+        }
+        return m;
+    } catch {
+        return new Map();
+    }
+}
+
+function persistSavedPrescanSelections() {
+    const obj = {};
+    for (const [repo, sel] of savedPrescanSelections.entries()) {
+        obj[repo] = { raw: Array.from(sel.raw || []), compressed: sel.compressed || [] };
+    }
+    localStorage.setItem(PRESCAN_SAVED_KEY, JSON.stringify(obj));
+}
 
 function getToken() {
     return document.getElementById('authToken').value || localStorage.getItem(TOKEN_KEY) || '';
@@ -78,6 +108,11 @@ async function fetchHealth() {
 }
 
 async function fetchRepos(hub) {
+    // Preserve current checked repos before wiping list
+    const previouslyChecked = new Set(
+        Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value)
+    );
+
     const list = document.getElementById('repoList');
     list.innerHTML = '<div class="text-gray-500 italic">Loading repos...</div>';
 
@@ -125,7 +160,7 @@ async function fetchRepos(hub) {
             let badgeHtml = '';
             if (savedPrescanSelections.has(repo)) {
                 const sel = savedPrescanSelections.get(repo);
-                const count = sel.raw ? sel.raw.size : 0;
+                const count = sel.compressed ? sel.compressed.length : 0;
                 badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${count} paths selected manually">Selection</span>`;
             }
 
@@ -135,6 +170,10 @@ async function fetchRepos(hub) {
                 ${badgeHtml}
             `;
             list.appendChild(div);
+
+            // Restore checked state after rerender
+            const cb = div.querySelector('input[type="checkbox"]');
+            if (previouslyChecked.has(repo)) cb.checked = true;
         });
     } catch (e) {
         list.innerHTML = '<div class="text-red-500">Error loading repos: ' + e.message + '</div>';
@@ -610,17 +649,27 @@ async function startJob(e) {
     }
 }
 
+let activeEventSource = null;
+
 function streamLogs(jobId) {
+    // Close existing stream if any
+    if (activeEventSource) {
+        activeEventSource.close();
+        activeEventSource = null;
+    }
+
     const pre = document.getElementById('logs');
     pre.innerText = `Connecting to logs for job ${jobId}...\n`;
 
     const token = getToken();
     const url = `${API_BASE}/jobs/${jobId}/logs` + (token ? `?token=${encodeURIComponent(token)}` : '');
     const es = new EventSource(url);
+    activeEventSource = es;
 
     es.onmessage = (event) => {
         if (event.data === 'end') {
             es.close();
+            activeEventSource = null;
             pre.innerText += "\n[Job Finished]\n";
             loadArtifacts(); // Refresh artifacts
             return;
@@ -632,6 +681,7 @@ function streamLogs(jobId) {
     es.onerror = () => {
         pre.innerText += "\n[Connection Lost]\n";
         es.close();
+        activeEventSource = null;
     };
 }
 
@@ -884,11 +934,6 @@ async function downloadWithAuth(url, name) {
 
 // --- Prescan Logic ---
 
-let prescanCurrentTree = null;
-let prescanSelection = new Set(); // Stores paths of selected files (and implicitly dirs)
-let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
-let savedPrescanSelections = new Map(); // repoName -> { raw: Set, compressed: Array }
-
 async function startPrescan() {
     const repos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
 
@@ -932,8 +977,13 @@ async function startPrescan() {
 
         document.getElementById('prescanStats').innerText = `${data.root} • ${data.file_count} files • ${(data.total_bytes / 1024 / 1024).toFixed(2)} MB`;
 
-        // Expand root by default
-        prescanExpandedPaths.add(data.root);
+        // Expand root by default - use internal path which is usually '.' for relative root
+        if (data.tree && data.tree.path) {
+            prescanExpandedPaths.add(data.tree.path);
+        } else {
+            // Fallback
+            prescanExpandedPaths.add(".");
+        }
 
         // Initial Selection: Recommended (instead of All) if empty
         if (prescanSelection.size === 0) {
@@ -1134,9 +1184,7 @@ function prescanRecommended() {
 }
 
 async function applyPrescanSelection() {
-    if (prescanSelection.size === 0) {
-        // Allow saving empty selection? Means deselecting all.
-    }
+    // Semantics: empty selection means "remove manual override" (back to standard behavior)
 
     // Path Compression Logic
     const compressedPaths = [];
@@ -1157,17 +1205,22 @@ async function applyPrescanSelection() {
 
     // Save to State
     const repo = prescanCurrentTree.root;
-    savedPrescanSelections.set(repo, {
-        raw: new Set(prescanSelection),
-        compressed: compressedPaths
-    });
+    if (compressedPaths.length === 0) {
+        // Remove manual selection override if nothing selected
+        savedPrescanSelections.delete(repo);
+    } else {
+        savedPrescanSelections.set(repo, {
+            raw: new Set(prescanSelection),
+            compressed: compressedPaths
+        });
+    }
+    persistSavedPrescanSelections();
 
     closePrescan();
 
     // Update UI (Badges)
-    fetchRepos(document.getElementById('hubPath').value);
-    // ^ This triggers a network call, which is slightly inefficient but safe.
-    // Optimally we would just re-render list, but we don't store repos locally.
+    // fetchRepos will now preserve checked state
+    await fetchRepos(document.getElementById('hubPath').value);
 }
 
 // Deprecated function name kept for safety but functionality moved to applyPrescanSelection
