@@ -17,9 +17,14 @@ def client(tmp_path):
 
     # Mock runner to prevent job execution/failure during test
     # This keeps the job in 'queued' state, ensuring reuse logic triggers.
+    # We use a context manager or explicit restore to avoid global state pollution.
+    original_submit = state.runner.submit_job
     state.runner.submit_job = MagicMock()
 
-    return TestClient(app)
+    yield TestClient(app)
+
+    # Restore original method (though init_service replaces runner, this is cleaner)
+    state.runner.submit_job = original_submit
 
 def test_create_job_idempotency(client):
     """

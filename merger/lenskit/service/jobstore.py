@@ -166,13 +166,10 @@ class JobStore:
     def get_by_job_key(self, job_key: str) -> Optional[Job]:
         """
         Retrieves a job by its canonical job_key.
-        Equivalent to find_job_by_hash but uses the new field explicitly.
+        Strict lookup: no fallback to content_hash to ensure invariant hardness.
         """
         with self._lock:
             candidates = [j for j in self._jobs_cache.values() if j.job_key == job_key]
-            if not candidates:
-                # Fallback: check content_hash if job_key is missing (migration)
-                candidates = [j for j in self._jobs_cache.values() if j.content_hash == job_key]
 
             if not candidates:
                 return None
