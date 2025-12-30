@@ -1049,7 +1049,9 @@ function prescanRecommended() {
             const parts = path.split('/');
             if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
                 // Improved test exclusion heuristic (User request E)
+                // Added __tests__ as per cherry-pick #291
                 const isTest = parts.includes('tests') ||
+                               parts.includes('__tests__') ||
                                parts.includes('test') ||
                                path.includes('_test.') ||
                                path.includes('.test.') ||
