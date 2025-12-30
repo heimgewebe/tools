@@ -1,9 +1,58 @@
+from __future__ import annotations
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import uuid
 import hashlib
 import json
 from datetime import datetime
+
+def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> str:
+    """
+    Calculates a deterministic hash for the job parameters to ensure idempotency.
+    Includes 'version' to ensure reproducibility across software updates.
+    """
+    # Normalize extras
+    extras_list = sorted([x.strip().lower() for x in (req.extras or "").split(",") if x.strip()])
+    extras_str = ",".join(extras_list)
+
+    # Normalize path_filter (None vs "")
+    path_filter = req.path_filter.strip() if isinstance(req.path_filter, str) else None
+    if path_filter == "":
+        path_filter = None
+
+    # Normalize repos
+    repos_list = sorted(req.repos) if req.repos else ["__ALL__"]
+
+    # Normalize extensions
+    ext_list = sorted(req.extensions) if req.extensions else []
+
+    # Normalize include_paths
+    inc_paths = sorted(req.include_paths) if req.include_paths else []
+
+    # Construct signature dict
+    sig = {
+        "lenskit_version": version,
+        "hub": hub_resolved, # Use resolved hub path!
+        "repos": repos_list,
+        "level": req.level,
+        "mode": req.mode,
+        "max_bytes": req.max_bytes,
+        "split_size": req.split_size,
+        "plan_only": req.plan_only,
+        "code_only": req.code_only,
+        "extensions": ext_list,
+        "path_filter": path_filter,
+        "extras": extras_str,
+        "json_sidecar": req.json_sidecar,
+        "include_paths": inc_paths
+        # Merges dir excluded from content hash:
+        # Same content, different output path = same logical job.
+        # Client must check returned artifact for actual path.
+    }
+
+    # Serialize and hash
+    sig_str = json.dumps(sig, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(sig_str.encode("utf-8")).hexdigest()
 
 class JobRequest(BaseModel):
     hub: Optional[str] = None
@@ -17,6 +66,7 @@ class JobRequest(BaseModel):
     code_only: bool = False
     extensions: Optional[List[str]] = None
     path_filter: Optional[str] = None
+    include_paths: Optional[List[str]] = None # Relative paths to include (whitelist)
     # Default: Minimal (Agent-fokussiert). Nur Sidecars.
     # Aligning with repolens.py logic to prevent drift.
     extras: Optional[str] = "json_sidecar,augment_sidecar"
@@ -65,15 +115,13 @@ class Job(BaseModel):
     finished_at: Optional[str] = None
     request: JobRequest
     hub_resolved: Optional[str] = None
-    # content_hash is deprecated, aliased to job_key for backward compatibility
-    content_hash: Optional[str] = Field(None, description="Deprecated. Aliased to job_key. Use job_key for identity.", deprecated=True)
-    job_key: Optional[str] = Field(None, description="Canonical deterministic job identifier.")
+    content_hash: Optional[str] = None
     logs: List[str] = []
     artifact_ids: List[str] = []
     error: Optional[str] = None
 
     @classmethod
-    def create(cls, request: JobRequest, content_hash: Optional[str] = None, job_key: Optional[str] = None) -> "Job":
+    def create(cls, request: JobRequest, content_hash: Optional[str] = None) -> "Job":
         now = datetime.utcnow().isoformat()
         return cls(
             id=str(uuid.uuid4()),
@@ -81,7 +129,34 @@ class Job(BaseModel):
             created_at=now,
             request=request,
             content_hash=content_hash,
-            job_key=job_key,
             logs=[],
             artifact_ids=[]
         )
+
+class PrescanRequest(BaseModel):
+    hub: Optional[str] = None
+    repo: str # Repo name to scan
+    max_depth: int = 10
+    ignore_globs: Optional[List[str]] = None
+
+class PrescanNode(BaseModel):
+    path: str
+    type: Literal["file", "dir"]
+    size: Optional[int] = None
+    children: Optional[List["PrescanNode"]] = None
+
+try:
+    PrescanNode.update_forward_refs()
+except AttributeError:
+    # Pydantic v2 usually handles this automatically or via model_rebuild
+    try:
+        PrescanNode.model_rebuild()
+    except AttributeError:
+        pass
+
+class PrescanResponse(BaseModel):
+    root: str
+    tree: PrescanNode
+    signature: str
+    file_count: int
+    total_bytes: int

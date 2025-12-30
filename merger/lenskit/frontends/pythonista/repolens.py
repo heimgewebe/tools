@@ -949,20 +949,16 @@ class MergerUI(object):
         Reihe 1: Extras | Load | Delta | PR-Schau
         Reihe 2: Run Merge (CTA)
         """
-        # Reihe 1: 4 Buttons
+        # Reihe 1: Buttons
         row1_h = 34
         gap = 8
         margin = 10
 
-        count = 4
-        w_avail = w - (2 * margin)
-        btn_w = (w_avail - (count - 1) * gap) / count
-
         # Titles & Actions
-        # Extras, Load, Delta, PR-Schau
+        # Presets, Extras, Load, Delta, Prescan, PR-Schau
 
-        # 5 Buttons to fit Presets
-        count = 5
+        # 6 Buttons to fit Prescan
+        count = 6
         w_avail = w - (2 * margin)
         btn_w = (w_avail - (count - 1) * gap) / count
 
@@ -971,6 +967,7 @@ class MergerUI(object):
             ("Extras", self.show_extras_sheet, "#333333"),
             ("Load", self.restore_last_state, "#333333"),
             ("Delta", self.run_delta_from_last_import, "#444444"), # Delta slightly different
+            ("Prescan", self.show_prescan_sheet, "#555555"),       # Grey for Prescan
             ("PR-Schau", self.show_pr_schau_browser, "#8E44AD"),   # Purple
         ]
 
@@ -2093,6 +2090,272 @@ class MergerUI(object):
                 print(f"[repoLens] {msg}")
             return
 
+    def show_prescan_sheet(self, sender):
+        """
+        Shows the Prescan UI (Tree View) for the selected repository.
+        Currently limited to single repo selection for simplicity.
+        """
+        selected = self._get_selected_repos()
+        if len(selected) != 1:
+            if console:
+                console.hud_alert("Please select exactly one repo for Prescan.", "error")
+            return
+
+        repo_name = selected[0]
+        repo_path = self.hub / repo_name
+
+        # We need to run prescan logic. Since we are in Pythonista (local), we call core directly.
+        try:
+            from lenskit.core.merge import prescan_repo
+        except ImportError:
+            _notify("Core merge module not found", "error")
+            return
+
+        # Show Loading HUD
+        if console:
+            console.show_activity("Scanning structure...")
+
+        def run_scan_bg():
+            try:
+                # Run prescan
+                data = prescan_repo(repo_path, max_depth=10)
+                # Ensure UI update on main thread
+                ui.delay(lambda: self._present_prescan_ui(data), 0)
+            except Exception as e:
+                def err():
+                    if console: console.alert("Prescan Failed", str(e), "OK", hide_cancel_button=True)
+                ui.delay(err, 0)
+            finally:
+                if console:
+                    console.hide_activity()
+
+        # Run in background
+        import threading
+        t = threading.Thread(target=run_scan_bg)
+        t.start()
+
+    def _present_prescan_ui(self, prescan_data):
+        """
+        Displays the prescan tree in a Sheet.
+        Allows selection of files/folders.
+        """
+        root_node = prescan_data["tree"]
+        root_name = prescan_data["root"]
+
+        # Flatten tree for table view (simple indentation approach)
+        flat_items = []
+
+        def traverse(node, depth):
+            # Item struct: { path, display, type, depth, node_ref }
+            name = node["path"].split("/")[-1]
+            if node["path"] == ".": name = root_name
+
+            icon = "📁" if node["type"] == "dir" else "📄"
+            indent = "  " * depth
+            display = f"{indent}{icon} {name}"
+
+            flat_items.append({
+                "path": node["path"],
+                "display": display,
+                "type": node["type"],
+                "depth": depth,
+                "orig": node,
+                "selected": False # Default state
+            })
+
+            if node.get("children"):
+                # Sort: Dirs first, then files
+                dirs = [c for c in node["children"] if c["type"] == "dir"]
+                files = [c for c in node["children"] if c["type"] == "file"]
+
+                dirs.sort(key=lambda x: x["path"])
+                files.sort(key=lambda x: x["path"])
+
+                for c in dirs + files:
+                    traverse(c, depth + 1)
+
+        traverse(root_node, 0)
+
+        # Initially select based on Recommended heuristic
+        # Start with None, then run heuristic
+        for item in flat_items:
+            item["selected"] = False
+
+        # Run heuristic logic (same as prescanRecommended)
+        def is_recommended(path_str):
+            path = path_str.lower()
+            # Critical
+            if "readme" in path or path.endswith(".ai-context.yml"):
+                return True
+            # Code
+            parts = path.split('/')
+            if "src" in parts or "contracts" in parts or "docs" in parts:
+                if "test" not in path:
+                     return True
+            return False
+
+        for item in flat_items:
+            if item["type"] == "file":
+                if is_recommended(item["path"]):
+                    item["selected"] = True
+
+        # Update directory selection state based on files (bottom-up propagation isn't strictly needed for flat list if we check children on render, but let's be consistent)
+        # Actually, for presentation we just check items.
+
+        # Create Sheet
+        sheet = ui.View()
+        sheet.name = f"Prescan: {root_name}"
+        sheet.background_color = "#111111"
+        sheet.frame = (0, 0, 600, 800)
+
+        # Header Stats
+        stats_lbl = ui.Label(frame=(10, 10, 580, 20))
+        stats_lbl.text = f"{prescan_data['file_count']} files • {parse_human_size(str(prescan_data['total_bytes']))} bytes total" # approximate
+        stats_lbl.text_color = "gray"
+        stats_lbl.font = ("<System>", 12)
+        sheet.add_subview(stats_lbl)
+
+        # Buttons: Select All / None / Recommended
+        btn_y = 40
+        btn_w = 80
+        btn_h = 30
+
+        def toggle_all(val):
+            for i in flat_items: i["selected"] = val
+            tv.reload_data()
+
+        btn_all = ui.Button(title="All")
+        btn_all.frame = (10, btn_y, btn_w, btn_h)
+        btn_all.background_color = "#333333"
+        btn_all.tint_color = "white"
+        btn_all.corner_radius = 4
+        btn_all.action = lambda s: toggle_all(True)
+        sheet.add_subview(btn_all)
+
+        btn_none = ui.Button(title="None")
+        btn_none.frame = (100, btn_y, btn_w, btn_h)
+        btn_none.background_color = "#333333"
+        btn_none.tint_color = "white"
+        btn_none.corner_radius = 4
+        btn_none.action = lambda s: toggle_all(False)
+        sheet.add_subview(btn_none)
+
+        # TableView
+        tv_y = 80
+        tv_h = sheet.height - tv_y - 60 # space for bottom bar
+        tv = ui.TableView()
+        tv.frame = (0, tv_y, sheet.width, tv_h)
+        tv.flex = "WH"
+        tv.background_color = "#111111"
+        tv.separator_color = "#333333"
+        tv.allows_multiple_selection = False # We handle selection manually
+
+        class PrescanDS(object):
+            def tableview_number_of_rows(self, tv, section):
+                return len(flat_items)
+
+            def tableview_cell_for_row(self, tv, section, row):
+                item = flat_items[row]
+                cell = ui.TableViewCell()
+                cell.text_label.text = item["display"]
+                cell.text_label.font = ("<Mono>", 12)
+                cell.background_color = "#111111"
+                cell.text_label.text_color = "white" if item["type"] == "file" else "#88ccff"
+
+                if item["selected"]:
+                    cell.accessory_type = "checkmark"
+                else:
+                    cell.accessory_type = "none"
+                return cell
+
+            def tableview_did_select(self, tv, section, row):
+                # Toggle logic
+                item = flat_items[row]
+                new_state = not item["selected"]
+                self._set_selected_recursive(item, new_state)
+                tv.reload_data()
+
+            def _set_selected_recursive(self, item, state):
+                item["selected"] = state
+                # If dir, find children in flat list and toggle
+                if item["type"] == "dir":
+                    # Naive: scan following items with depth > item.depth
+                    # Since it is a flat list from traversal, children are immediately following.
+                    idx = flat_items.index(item)
+                    for i in range(idx + 1, len(flat_items)):
+                        child = flat_items[i]
+                        if child["depth"] <= item["depth"]:
+                            break
+                        child["selected"] = state
+
+        ds = PrescanDS()
+        tv.data_source = ds
+        tv.delegate = ds
+        sheet.add_subview(tv)
+
+        # Bottom Bar: Cancel / Merge
+        bar_y = sheet.height - 50
+
+        btn_merge = ui.Button(title="Merge Selected")
+        btn_merge.frame = (sheet.width - 160, bar_y, 150, 40)
+        btn_merge.flex = "LT" # Left margin flex, Top margin flex
+        btn_merge.background_color = "#007aff"
+        btn_merge.tint_color = "white"
+        btn_merge.corner_radius = 6
+
+        def do_merge(sender):
+            # Path Compression
+            # If a dir is fully selected, pass dir. Else pass selected files.
+
+            # Helper to check directory completeness against FLAT items
+            # This is tricky without tree traversal.
+            # Let's rely on the tree structure we traversed earlier?
+            # 'root_node' is available in closure.
+
+            compressed_paths = []
+
+            # Create a map for quick lookup of selection status by path
+            selection_map = {item["path"]: item["selected"] for item in flat_items}
+
+            def is_dir_fully_selected(node):
+                if node["type"] == "file":
+                    return selection_map.get(node["path"], False)
+                if node.get("children"):
+                    return all(is_dir_fully_selected(c) for c in node["children"])
+                return True # Empty dir considered selected? Or false? Let's say false for safety unless explicitly selected (which dirs aren't directly in this map logic except implicitly)
+                # Actually, empty dirs don't matter for file inclusion.
+
+            def collect(node):
+                if node["type"] == "file":
+                    if selection_map.get(node["path"], False):
+                        compressed_paths.append(node["path"])
+                elif node["type"] == "dir":
+                    if is_dir_fully_selected(node):
+                        compressed_paths.append(node["path"])
+                        # Stop traversing
+                    else:
+                        if node.get("children"):
+                            for c in node["children"]:
+                                collect(c)
+
+            collect(root_node)
+
+            # Fallback
+            if not compressed_paths and any(selection_map.values()):
+                 # Should not happen if logic is correct, but safety net:
+                 compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
+
+            self._temp_include_paths = compressed_paths
+
+            sheet.close()
+            # Trigger merge
+            self.run_merge(None)
+
+        btn_merge.action = do_merge
+        sheet.add_subview(btn_merge)
+
+        sheet.present("sheet")
+
     def show_presets_sheet(self, sender):
         """Shows a sheet to select a preset configuration."""
         if not dialogs:
@@ -2196,6 +2459,12 @@ class MergerUI(object):
 
         path_contains = (self.path_field.text or "").strip() or None
 
+        # Consume temp include paths if set by Prescan
+        include_paths = getattr(self, "_temp_include_paths", None)
+        # Clear it immediately so next run doesn't inherit it
+        if hasattr(self, "_temp_include_paths"):
+            del self._temp_include_paths
+
         detail_idx = self.seg_detail.selected_index
         detail = ["overview", "summary", "dev", "max"][detail_idx]
 
@@ -2240,7 +2509,7 @@ class MergerUI(object):
                 _ui.delay(lambda: None, 0.0)
             except Exception:
                 pass
-            summary = scan_repo(root, extensions or None, path_contains, max_bytes)
+            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=include_paths)
             summaries.append(summary)
 
         if not summaries:

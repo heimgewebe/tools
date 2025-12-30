@@ -128,7 +128,10 @@
                     </div>
                 </div>
 
-                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded transition-colors mt-auto">Start Job</button>
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded transition-colors mt-auto mb-2">Start Job</button>
+                <button type="button" onclick="startPrescan()" class="w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded transition-colors text-xs border border-gray-500">
+                    🔍 Prescan (Select Files)
+                </button>
              </form>
         </main>
 
@@ -236,6 +239,36 @@
             <div class="flex justify-end gap-2 mt-4 pt-2 border-t border-gray-700">
                 <button onclick="closePicker()" class="px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
                 <button onclick="pickerSelect()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-bold rounded">Select This Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prescan Modal -->
+    <div id="prescanModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded shadow-lg w-full max-w-4xl h-[90vh] flex flex-col p-4">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                <div class="flex flex-col">
+                     <h3 class="text-lg font-bold">Prescan Selection</h3>
+                     <span class="text-xs text-gray-400" id="prescanStats">Loading...</span>
+                </div>
+                <button onclick="closePrescan()" class="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+
+            <div class="flex gap-2 mb-2 bg-gray-900 p-2 rounded">
+                 <button onclick="prescanToggleAll(true)" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">All</button>
+                 <button onclick="prescanToggleAll(false)" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">None</button>
+                 <div class="w-px bg-gray-700 mx-2"></div>
+                 <button onclick="prescanRecommended()" class="text-xs bg-blue-900 hover:bg-blue-800 text-blue-100 px-2 py-1 rounded">Recommended</button>
+                 <button onclick="prescanDocs()" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">Docs Only</button>
+            </div>
+
+            <div id="prescanTree" class="flex-1 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-sm font-mono whitespace-nowrap">
+                <!-- Tree Content -->
+            </div>
+
+            <div class="flex justify-end gap-2 mt-4 pt-2 border-t border-gray-700">
+                <button onclick="closePrescan()" class="px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
+                <button onclick="runMergeFromPrescan()" class="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white font-bold rounded">Merge Selected</button>
             </div>
         </div>
     </div>

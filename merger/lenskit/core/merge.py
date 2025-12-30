@@ -1813,13 +1813,140 @@ def is_critical_file(rel_path_str: str) -> bool:
         return True
     return False
 
-def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES) -> Dict[str, Any]:
+def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Lightweight scan for structure visualization (Prescan).
+    Returns a nested dict representing the tree.
+    """
+    repo_root = repo_root.resolve()
+    root_label = repo_root.name
+
+    # Build ignores
+    ignore_set = set(SKIP_DIRS)
+    import fnmatch
+
+    # Simple tree structure: { "path": ".", "type": "dir", "children": [...] }
+    # To build it, we traverse and collect nodes.
+    # We can perform a recursive function.
+
+    total_files = 0
+    total_bytes = 0
+    node_count = 0
+    MAX_NODES = 50000
+
+    def _is_ignored(name: str) -> bool:
+        if name in ignore_set or name in SKIP_FILES:
+            return True
+        if name.startswith(".env") and name not in (".env.example", ".env.template", ".env.sample"):
+            return True
+        if ignore_globs:
+            for g in ignore_globs:
+                if fnmatch.fnmatch(name, g):
+                    return True
+        return False
+
+    def _walk(path: Path, depth: int) -> Dict[str, Any]:
+        nonlocal total_files, total_bytes, node_count
+        node_count += 1
+        if node_count > MAX_NODES:
+            # Hard abort signal
+            raise RuntimeError(f"Prescan limit reached ({MAX_NODES} nodes). Repo too large.")
+
+        node = {
+            "path": path.relative_to(repo_root).as_posix() if path != repo_root else ".",
+            "type": "dir",
+            "children": []
+        }
+
+        if depth > max_depth:
+            return node
+
+        try:
+            # Sort for deterministic output
+            entries = sorted(os.listdir(path))
+        except OSError:
+            return node
+
+        for name in entries:
+            if _is_ignored(name):
+                continue
+
+            full = path / name
+
+            # Symlink Check (Security/Recursion)
+            if full.is_symlink():
+                continue
+
+            try:
+                st = full.stat()
+            except OSError:
+                continue
+
+            if full.is_dir():
+                 child_node = _walk(full, depth + 1)
+                 node["children"].append(child_node)
+            else:
+                 # File
+                 total_files += 1
+                 node_count += 1
+                 if node_count > MAX_NODES:
+                     raise RuntimeError(f"Prescan limit reached ({MAX_NODES} nodes). Repo too large.")
+
+                 total_bytes += st.st_size
+                 file_node = {
+                     "path": full.relative_to(repo_root).as_posix(),
+                     "type": "file",
+                     "size": st.st_size
+                 }
+                 node["children"].append(file_node)
+
+        return node
+
+    tree = _walk(repo_root, 0)
+
+    # Compute a signature (hash of file paths + total bytes)
+    # This helps detecting drift between prescan and merge.
+    # Collect all file paths and sizes for signature
+    sig_items = []
+
+    def _collect_for_sig(node):
+        if node["type"] == "file":
+            # relpath:size
+            sig_items.append(f"{node['path']}:{node.get('size', 0)}")
+        if node.get("children"):
+            for c in node["children"]:
+                _collect_for_sig(c)
+
+    _collect_for_sig(tree)
+    sig_items.sort()
+
+    sig_raw = "\n".join(sig_items)
+    signature = hashlib.sha256(sig_raw.encode("utf-8")).hexdigest()
+
+    return {
+        "root": root_label,
+        "tree": tree,
+        "signature": signature,
+        "file_count": total_files,
+        "total_bytes": total_bytes
+    }
+
+def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None) -> Dict[str, Any]:
     repo_root = repo_root.resolve()
     root_label = repo_root.name
     files = []
 
     ext_filter = set(e.lower() for e in extensions) if extensions else None
     path_filter = path_contains.strip() if path_contains else None
+
+    # Optimize include_paths check
+    include_set = None
+    include_prefixes = []
+    if include_paths:
+        include_set = set(include_paths)
+        # Store prefixes for directory matching optimization
+        for p in include_paths:
+            include_prefixes.append(p + "/")
 
     total_files = 0
     total_bytes = 0
@@ -1856,6 +1983,20 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 ext = abs_path.suffix.lower()
                 inclusion_reason = "force_include"
             else:
+                # Include Paths Check (Whitelist)
+                if include_paths is not None:
+                     # If file is explicitly in include_set or under an included directory
+                     matched = False
+                     if rel_path_str in include_set:
+                         matched = True
+                     else:
+                         for prefix in include_prefixes:
+                             if rel_path_str.startswith(prefix):
+                                 matched = True
+                                 break
+                     if not matched:
+                         continue
+
                 # Normal filtering
                 if path_filter and path_filter not in rel_path_str:
                     continue
