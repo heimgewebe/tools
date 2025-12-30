@@ -113,16 +113,26 @@ async function fetchRepos(hub) {
 
         repos.forEach(repo => {
             const div = document.createElement('div');
-            div.className = "flex items-center space-x-2 p-1 hover:bg-gray-800 rounded cursor-pointer";
+            div.className = "flex items-center space-x-2 p-1 hover:bg-gray-800 rounded cursor-pointer relative group";
             div.onclick = (e) => {
                 if (e.target.type !== 'checkbox') {
                     const box = div.querySelector('input[type="checkbox"]');
                     box.checked = !box.checked;
                 }
             };
+
+            // Badge check
+            let badgeHtml = '';
+            if (savedPrescanSelections.has(repo)) {
+                const sel = savedPrescanSelections.get(repo);
+                const count = sel.raw ? sel.raw.size : 0;
+                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${count} paths selected manually">Selection</span>`;
+            }
+
             div.innerHTML = `
                 <input type="checkbox" name="repos" value="${repo}" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
                 <span class="font-bold text-gray-300 select-none">${repo}</span>
+                ${badgeHtml}
             `;
             list.appendChild(div);
         });
@@ -528,10 +538,9 @@ async function startJob(e) {
     // JSON Sidecar legacy logic
     const jsonSidecar = checkedExtras.includes('json_sidecar');
 
-    const payload = {
+    const commonPayload = {
         hub: document.getElementById('hubPath').value,
         merges_dir: document.getElementById('mergesPath').value || null,
-        repos: selectedRepos.length > 0 ? selectedRepos : null,
         level: document.getElementById('profile').value,
         mode: document.getElementById('mode').value,
         max_bytes: document.getElementById('maxBytes').value,
@@ -545,27 +554,54 @@ async function startJob(e) {
     };
 
     try {
-        const res = await apiFetch(`${API_BASE}/jobs`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
+        // Multi-repo selection strategy (Weg 1: Separate jobs for custom, batch for rest)
+        const customRepos = [];
+        const standardRepos = [];
+
+        selectedRepos.forEach(repo => {
+            if (savedPrescanSelections.has(repo)) {
+                customRepos.push(repo);
+            } else {
+                standardRepos.push(repo);
+            }
         });
 
-        if (res.status === 401) {
-            throw new Error("Unauthorized. Please check your token.");
+        const jobsToStart = [];
+
+        // 1. Custom Jobs
+        for (const repo of customRepos) {
+            const sel = savedPrescanSelections.get(repo);
+            const payload = { ...commonPayload, repos: [repo], include_paths: sel.compressed };
+            jobsToStart.push(payload);
         }
 
-        if (!res.ok) {
-            throw new Error(`HTTP Error ${res.status}`);
+        // 2. Standard Job (Batch)
+        if (standardRepos.length > 0) {
+            const payload = { ...commonPayload, repos: standardRepos };
+            jobsToStart.push(payload);
         }
 
-        const job = await res.json();
+        if (jobsToStart.length === 0) {
+             throw new Error("No repos selected.");
+        }
+
+        // Sequential launch
+        for (const payload of jobsToStart) {
+             const res = await apiFetch(`${API_BASE}/jobs`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+
+            if (res.status === 401) throw new Error("Unauthorized.");
+            if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+            const job = await res.json();
+            streamLogs(job.id); // This will connect to the last one, acceptable for now
+        }
 
         btn.disabled = false;
         btn.innerText = "Start Job";
-
-        // Start log streaming
-        streamLogs(job.id);
 
     } catch (e) {
         alert("Failed to start job: " + e.message);
@@ -850,6 +886,8 @@ async function downloadWithAuth(url, name) {
 
 let prescanCurrentTree = null;
 let prescanSelection = new Set(); // Stores paths of selected files (and implicitly dirs)
+let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
+let savedPrescanSelections = new Map(); // repoName -> { raw: Set, compressed: Array }
 
 async function startPrescan() {
     const repos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
@@ -859,7 +897,7 @@ async function startPrescan() {
         return;
     }
     if (repos.length > 1) {
-        alert("Prescan currently supports single repo selection. Please select only one.");
+        alert("Prescan currently supports single repo selection for editing. Please select only one.");
         return;
     }
 
@@ -868,7 +906,14 @@ async function startPrescan() {
     document.getElementById('prescanModal').classList.remove('hidden');
     document.getElementById('prescanTree').innerHTML = '<div class="text-gray-500 italic p-4">Scanning structure...</div>';
     document.getElementById('prescanStats').innerText = `Scanning ${repo}...`;
-    prescanSelection.clear();
+
+    // Reset or load selection
+    if (savedPrescanSelections.has(repo)) {
+        prescanSelection = new Set(savedPrescanSelections.get(repo).raw);
+    } else {
+        prescanSelection.clear();
+    }
+    prescanExpandedPaths.clear();
 
     try {
         const res = await apiFetch(`${API_BASE}/prescan`, {
@@ -887,8 +932,14 @@ async function startPrescan() {
 
         document.getElementById('prescanStats').innerText = `${data.root} • ${data.file_count} files • ${(data.total_bytes / 1024 / 1024).toFixed(2)} MB`;
 
-        // Initial Selection: Recommended (instead of All)
-        prescanRecommended();
+        // Expand root by default
+        prescanExpandedPaths.add(data.root);
+
+        // Initial Selection: Recommended (instead of All) if empty
+        if (prescanSelection.size === 0) {
+            prescanRecommended();
+        }
+
         renderPrescanTree();
 
     } catch (e) {
@@ -899,6 +950,7 @@ async function startPrescan() {
 function closePrescan() {
     document.getElementById('prescanModal').classList.add('hidden');
     prescanCurrentTree = null;
+    prescanExpandedPaths.clear();
 }
 
 function renderPrescanTree() {
@@ -913,11 +965,12 @@ function renderPrescanTree() {
         div.className = "select-none";
 
         const row = document.createElement('div');
-        row.className = "flex items-center hover:bg-gray-800 py-px cursor-pointer";
+        row.className = "flex items-center hover:bg-gray-800 py-px cursor-pointer group";
 
         const path = node.path;
         const isDir = node.type === 'dir';
         const isChecked = isDir ? isDirSelected(node) : prescanSelection.has(path);
+        const isExpanded = isDir && prescanExpandedPaths.has(path);
 
         // Determine indeterminate state for dirs
         let indeterminate = false;
@@ -933,20 +986,33 @@ function renderPrescanTree() {
         cb.onclick = (e) => {
             e.stopPropagation();
             togglePrescanNode(node, cb.checked);
-            renderPrescanTree(); // Re-render to update UI state
+            // Optimization: Don't full re-render, just update checkbox states if possible?
+            // For now, re-render is safer for indeterminate states, but since we collapse, it's fast.
+            renderPrescanTree();
         };
 
+        // Click on row toggles expansion (for dirs)
         row.onclick = (e) => {
-            if (e.target !== cb) {
-                cb.checked = !cb.checked;
-                togglePrescanNode(node, cb.checked);
+            if (e.target !== cb && isDir) {
+                if (prescanExpandedPaths.has(path)) {
+                    prescanExpandedPaths.delete(path);
+                } else {
+                    prescanExpandedPaths.add(path);
+                }
                 renderPrescanTree();
+            } else if (e.target !== cb && !isDir) {
+                // Toggle file
+                cb.click();
             }
         };
 
         const icon = document.createElement('span');
-        icon.className = "mr-2 text-xs";
-        icon.innerText = isDir ? '📁' : '📄';
+        icon.className = "mr-2 text-xs w-4 text-center inline-block";
+        if (isDir) {
+            icon.innerText = isExpanded ? '📂' : '📁';
+        } else {
+            icon.innerText = '📄';
+        }
 
         const label = document.createElement('span');
         label.className = isDir ? "text-blue-200 font-bold" : "text-gray-300";
@@ -959,14 +1025,15 @@ function renderPrescanTree() {
         if (!isDir) {
              const sizeKb = (node.size / 1024).toFixed(1);
              const meta = document.createElement('span');
-             meta.className = "text-gray-600 text-xs ml-2";
+             meta.className = "text-gray-600 text-xs ml-2 opacity-0 group-hover:opacity-100";
              meta.innerText = `${sizeKb} KB`;
              row.appendChild(meta);
         }
 
         div.appendChild(row);
 
-        if (isDir && node.children) {
+        // Render children only if expanded
+        if (isDir && node.children && isExpanded) {
             const childrenContainer = document.createElement('div');
             childrenContainer.className = "pl-4 border-l border-gray-800 ml-2";
 
@@ -982,12 +1049,8 @@ function renderPrescanTree() {
         parentEl.appendChild(div);
     }
 
-    // Start with children of root
-    if (prescanCurrentTree.tree.children) {
-        const rootDirs = prescanCurrentTree.tree.children.filter(c => c.type === 'dir').sort((a,b) => a.path.localeCompare(b.path));
-        const rootFiles = prescanCurrentTree.tree.children.filter(c => c.type === 'file').sort((a,b) => a.path.localeCompare(b.path));
-        [...rootDirs, ...rootFiles].forEach(child => renderNodeTo(child, container));
-    }
+    // Start with root directly
+    renderNodeTo(prescanCurrentTree.tree, container);
 }
 
 function isDirSelected(node) {
@@ -1013,6 +1076,7 @@ function togglePrescanNode(node, checked) {
 
 function prescanToggleAll(checked) {
     if (!prescanCurrentTree) return;
+    // O(N) data update is fine, DOM was the bottleneck
     togglePrescanNode(prescanCurrentTree.tree, checked);
     renderPrescanTree();
 }
@@ -1069,42 +1133,13 @@ function prescanRecommended() {
     renderPrescanTree();
 }
 
-async function runMergeFromPrescan() {
-    // Start job with include_paths
+async function applyPrescanSelection() {
     if (prescanSelection.size === 0) {
-        alert("Selection empty!");
-        return;
+        // Allow saving empty selection? Means deselecting all.
     }
 
-    // We reuse startJob logic but injection
-    // To keep it clean, we'll manually invoke the API call here
-    // But we need to gather all other form fields first.
-
-    const btn = document.querySelector('#prescanModal button[onclick="runMergeFromPrescan()"]');
-    btn.disabled = true;
-    btn.innerText = "Launching...";
-
-    // Gather main form config
-    const repo = prescanCurrentTree.root; // Single repo
-    const level = document.getElementById('profile').value;
-    const mode = document.getElementById('mode').value;
-    const maxBytes = document.getElementById('maxBytes').value;
-    const splitSize = document.getElementById('splitSize').value;
-    const planOnly = document.getElementById('planOnly').checked;
-    const codeOnly = document.getElementById('codeOnly').checked;
-    const jsonSidecar = Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).includes('json_sidecar');
-    const pathFilter = document.getElementById('pathFilter').value.trim() || null;
-    const extRaw = document.getElementById('extFilter').value.trim();
-    const extensions = extRaw ? extRaw.split(',').map(s => s.trim()) : null;
-    const extrasCsv = Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).join(',');
-
     // Path Compression Logic
-    // If a directory is fully selected (all known children in tree selected), pass dir path.
-    // Else pass individual file paths.
-    // We can iterate the tree structure.
-
     const compressedPaths = [];
-
     function collectPaths(node) {
         if (node.type === 'file') {
             if (prescanSelection.has(node.path)) {
@@ -1112,57 +1147,30 @@ async function runMergeFromPrescan() {
             }
         } else if (node.type === 'dir') {
             if (isDirSelected(node)) {
-                // Whole dir selected -> add dir path
-                compressedPaths.push(node.path);
-                // Do not traverse children
+                compressedPaths.push(node.path); // Full dir
             } else {
-                // Partial -> traverse children
-                if (node.children) {
-                    node.children.forEach(collectPaths);
-                }
+                if (node.children) node.children.forEach(collectPaths);
             }
         }
     }
-
     collectPaths(prescanCurrentTree.tree);
 
-    // Fallback: if root is fully selected, compressedPaths might be ['.'].
-    // scan_repo handles explicit paths. '.' matches everything.
+    // Save to State
+    const repo = prescanCurrentTree.root;
+    savedPrescanSelections.set(repo, {
+        raw: new Set(prescanSelection),
+        compressed: compressedPaths
+    });
 
-    const payload = {
-        hub: document.getElementById('hubPath').value,
-        merges_dir: document.getElementById('mergesPath').value || null,
-        repos: [repo],
-        level: level,
-        mode: mode,
-        max_bytes: maxBytes,
-        split_size: splitSize,
-        plan_only: planOnly,
-        code_only: codeOnly,
-        json_sidecar: jsonSidecar,
-        path_filter: pathFilter,
-        extensions: extensions,
-        extras: extrasCsv,
-        include_paths: compressedPaths
-    };
+    closePrescan();
 
-    try {
-        const res = await apiFetch(`${API_BASE}/jobs`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
-        });
+    // Update UI (Badges)
+    fetchRepos(document.getElementById('hubPath').value);
+    // ^ This triggers a network call, which is slightly inefficient but safe.
+    // Optimally we would just re-render list, but we don't store repos locally.
+}
 
-        if (!res.ok) throw new Error("Failed to launch job");
-
-        const job = await res.json();
-        closePrescan();
-        streamLogs(job.id);
-
-    } catch (e) {
-        alert(e.message);
-    } finally {
-        btn.disabled = false;
-        btn.innerText = "Merge Selected";
-    }
+// Deprecated function name kept for safety but functionality moved to applyPrescanSelection
+function runMergeFromPrescan() {
+    applyPrescanSelection();
 }
