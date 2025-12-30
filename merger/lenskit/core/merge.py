@@ -1834,14 +1834,15 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
     node_count = 0
     MAX_NODES = 50000
 
-    def _is_ignored(name: str) -> bool:
+    def _is_ignored(name: str, relpath: str) -> bool:
         if name in ignore_set or name in SKIP_FILES:
             return True
         if name.startswith(".env") and name not in (".env.example", ".env.template", ".env.sample"):
             return True
         if ignore_globs:
             for g in ignore_globs:
-                if fnmatch.fnmatch(name, g):
+                # User request: match against name (basename) OR relpath
+                if fnmatch.fnmatch(name, g) or fnmatch.fnmatch(relpath, g):
                     return True
         return False
 
@@ -1852,8 +1853,9 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
             # Hard abort signal
             raise RuntimeError(f"Prescan limit reached ({MAX_NODES} nodes). Repo too large.")
 
+        rel_dir = path.relative_to(repo_root).as_posix() if path != repo_root else "."
         node = {
-            "path": path.relative_to(repo_root).as_posix() if path != repo_root else ".",
+            "path": rel_dir,
             "type": "dir",
             "children": []
         }
@@ -1868,10 +1870,14 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
             return node
 
         for name in entries:
-            if _is_ignored(name):
-                continue
-
             full = path / name
+
+            # Compute relpath for check
+            # if rel_dir is ".", then relpath is name. Else rel_dir/name.
+            child_rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+
+            if _is_ignored(name, child_rel):
+                continue
 
             # Symlink Check (Security/Recursion)
             if full.is_symlink():
@@ -1942,7 +1948,12 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     # Optimize include_paths check
     include_set = None
     include_prefixes = []
-    if include_paths:
+
+    # Normalize: ["."] or [""] -> None (all)
+    if include_paths is not None and any(p in (".", "") for p in include_paths):
+        include_paths = None
+
+    if include_paths is not None:
         include_set = set(include_paths)
         # Store prefixes for directory matching optimization
         for p in include_paths:
