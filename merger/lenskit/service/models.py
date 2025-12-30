@@ -27,7 +27,13 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
     ext_list = sorted(req.extensions) if req.extensions else []
 
     # Normalize include_paths
-    inc_paths = sorted(req.include_paths) if req.include_paths else []
+    inc_paths = None
+    if req.include_paths is not None:
+        # Check for explicit "all" markers (match scan_repo logic)
+        if any(p in (".", "") for p in req.include_paths):
+            inc_paths = None
+        else:
+            inc_paths = sorted(req.include_paths)
 
     # Construct signature dict
     sig = {
@@ -134,7 +140,6 @@ class Job(BaseModel):
         )
 
 class PrescanRequest(BaseModel):
-    hub: Optional[str] = None
     repo: str # Repo name to scan
     max_depth: int = 10
     ignore_globs: Optional[List[str]] = None

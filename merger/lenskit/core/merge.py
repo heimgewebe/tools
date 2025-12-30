@@ -1834,14 +1834,14 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
     node_count = 0
     MAX_NODES = 50000
 
-    def _is_ignored(name: str) -> bool:
+    def _is_ignored(name: str, relpath: str) -> bool:
         if name in ignore_set or name in SKIP_FILES:
             return True
         if name.startswith(".env") and name not in (".env.example", ".env.template", ".env.sample"):
             return True
         if ignore_globs:
             for g in ignore_globs:
-                if fnmatch.fnmatch(name, g):
+                if fnmatch.fnmatch(name, g) or fnmatch.fnmatch(relpath, g):
                     return True
         return False
 
@@ -1868,10 +1868,11 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
             return node
 
         for name in entries:
-            if _is_ignored(name):
-                continue
-
             full = path / name
+            rel_str = full.relative_to(repo_root).as_posix()
+
+            if _is_ignored(name, rel_str):
+                continue
 
             # Symlink Check (Security/Recursion)
             if full.is_symlink():
@@ -1942,7 +1943,12 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     # Optimize include_paths check
     include_set = None
     include_prefixes = []
-    if include_paths:
+
+    # Normalize: ["."] or [""] -> None
+    if include_paths is not None and any(p in (".", "") for p in include_paths):
+        include_paths = None
+
+    if include_paths is not None:
         include_set = set(include_paths)
         # Store prefixes for directory matching optimization
         for p in include_paths:
@@ -1987,7 +1993,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 if include_paths is not None:
                      # If file is explicitly in include_set or under an included directory
                      matched = False
-                     if rel_path_str in include_set:
+                     if include_set and rel_path_str in include_set:
                          matched = True
                      else:
                          for prefix in include_prefixes:

@@ -1040,15 +1040,25 @@ function prescanRecommended() {
     function visit(node) {
         if (node.type === 'file') {
             const path = node.path.toLowerCase();
-            // Critical
+            const parts = path.split('/');
+
+            // Critical (Force Include)
             if (path.includes('readme') || path.endsWith('.ai-context.yml')) {
                 prescanSelection.add(node.path);
                 return;
             }
-            // Code
-            const parts = path.split('/');
+
+            // Heuristic Filter: exclude explicit test paths
+            const isTest = parts.includes('tests') ||
+                           parts.includes('__tests__') ||
+                           parts.includes('test') ||
+                           path.endsWith('.test.js') || path.endsWith('.test.ts') ||
+                           path.endsWith('.spec.js') || path.endsWith('.spec.ts') ||
+                           path.endsWith('_test.py');
+
+            // Code Categories
             if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
-                if (!path.includes('test')) {
+                if (!isTest) {
                      prescanSelection.add(node.path);
                 }
             }
