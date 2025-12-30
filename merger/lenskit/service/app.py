@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact
 from .jobstore import JobStore
 from .runner import JobRunner
 import hashlib
@@ -355,12 +355,11 @@ def create_job(request: JobRequest):
     # --- Idempotency & GC ---
     resolved_hub_str = str(req_hub)
 
-    # Legacy hash (ensure no behavior change for existing clients relying on this exact algorithm)
-    # Although compute_job_key is likely identical, we keep them distinct to satisfy "no behavior change".
-    content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
-
-    # New Canonical Job Key
+    # Canonical Job Key
     job_key = compute_job_key(request, resolved_hub_str, SPEC_VERSION)
+
+    # Legacy Alias: content_hash is now strictly identical to job_key
+    content_hash = job_key
 
     # Lazy GC
     state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
