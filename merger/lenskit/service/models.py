@@ -25,6 +25,9 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
     # Normalize extensions
     ext_list = sorted(req.extensions) if req.extensions else []
 
+    # Normalize include_paths
+    inc_paths = sorted(req.include_paths) if req.include_paths else []
+
     # Construct signature dict
     sig = {
         "lenskit_version": version,
@@ -39,7 +42,8 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         "extensions": ext_list,
         "path_filter": path_filter,
         "extras": extras_str,
-        "json_sidecar": req.json_sidecar
+        "json_sidecar": req.json_sidecar,
+        "include_paths": inc_paths
         # Merges dir excluded from content hash:
         # Same content, different output path = same logical job.
         # Client must check returned artifact for actual path.
@@ -61,6 +65,7 @@ class JobRequest(BaseModel):
     code_only: bool = False
     extensions: Optional[List[str]] = None
     path_filter: Optional[str] = None
+    include_paths: Optional[List[str]] = None # Relative paths to include (whitelist)
     # Default: Minimal (Agent-fokussiert). Nur Sidecars.
     # Aligning with repolens.py logic to prevent drift.
     extras: Optional[str] = "json_sidecar,augment_sidecar"
@@ -126,3 +131,22 @@ class Job(BaseModel):
             logs=[],
             artifact_ids=[]
         )
+
+class PrescanRequest(BaseModel):
+    hub: Optional[str] = None
+    repo: str # Repo name to scan
+    max_depth: int = 10
+    ignore_globs: Optional[List[str]] = None
+
+class PrescanNode(BaseModel):
+    path: str
+    type: Literal["file", "dir"]
+    size: Optional[int] = None
+    children: Optional[List["PrescanNode"]] = None
+
+class PrescanResponse(BaseModel):
+    root: str
+    tree: PrescanNode
+    signature: str
+    file_count: int
+    total_bytes: int

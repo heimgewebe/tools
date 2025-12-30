@@ -152,6 +152,7 @@ class JobRunner:
             max_bytes = parse_human_size(req.max_bytes or "0")
             ext_list = _normalize_ext_list(",".join(req.extensions)) if req.extensions else None
             path_filter = req.path_filter
+            include_paths = req.include_paths
 
             summaries = []
             total_sources = len(sources)
@@ -170,7 +171,7 @@ class JobRunner:
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
-                summary = scan_repo(src, ext_list, path_filter, max_bytes)
+                summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=include_paths)
                 summaries.append(summary)
 
             # 4. Write Reports

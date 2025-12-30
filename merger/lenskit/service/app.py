@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
 from .jobstore import JobStore
 from .runner import JobRunner
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
@@ -25,9 +25,9 @@ from ..adapters import sources as sources_refresh
 from ..adapters import diagnostics as diagnostics_rebuild
 
 try:
-    from ..core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
+    from ..core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION, prescan_repo
 except ImportError:
-    from merger.lenskit.core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION
+    from merger.lenskit.core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION, prescan_repo
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -292,6 +292,37 @@ def list_repos(hub: Optional[str] = None):
     # Use runner's helper or core helper
     from .runner import _find_repos
     return _find_repos(target_hub)
+
+@app.post("/api/prescan", response_model=PrescanResponse, dependencies=[Depends(verify_token)])
+def api_prescan(request: PrescanRequest):
+    if not state.hub:
+        raise HTTPException(status_code=400, detail="Hub not configured")
+
+    # Resolve repo
+    repo_name = validate_repo_name(request.repo)
+    repo_root = state.hub / repo_name
+    if not repo_root.exists() or not repo_root.is_dir():
+        raise HTTPException(status_code=404, detail=f"Repo {repo_name} not found")
+
+    try:
+        # Run prescan
+        result = prescan_repo(
+            repo_root=repo_root,
+            max_depth=request.max_depth,
+            ignore_globs=request.ignore_globs
+        )
+        # Convert to response
+        return PrescanResponse(
+            root=result["root"],
+            tree=result["tree"],
+            signature=result["signature"],
+            file_count=result["file_count"],
+            total_bytes=result["total_bytes"]
+        )
+    except Exception as e:
+        logger.exception(f"Prescan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/jobs", response_model=Job, dependencies=[Depends(verify_token)])
 def create_job(request: JobRequest):

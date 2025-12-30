@@ -845,3 +845,286 @@ async function downloadWithAuth(url, name) {
         alert("Download error: " + e.message);
     }
 }
+
+// --- Prescan Logic ---
+
+let prescanCurrentTree = null;
+let prescanSelection = new Set(); // Stores paths of selected files (and implicitly dirs)
+
+async function startPrescan() {
+    const repos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
+
+    if (repos.length === 0) {
+        alert("Please select at least one repository first.");
+        return;
+    }
+    if (repos.length > 1) {
+        alert("Prescan currently supports single repo selection. Please select only one.");
+        return;
+    }
+
+    const repo = repos[0];
+
+    document.getElementById('prescanModal').classList.remove('hidden');
+    document.getElementById('prescanTree').innerHTML = '<div class="text-gray-500 italic p-4">Scanning structure...</div>';
+    document.getElementById('prescanStats').innerText = `Scanning ${repo}...`;
+    prescanSelection.clear();
+
+    try {
+        const res = await apiFetch(`${API_BASE}/prescan`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                repo: repo,
+                max_depth: 10
+            })
+        });
+
+        if (!res.ok) throw new Error("Prescan failed: " + res.statusText);
+
+        const data = await res.json();
+        prescanCurrentTree = data;
+
+        document.getElementById('prescanStats').innerText = `${data.root} • ${data.file_count} files • ${(data.total_bytes / 1024 / 1024).toFixed(2)} MB`;
+
+        // Initial Select All
+        prescanToggleAll(true);
+        renderPrescanTree();
+
+    } catch (e) {
+        document.getElementById('prescanTree').innerHTML = `<div class="text-red-400 p-4">Error: ${e.message}</div>`;
+    }
+}
+
+function closePrescan() {
+    document.getElementById('prescanModal').classList.add('hidden');
+    prescanCurrentTree = null;
+}
+
+function renderPrescanTree() {
+    if (!prescanCurrentTree) return;
+
+    const container = document.getElementById('prescanTree');
+    container.innerHTML = '';
+
+    // Retry render logic: Pure DOM recursion
+    function renderNodeTo(node, parentEl) {
+        const div = document.createElement('div');
+        div.className = "select-none";
+
+        const row = document.createElement('div');
+        row.className = "flex items-center hover:bg-gray-800 py-px cursor-pointer";
+
+        const path = node.path;
+        const isDir = node.type === 'dir';
+        const isChecked = isDir ? isDirSelected(node) : prescanSelection.has(path);
+
+        // Determine indeterminate state for dirs
+        let indeterminate = false;
+        if (isDir && !isChecked) {
+            indeterminate = isDirPartial(node);
+        }
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = isChecked;
+        cb.indeterminate = indeterminate;
+        cb.className = "mr-2 form-checkbox text-blue-500 bg-gray-900 border-gray-700";
+        cb.onclick = (e) => {
+            e.stopPropagation();
+            togglePrescanNode(node, cb.checked);
+            renderPrescanTree(); // Re-render to update UI state
+        };
+
+        row.onclick = (e) => {
+            if (e.target !== cb) {
+                cb.checked = !cb.checked;
+                togglePrescanNode(node, cb.checked);
+                renderPrescanTree();
+            }
+        };
+
+        const icon = document.createElement('span');
+        icon.className = "mr-2 text-xs";
+        icon.innerText = isDir ? '📁' : '📄';
+
+        const label = document.createElement('span');
+        label.className = isDir ? "text-blue-200 font-bold" : "text-gray-300";
+        label.innerText = path.split('/').pop();
+
+        row.appendChild(cb);
+        row.appendChild(icon);
+        row.appendChild(label);
+
+        if (!isDir) {
+             const sizeKb = (node.size / 1024).toFixed(1);
+             const meta = document.createElement('span');
+             meta.className = "text-gray-600 text-xs ml-2";
+             meta.innerText = `${sizeKb} KB`;
+             row.appendChild(meta);
+        }
+
+        div.appendChild(row);
+
+        if (isDir && node.children) {
+            const childrenContainer = document.createElement('div');
+            childrenContainer.className = "pl-4 border-l border-gray-800 ml-2";
+
+            const dirs = node.children.filter(c => c.type === 'dir').sort((a,b) => a.path.localeCompare(b.path));
+            const files = node.children.filter(c => c.type === 'file').sort((a,b) => a.path.localeCompare(b.path));
+
+            [...dirs, ...files].forEach(child => {
+                renderNodeTo(child, childrenContainer);
+            });
+            div.appendChild(childrenContainer);
+        }
+
+        parentEl.appendChild(div);
+    }
+
+    // Start with children of root
+    if (prescanCurrentTree.tree.children) {
+        const rootDirs = prescanCurrentTree.tree.children.filter(c => c.type === 'dir').sort((a,b) => a.path.localeCompare(b.path));
+        const rootFiles = prescanCurrentTree.tree.children.filter(c => c.type === 'file').sort((a,b) => a.path.localeCompare(b.path));
+        [...rootDirs, ...rootFiles].forEach(child => renderNodeTo(child, container));
+    }
+}
+
+function isDirSelected(node) {
+    // A dir is selected if all its children are selected
+    if (!node.children || node.children.length === 0) return false;
+    return node.children.every(c => c.type === 'dir' ? isDirSelected(c) : prescanSelection.has(c.path));
+}
+
+function isDirPartial(node) {
+    // True if some children selected
+    if (!node.children || node.children.length === 0) return false;
+    return node.children.some(c => c.type === 'dir' ? (isDirSelected(c) || isDirPartial(c)) : prescanSelection.has(c.path));
+}
+
+function togglePrescanNode(node, checked) {
+    if (node.type === 'file') {
+        if (checked) prescanSelection.add(node.path);
+        else prescanSelection.delete(node.path);
+    } else if (node.children) {
+        node.children.forEach(c => togglePrescanNode(c, checked));
+    }
+}
+
+function prescanToggleAll(checked) {
+    if (!prescanCurrentTree) return;
+    togglePrescanNode(prescanCurrentTree.tree, checked);
+    renderPrescanTree();
+}
+
+function prescanDocs() {
+    prescanToggleAll(false);
+    // Traverse and select matches
+    function visit(node) {
+        if (node.type === 'file') {
+            const path = node.path.toLowerCase();
+            if (path.includes('readme') || path.includes('docs/') || path.endsWith('.md') || path.includes('manual')) {
+                prescanSelection.add(node.path);
+            }
+        } else if (node.children) {
+            node.children.forEach(visit);
+        }
+    }
+    visit(prescanCurrentTree.tree);
+    renderPrescanTree();
+}
+
+function prescanRecommended() {
+    // Default heuristic: src, README, docs, contracts, no tests
+    prescanToggleAll(false);
+    function visit(node) {
+        if (node.type === 'file') {
+            const path = node.path.toLowerCase();
+            // Critical
+            if (path.includes('readme') || path.endsWith('.ai-context.yml')) {
+                prescanSelection.add(node.path);
+                return;
+            }
+            // Code
+            const parts = path.split('/');
+            if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
+                if (!path.includes('test')) {
+                     prescanSelection.add(node.path);
+                }
+            }
+        } else if (node.children) {
+            node.children.forEach(visit);
+        }
+    }
+    visit(prescanCurrentTree.tree);
+    renderPrescanTree();
+}
+
+async function runMergeFromPrescan() {
+    // Start job with include_paths
+    if (prescanSelection.size === 0) {
+        alert("Selection empty!");
+        return;
+    }
+
+    // We reuse startJob logic but injection
+    // To keep it clean, we'll manually invoke the API call here
+    // But we need to gather all other form fields first.
+
+    const btn = document.querySelector('#prescanModal button[onclick="runMergeFromPrescan()"]');
+    btn.disabled = true;
+    btn.innerText = "Launching...";
+
+    // Gather main form config
+    const repo = prescanCurrentTree.root; // Single repo
+    const level = document.getElementById('profile').value;
+    const mode = document.getElementById('mode').value;
+    const maxBytes = document.getElementById('maxBytes').value;
+    const splitSize = document.getElementById('splitSize').value;
+    const planOnly = document.getElementById('planOnly').checked;
+    const codeOnly = document.getElementById('codeOnly').checked;
+    const jsonSidecar = Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).includes('json_sidecar');
+    const pathFilter = document.getElementById('pathFilter').value.trim() || null;
+    const extRaw = document.getElementById('extFilter').value.trim();
+    const extensions = extRaw ? extRaw.split(',').map(s => s.trim()) : null;
+    const extrasCsv = Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).join(',');
+
+    const includePaths = Array.from(prescanSelection);
+
+    const payload = {
+        hub: document.getElementById('hubPath').value,
+        merges_dir: document.getElementById('mergesPath').value || null,
+        repos: [repo],
+        level: level,
+        mode: mode,
+        max_bytes: maxBytes,
+        split_size: splitSize,
+        plan_only: planOnly,
+        code_only: codeOnly,
+        json_sidecar: jsonSidecar,
+        path_filter: pathFilter,
+        extensions: extensions,
+        extras: extrasCsv,
+        include_paths: includePaths
+    };
+
+    try {
+        const res = await apiFetch(`${API_BASE}/jobs`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error("Failed to launch job");
+
+        const job = await res.json();
+        closePrescan();
+        streamLogs(job.id);
+
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = "Merge Selected";
+    }
+}
