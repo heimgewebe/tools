@@ -1263,16 +1263,18 @@ async function applyPrescanSelection() {
     const compressedPaths = [];
     function collectPaths(node) {
         const path = normalizePath(node.path);
-        // Note: isPathSelected handles null/normalization internally, but here we need path for array push
-        // if path is null, we shouldn't push it.
+
         if (node.type === 'file') {
-            if (isPathSelected(path) && path !== null) {
+            // Only add if path is valid AND selected
+            if (path !== null && isPathSelected(path)) {
                 compressedPaths.push(path);
             }
         } else if (node.type === 'dir') {
-            if (isDirSelected(node) && path !== null) {
-                compressedPaths.push(path); // Full dir
+            // If valid path AND fully selected, add dir
+            if (path !== null && isDirSelected(node)) {
+                compressedPaths.push(path);
             } else {
+                // Otherwise descend (also descends if path is null/invalid but has children)
                 if (node.children) node.children.forEach(collectPaths);
             }
         }
