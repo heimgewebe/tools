@@ -160,8 +160,9 @@ async function fetchRepos(hub) {
             let badgeHtml = '';
             if (savedPrescanSelections.has(repo)) {
                 const sel = savedPrescanSelections.get(repo);
-                const count = sel.compressed ? sel.compressed.length : 0;
-                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${count} paths selected manually">Selection</span>`;
+                const compressedCount = sel.compressed ? sel.compressed.length : 0;
+                const rawCount = sel.raw ? sel.raw.size : 0;
+                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${rawCount} selected items (compressed to ${compressedCount} path rules)">Selection</span>`;
             }
 
             div.innerHTML = `
