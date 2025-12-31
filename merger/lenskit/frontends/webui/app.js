@@ -38,7 +38,9 @@ const DEFAULT_EXTRAS = [
 // --- Utilities ---
 
 function normalizePath(p) {
-    if (typeof p !== 'string') return ".";
+    // Return null for invalid input to prevent accidental root selection (".")
+    if (typeof p !== 'string') return null;
+
     p = p.trim();
 
     // Absolute root protection
@@ -61,22 +63,28 @@ function normalizePath(p) {
 
 function setSelectionState(path, isSelected) {
     const p = normalizePath(path);
+    if (p === null) return;
     if (isSelected) prescanSelection.add(p);
     else prescanSelection.delete(p);
 }
 
 function isPathSelected(path) {
-    return prescanSelection.has(normalizePath(path));
+    const p = normalizePath(path);
+    if (p === null) return false;
+    return prescanSelection.has(p);
 }
 
 function setExpansionState(path, isExpanded) {
     const p = normalizePath(path);
+    if (p === null) return;
     if (isExpanded) prescanExpandedPaths.add(p);
     else prescanExpandedPaths.delete(p);
 }
 
 function isPathExpanded(path) {
-    return prescanExpandedPaths.has(normalizePath(path));
+    const p = normalizePath(path);
+    if (p === null) return false;
+    return prescanExpandedPaths.has(p);
 }
 
 // --- Prescan saved selections persistence ---
@@ -87,9 +95,10 @@ function loadSavedPrescanSelections() {
         for (const [repo, obj] of Object.entries(raw)) {
             // Apply normalization on load to be safe
             const rawList = Array.isArray(obj.raw) ? obj.raw : [];
-            const rawSet = new Set(rawList.map(normalizePath));
+            // Filter out nulls from normalizePath
+            const rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
 
-            const compressed = Array.isArray(obj.compressed) ? obj.compressed.map(normalizePath) : [];
+            const compressed = Array.isArray(obj.compressed) ? obj.compressed.map(normalizePath).filter(p => p !== null) : [];
             m.set(repo, { raw: rawSet, compressed });
         }
         return m;
@@ -1114,7 +1123,10 @@ function renderPrescanTree() {
 
         const label = document.createElement('span');
         label.className = isDir ? "text-blue-200 font-bold" : "text-gray-300";
-        label.innerText = normalizePath(path).split('/').pop();
+
+        // UX Enhancement: Handle root/empty path labels gracefully
+        const normalized = normalizePath(path);
+        label.innerText = normalized ? (normalized.split('/').pop() || "/") : "n/a";
 
         row.appendChild(cb);
         row.appendChild(icon);
@@ -1192,9 +1204,11 @@ function prescanDocs() {
     function visit(node) {
         if (node.type === 'file') {
             const path = normalizePath(node.path);
-            const lower = path.toLowerCase();
-            if (lower.includes('readme') || lower.includes('docs/') || lower.endsWith('.md') || lower.includes('manual')) {
-                setSelectionState(path, true);
+            if (path) { // Guard against null
+                const lower = path.toLowerCase();
+                if (lower.includes('readme') || lower.includes('docs/') || lower.endsWith('.md') || lower.includes('manual')) {
+                    setSelectionState(path, true);
+                }
             }
         } else if (node.children) {
             node.children.forEach(visit);
@@ -1210,26 +1224,28 @@ function prescanRecommended() {
     function visit(node) {
         if (node.type === 'file') {
             const path = normalizePath(node.path);
-            const lower = path.toLowerCase();
-            // Critical
-            if (lower.includes('readme') || lower.endsWith('.ai-context.yml')) {
-                setSelectionState(path, true);
-                return;
-            }
-            // Code
-            const parts = lower.split('/');
-            if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
-                // Improved test exclusion heuristic (User request E)
-                // Added __tests__ as per cherry-pick #291
-                const isTest = parts.includes('tests') ||
-                               parts.includes('__tests__') ||
-                               parts.includes('test') ||
-                               lower.includes('_test.') ||
-                               lower.includes('.test.') ||
-                               lower.includes('.spec.');
+            if (path) { // Guard against null
+                const lower = path.toLowerCase();
+                // Critical
+                if (lower.includes('readme') || lower.endsWith('.ai-context.yml')) {
+                    setSelectionState(path, true);
+                    return;
+                }
+                // Code
+                const parts = lower.split('/');
+                if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
+                    // Improved test exclusion heuristic (User request E)
+                    // Added __tests__ as per cherry-pick #291
+                    const isTest = parts.includes('tests') ||
+                                   parts.includes('__tests__') ||
+                                   parts.includes('test') ||
+                                   lower.includes('_test.') ||
+                                   lower.includes('.test.') ||
+                                   lower.includes('.spec.');
 
-                if (!isTest) {
-                     setSelectionState(path, true);
+                    if (!isTest) {
+                         setSelectionState(path, true);
+                    }
                 }
             }
         } else if (node.children) {
@@ -1247,12 +1263,14 @@ async function applyPrescanSelection() {
     const compressedPaths = [];
     function collectPaths(node) {
         const path = normalizePath(node.path);
+        // Note: isPathSelected handles null/normalization internally, but here we need path for array push
+        // if path is null, we shouldn't push it.
         if (node.type === 'file') {
-            if (isPathSelected(path)) {
+            if (isPathSelected(path) && path !== null) {
                 compressedPaths.push(path);
             }
         } else if (node.type === 'dir') {
-            if (isDirSelected(node)) {
+            if (isDirSelected(node) && path !== null) {
                 compressedPaths.push(path); // Full dir
             } else {
                 if (node.children) node.children.forEach(collectPaths);
