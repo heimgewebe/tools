@@ -35,14 +35,70 @@ const DEFAULT_EXTRAS = [
     'json_sidecar'
 ];
 
+// --- Utilities ---
+
+function normalizePath(p) {
+    // Return null for invalid input to prevent accidental root selection (".")
+    if (typeof p !== 'string') return null;
+
+    p = p.trim();
+
+    // Absolute root protection
+    if (p === "/") return "/";
+
+    if (p.startsWith("./")) {
+        p = p.substring(2);
+    }
+
+    // Remove trailing slash only if not root "/" (guarded above)
+    if (p.length > 1 && p.endsWith("/")) {
+        p = p.substring(0, p.length - 1);
+    }
+
+    if (p === "") return ".";
+    return p;
+}
+
+// --- Invariant State Wrappers ---
+
+function setSelectionState(path, isSelected) {
+    const p = normalizePath(path);
+    if (p === null) return;
+    if (isSelected) prescanSelection.add(p);
+    else prescanSelection.delete(p);
+}
+
+function isPathSelected(path) {
+    const p = normalizePath(path);
+    if (p === null) return false;
+    return prescanSelection.has(p);
+}
+
+function setExpansionState(path, isExpanded) {
+    const p = normalizePath(path);
+    if (p === null) return;
+    if (isExpanded) prescanExpandedPaths.add(p);
+    else prescanExpandedPaths.delete(p);
+}
+
+function isPathExpanded(path) {
+    const p = normalizePath(path);
+    if (p === null) return false;
+    return prescanExpandedPaths.has(p);
+}
+
 // --- Prescan saved selections persistence ---
 function loadSavedPrescanSelections() {
     try {
         const raw = JSON.parse(localStorage.getItem(PRESCAN_SAVED_KEY) || "{}");
         const m = new Map();
         for (const [repo, obj] of Object.entries(raw)) {
-            const rawSet = new Set(Array.isArray(obj.raw) ? obj.raw : []);
-            const compressed = Array.isArray(obj.compressed) ? obj.compressed : [];
+            // Apply normalization on load to be safe
+            const rawList = Array.isArray(obj.raw) ? obj.raw : [];
+            // Filter out nulls from normalizePath
+            const rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
+
+            const compressed = Array.isArray(obj.compressed) ? obj.compressed.map(normalizePath).filter(p => p !== null) : [];
             m.set(repo, { raw: rawSet, compressed });
         }
         return m;
@@ -980,10 +1036,10 @@ async function startPrescan() {
 
         // Expand root by default - use internal path which is usually '.' for relative root
         if (data.tree && data.tree.path) {
-            prescanExpandedPaths.add(data.tree.path);
+            setExpansionState(data.tree.path, true);
         } else {
             // Fallback
-            prescanExpandedPaths.add(".");
+            setExpansionState(".", true);
         }
 
         // Initial Selection: Recommended (instead of All) if empty
@@ -1018,10 +1074,10 @@ function renderPrescanTree() {
         const row = document.createElement('div');
         row.className = "flex items-center hover:bg-gray-800 py-px cursor-pointer group";
 
-        const path = node.path;
+        const path = node.path; // Normalization handled by wrappers/isPathSelected
         const isDir = node.type === 'dir';
-        const isChecked = isDir ? isDirSelected(node) : prescanSelection.has(path);
-        const isExpanded = isDir && prescanExpandedPaths.has(path);
+        const isChecked = isDir ? isDirSelected(node) : isPathSelected(path);
+        const isExpanded = isDir && isPathExpanded(path);
 
         // Determine indeterminate state for dirs
         let indeterminate = false;
@@ -1045,10 +1101,10 @@ function renderPrescanTree() {
         // Click on row toggles expansion (for dirs)
         row.onclick = (e) => {
             if (e.target !== cb && isDir) {
-                if (prescanExpandedPaths.has(path)) {
-                    prescanExpandedPaths.delete(path);
+                if (isPathExpanded(path)) {
+                    setExpansionState(path, false);
                 } else {
-                    prescanExpandedPaths.add(path);
+                    setExpansionState(path, true);
                 }
                 renderPrescanTree();
             } else if (e.target !== cb && !isDir) {
@@ -1067,7 +1123,10 @@ function renderPrescanTree() {
 
         const label = document.createElement('span');
         label.className = isDir ? "text-blue-200 font-bold" : "text-gray-300";
-        label.innerText = path.split('/').pop();
+
+        // UX Enhancement: Handle root/empty path labels gracefully
+        const normalized = normalizePath(path);
+        label.innerText = normalized ? (normalized.split('/').pop() || "/") : "n/a";
 
         row.appendChild(cb);
         row.appendChild(icon);
@@ -1088,8 +1147,8 @@ function renderPrescanTree() {
             const childrenContainer = document.createElement('div');
             childrenContainer.className = "pl-4 border-l border-gray-800 ml-2";
 
-            const dirs = node.children.filter(c => c.type === 'dir').sort((a,b) => a.path.localeCompare(b.path));
-            const files = node.children.filter(c => c.type === 'file').sort((a,b) => a.path.localeCompare(b.path));
+            const dirs = node.children.filter(c => c.type === 'dir').sort((a,b) => (normalizePath(a.path) || "").localeCompare(normalizePath(b.path) || ""));
+            const files = node.children.filter(c => c.type === 'file').sort((a,b) => (normalizePath(a.path) || "").localeCompare(normalizePath(b.path) || ""));
 
             [...dirs, ...files].forEach(child => {
                 renderNodeTo(child, childrenContainer);
@@ -1107,21 +1166,28 @@ function renderPrescanTree() {
 function isDirSelected(node) {
     // A dir is selected if all its children are selected
     if (!node.children || node.children.length === 0) return false;
-    return node.children.every(c => c.type === 'dir' ? isDirSelected(c) : prescanSelection.has(c.path));
+    return node.children.every(c => c.type === 'dir' ? isDirSelected(c) : isPathSelected(c.path));
 }
 
 function isDirPartial(node) {
     // True if some children selected
     if (!node.children || node.children.length === 0) return false;
-    return node.children.some(c => c.type === 'dir' ? (isDirSelected(c) || isDirPartial(c)) : prescanSelection.has(c.path));
+    return node.children.some(c => c.type === 'dir' ? (isDirSelected(c) || isDirPartial(c)) : isPathSelected(c.path));
 }
 
-function togglePrescanNode(node, checked) {
-    if (node.type === 'file') {
-        if (checked) prescanSelection.add(node.path);
-        else prescanSelection.delete(node.path);
-    } else if (node.children) {
-        node.children.forEach(c => togglePrescanNode(c, checked));
+function togglePrescanNode(rootNode, checked) {
+    // Iterative approach to avoid call stack overflow on deep trees
+    const stack = [rootNode];
+    while (stack.length > 0) {
+        const node = stack.pop();
+        if (node.type === 'file') {
+            setSelectionState(node.path, checked);
+        } else if (node.children) {
+            // Push children to stack
+            for (let i = 0; i < node.children.length; i++) {
+                stack.push(node.children[i]);
+            }
+        }
     }
 }
 
@@ -1137,9 +1203,12 @@ function prescanDocs() {
     // Traverse and select matches
     function visit(node) {
         if (node.type === 'file') {
-            const path = node.path.toLowerCase();
-            if (path.includes('readme') || path.includes('docs/') || path.endsWith('.md') || path.includes('manual')) {
-                prescanSelection.add(node.path);
+            const path = normalizePath(node.path);
+            if (path) { // Guard against null
+                const lower = path.toLowerCase();
+                if (lower.includes('readme') || lower.includes('docs/') || lower.endsWith('.md') || lower.includes('manual')) {
+                    setSelectionState(path, true);
+                }
             }
         } else if (node.children) {
             node.children.forEach(visit);
@@ -1154,26 +1223,29 @@ function prescanRecommended() {
     prescanToggleAll(false);
     function visit(node) {
         if (node.type === 'file') {
-            const path = node.path.toLowerCase();
-            // Critical
-            if (path.includes('readme') || path.endsWith('.ai-context.yml')) {
-                prescanSelection.add(node.path);
-                return;
-            }
-            // Code
-            const parts = path.split('/');
-            if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
-                // Improved test exclusion heuristic (User request E)
-                // Added __tests__ as per cherry-pick #291
-                const isTest = parts.includes('tests') ||
-                               parts.includes('__tests__') ||
-                               parts.includes('test') ||
-                               path.includes('_test.') ||
-                               path.includes('.test.') ||
-                               path.includes('.spec.');
+            const path = normalizePath(node.path);
+            if (path) { // Guard against null
+                const lower = path.toLowerCase();
+                // Critical
+                if (lower.includes('readme') || lower.endsWith('.ai-context.yml')) {
+                    setSelectionState(path, true);
+                    return;
+                }
+                // Code
+                const parts = lower.split('/');
+                if (parts.includes('src') || parts.includes('contracts') || parts.includes('docs')) {
+                    // Improved test exclusion heuristic (User request E)
+                    // Added __tests__ as per cherry-pick #291
+                    const isTest = parts.includes('tests') ||
+                                   parts.includes('__tests__') ||
+                                   parts.includes('test') ||
+                                   lower.includes('_test.') ||
+                                   lower.includes('.test.') ||
+                                   lower.includes('.spec.');
 
-                if (!isTest) {
-                     prescanSelection.add(node.path);
+                    if (!isTest) {
+                         setSelectionState(path, true);
+                    }
                 }
             }
         } else if (node.children) {
@@ -1190,14 +1262,19 @@ async function applyPrescanSelection() {
     // Path Compression Logic
     const compressedPaths = [];
     function collectPaths(node) {
+        const path = normalizePath(node.path);
+
         if (node.type === 'file') {
-            if (prescanSelection.has(node.path)) {
-                compressedPaths.push(node.path);
+            // Only add if path is valid AND selected
+            if (path !== null && isPathSelected(path)) {
+                compressedPaths.push(path);
             }
         } else if (node.type === 'dir') {
-            if (isDirSelected(node)) {
-                compressedPaths.push(node.path); // Full dir
+            // If valid path AND fully selected, add dir
+            if (path !== null && isDirSelected(node)) {
+                compressedPaths.push(path);
             } else {
+                // Otherwise descend (also descends if path is null/invalid but has children)
                 if (node.children) node.children.forEach(collectPaths);
             }
         }
