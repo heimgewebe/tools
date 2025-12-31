@@ -1147,8 +1147,8 @@ function renderPrescanTree() {
             const childrenContainer = document.createElement('div');
             childrenContainer.className = "pl-4 border-l border-gray-800 ml-2";
 
-            const dirs = node.children.filter(c => c.type === 'dir').sort((a,b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
-            const files = node.children.filter(c => c.type === 'file').sort((a,b) => normalizePath(a.path).localeCompare(normalizePath(b.path)));
+            const dirs = node.children.filter(c => c.type === 'dir').sort((a,b) => (normalizePath(a.path) || "").localeCompare(normalizePath(b.path) || ""));
+            const files = node.children.filter(c => c.type === 'file').sort((a,b) => (normalizePath(a.path) || "").localeCompare(normalizePath(b.path) || ""));
 
             [...dirs, ...files].forEach(child => {
                 renderNodeTo(child, childrenContainer);
