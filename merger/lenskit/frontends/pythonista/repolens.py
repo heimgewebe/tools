@@ -2522,8 +2522,10 @@ class MergerUI(object):
             
             # Calculate raw paths (all selected file paths) for UI truth
             # CRITICAL: raw must contain ONLY files, never directories
-            raw_paths = [normalize_path(item["path"]) for item in flat_items 
-                         if item["selected"] and item["type"] == "file"]
+            raw_paths = [
+                normalize_path(item["path"]) for item in flat_items 
+                if item["selected"] and item["type"] == "file"
+            ]
             
             # Handle different modes
             if mode == 'remove':
