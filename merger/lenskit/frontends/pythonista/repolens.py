@@ -2591,7 +2591,12 @@ class MergerUI(object):
                             self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
                         else:
                             # Union of existing and new for both fields
-                            merged_raw = set(existing_raw or [])
+                            # DEFENSIVE: Filter existing_raw to ensure files-only contract
+                            # (protects against legacy/corrupted data where raw might contain dirs)
+                            file_paths_set = {normalize_path(item["path"]) for item in flat_items if item["type"] == "file"}
+                            filtered_existing_raw = [p for p in (existing_raw or []) if p in file_paths_set]
+                            
+                            merged_raw = set(filtered_existing_raw)
                             merged_raw.update(raw_paths)
                             
                             merged_compressed = set(existing_compressed or [])

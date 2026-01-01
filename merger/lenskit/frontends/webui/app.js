@@ -1657,8 +1657,11 @@ async function applyPrescanSelectionInternal(append) {
                          if (prescanCurrentTree && prescanCurrentTree.tree) {
                              mergedRaw = materializeRawFromCompressed(prescanCurrentTree.tree, mergedCompressed);
                          } else {
-                             // Degraded fallback: use compressed as raw
-                             mergedRaw = new Set(mergedCompressed);
+                             // Cannot materialize raw without tree. Keep raw as null (degraded state).
+                             // This maintains the files-only contract: raw is either null or contains only files.
+                             // UI will need to handle this degraded state on reload (tree required for full restore).
+                             console.warn('Cannot materialize raw from compressed without tree; raw will be null (degraded)');
+                             mergedRaw = null;
                          }
                      }
 
