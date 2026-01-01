@@ -121,6 +121,41 @@ except Exception:
 _ACTIVE_MERGER_VIEW = None
 
 
+def normalize_path(p: str) -> str:
+    """
+    Normalize a path for consistent comparisons.
+    Similar to WebUI's normalizePath function.
+    
+    Rules:
+    - Remove leading "./"
+    - Remove trailing "/" (except for root)
+    - Keep "/" as separator
+    - Empty string becomes "."
+    """
+    if not isinstance(p, str):
+        return "."
+    
+    p = p.strip()
+    
+    # Handle absolute root
+    if p == "/":
+        return "/"
+    
+    # Remove leading "./"
+    if p.startswith("./"):
+        p = p[2:]
+    
+    # Remove trailing "/" (but not if it's just "/")
+    if len(p) > 1 and p.endswith("/"):
+        p = p[:-1]
+    
+    # Empty becomes "."
+    if p == "":
+        return "."
+    
+    return p
+
+
 def safe_script_path() -> Path:
     """
     Versucht, den Pfad dieses Skripts robust zu bestimmen.
@@ -507,8 +542,10 @@ class MergerUI(object):
         self._load_ignored_repos_from_state()
 
         # Saved Prescan Selections (Pool)
-        # repo_name -> list of paths (or None for ALL)
-        self.saved_prescan_selections = {}
+        # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
+        # - raw: None (ALL) or list of all selected file paths (for UI truth)
+        # - compressed: None (ALL) or list of compressed paths (dirs/files for backend)
+        self.saved_prescan_selections: Dict[str, Dict[str, Optional[List[str]]]] = {}
 
         # Auto-run / warm the extractor on startup (best-effort).
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
@@ -1320,6 +1357,71 @@ class MergerUI(object):
         if isinstance(data, dict):
             self.ignored_repos = set(data.get("ignored_repos", []))
 
+    def _serialize_prescan_pool(self) -> Dict[str, Any]:
+        """
+        Serialize prescan pool to structured format.
+        Internal format is already {"raw": ..., "compressed": ...}.
+        """
+        serialized = {}
+        for repo, selection in self.saved_prescan_selections.items():
+            if isinstance(selection, dict):
+                # Already in structured format
+                serialized[repo] = {
+                    "raw": selection.get("raw"),
+                    "compressed": selection.get("compressed")
+                }
+            else:
+                # Shouldn't happen with new code, but handle legacy just in case
+                if selection is None:
+                    serialized[repo] = {"raw": None, "compressed": None}
+                elif isinstance(selection, list):
+                    serialized[repo] = {"raw": selection, "compressed": selection}
+        return serialized
+
+    def _deserialize_prescan_pool(self, pool_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """
+        Deserialize prescan pool with migration support.
+        Handles legacy formats and converts to structured internal representation.
+        
+        Internal representation (structured):
+        - {"raw": None, "compressed": None}: ALL state
+        - {"raw": list[str], "compressed": list[str]}: Partial selection
+        
+        Returns dict mapping repo -> {"raw": ..., "compressed": ...}
+        """
+        deserialized = {}
+        for repo, selection in pool_data.items():
+            if selection is None:
+                # ALL state in legacy format
+                deserialized[repo] = {"raw": None, "compressed": None}
+            elif isinstance(selection, dict):
+                # Structured format - preserve both fields
+                raw = selection.get("raw")
+                compressed = selection.get("compressed")
+                
+                if raw is None and compressed is None:
+                    # ALL state
+                    deserialized[repo] = {"raw": None, "compressed": None}
+                else:
+                    # Partial - keep both raw and compressed
+                    # Normalize paths for consistency
+                    normalized_raw = [normalize_path(p) for p in raw] if (raw and isinstance(raw, list)) else None
+                    normalized_compressed = [normalize_path(p) for p in compressed] if (compressed and isinstance(compressed, list)) else None
+                    deserialized[repo] = {
+                        "raw": normalized_raw,
+                        "compressed": normalized_compressed
+                    }
+            elif isinstance(selection, list):
+                # Legacy format: simple list - use for both raw and compressed
+                # Filter out None values and validate strings
+                valid_paths = [p for p in selection if isinstance(p, str)]
+                normalized = [normalize_path(p) for p in valid_paths] if valid_paths else None
+                deserialized[repo] = {"raw": normalized, "compressed": normalized}
+            else:
+                # Unknown format - skip
+                pass
+        return deserialized
+
     def save_last_state(self, ignore_only: bool = False) -> None:
         """
         Speichert den UI-Zustand in einer JSON-Datei.
@@ -1376,7 +1478,7 @@ class MergerUI(object):
                         "heatmap": self.extras_config.heatmap,
                         "json_sidecar": self.extras_config.json_sidecar,
                     },
-                    "prescan_pool": self.saved_prescan_selections,
+                    "prescan_pool": self._serialize_prescan_pool(),
                 }
             )
 
@@ -1441,8 +1543,8 @@ class MergerUI(object):
             if "json_sidecar" in extras_data:
                 self.extras_config.json_sidecar = extras_data["json_sidecar"]
 
-        # Restore Prescan Pool
-        self.saved_prescan_selections = data.get("prescan_pool", {})
+        # Restore Prescan Pool (with migration support)
+        self.saved_prescan_selections = self._deserialize_prescan_pool(data.get("prescan_pool", {}))
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
@@ -2191,45 +2293,43 @@ class MergerUI(object):
 
         # Load existing selection from pool if available
         # This supports the "Append" workflow by initializing with previous state
-        existing_pool_paths = self.saved_prescan_selections.get(root_name)
+        existing_pool_entry = self.saved_prescan_selections.get(root_name)
 
         # Logic:
-        # - If pool has entry:
-        #   - If None (ALL): Select everything.
-        #   - If List: Select those paths.
+        # - If pool has entry (dict):
+        #   - If raw is None: ALL state - select everything
+        #   - If raw is list: Use raw for UI truth (not compressed)
         # - If no pool entry:
         #   - Run Heuristic (Recommended).
 
-        if existing_pool_paths is None and root_name in self.saved_prescan_selections:
-            # ALL selected explicitly
-            for item in flat_items:
-                item["selected"] = True
-        elif isinstance(existing_pool_paths, list):
-            # Partial selection from pool
-            pool_set = set(existing_pool_paths)
-            for item in flat_items:
-                # Direct match or folder match?
-                # Pool stores specific file paths or compressed dir paths?
-                # Ideally we store exact paths.
-                # If pool has 'src/', we should select 'src/' and children?
-                # Check normalized paths.
-                if item["path"] in pool_set:
-                    item["selected"] = True
-
-                # Check if parent dir is in pool
-                # (Simple containment check)
-                # This handles compressed paths like 'src/' selecting 'src/main.py'
-                # Note: item["path"] is relative to repo root (e.g. 'src/main.py')
-                # If pool has 'src', it matches 'src'.
-                # For children: we need to check if any parent path is in pool_set.
-
-                parts = item["path"].split('/')
-                # Check cumulative parts: 'src', 'src/sub', etc.
-                for i in range(len(parts)):
-                    sub = "/".join(parts[:i+1])
-                    if sub in pool_set:
+        if existing_pool_entry:
+            if isinstance(existing_pool_entry, dict):
+                raw = existing_pool_entry.get("raw")
+                if raw is None:
+                    # ALL state - select everything
+                    for item in flat_items:
                         item["selected"] = True
-                        break
+                elif isinstance(raw, list):
+                    # Partial selection from pool - use raw for UI truth
+                    # Normalize paths for consistent matching
+                    pool_set = set(normalize_path(p) for p in raw)
+                    for item in flat_items:
+                        normalized_item_path = normalize_path(item["path"])
+                        # Direct match
+                        if normalized_item_path in pool_set:
+                            item["selected"] = True
+                        else:
+                            # Check if parent dir is in pool (for compressed paths)
+                            parts = normalized_item_path.split('/')
+                            for i in range(len(parts)):
+                                sub = "/".join(parts[:i+1])
+                                if sub in pool_set:
+                                    item["selected"] = True
+                                    break
+            else:
+                # Legacy format - shouldn't happen after migration
+                # Run heuristic as fallback
+                pass
         else:
             # No existing selection -> Heuristic
             # Run heuristic logic (same as prescanRecommended)
@@ -2256,6 +2356,21 @@ class MergerUI(object):
         sheet.background_color = "#111111"
         sheet.frame = (0, 0, 600, 800)
 
+        # Track selection mode explicitly for better state management
+        # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
+        selection_state = {
+            'mode': 'partial',  # 'all', 'partial', or 'none'
+            'materialized_all': None  # Stores all paths when materializing from ALL state
+        }
+        
+        # Initialize selection mode based on current selection
+        if existing_pool_paths is None and root_name in self.saved_prescan_selections:
+            selection_state['mode'] = 'all'
+        elif not any(item["selected"] for item in flat_items):
+            selection_state['mode'] = 'none'
+        else:
+            selection_state['mode'] = 'partial'
+
         # Header Stats
         stats_lbl = ui.Label(frame=(10, 10, 580, 20))
         stats_lbl.text = f"{prescan_data['file_count']} files • {parse_human_size(str(prescan_data['total_bytes']))} bytes total" # approximate
@@ -2270,6 +2385,11 @@ class MergerUI(object):
 
         def toggle_all(val):
             for i in flat_items: i["selected"] = val
+            # Update selection mode
+            if val:
+                selection_state['mode'] = 'all'
+            else:
+                selection_state['mode'] = 'none'
             tv.reload_data()
 
         btn_all = ui.Button(title="All")
@@ -2320,7 +2440,23 @@ class MergerUI(object):
                 # Toggle logic
                 item = flat_items[row]
                 new_state = not item["selected"]
+                
+                # Handle ALL state materialization if needed
+                if selection_state['mode'] == 'all' and not new_state:
+                    # Deselecting from ALL state - materialize all paths first
+                    selection_state['materialized_all'] = set(i["path"] for i in flat_items)
+                    selection_state['mode'] = 'partial'
+                
                 self._set_selected_recursive(item, new_state)
+                
+                # Update selection mode after change
+                if all(i["selected"] for i in flat_items):
+                    selection_state['mode'] = 'all'
+                elif not any(i["selected"] for i in flat_items):
+                    selection_state['mode'] = 'none'
+                else:
+                    selection_state['mode'] = 'partial'
+                
                 tv.reload_data()
 
             def _set_selected_recursive(self, item, state):
@@ -2341,32 +2477,28 @@ class MergerUI(object):
         tv.delegate = ds
         sheet.add_subview(tv)
 
-        # Bottom Bar: Cancel / Merge
+        # Bottom Bar: Remove / Cancel / Replace / Append
         bar_y = sheet.height - 50
-
-        btn_merge = ui.Button(title="Merge Selected")
-        btn_merge.frame = (sheet.width - 160, bar_y, 150, 40)
-        btn_merge.flex = "LT" # Left margin flex, Top margin flex
-        btn_merge.background_color = "#007aff"
-        btn_merge.tint_color = "white"
-        btn_merge.corner_radius = 6
-
-        def do_merge(sender):
-            # Path Compression
-            # If a dir is fully selected, pass dir. Else pass selected files.
-
+        
+        # Shared pool update logic
+        def _pool_update(mode):
+            """
+            Update the prescan selection pool.
+            mode: 'replace', 'append', or 'remove'
+            """
+            # Path Compression: If a dir is fully selected, pass dir. Else pass selected files.
             compressed_paths = []
-
+            
             # Create a map for quick lookup of selection status by path
             selection_map = {item["path"]: item["selected"] for item in flat_items}
-
+            
             def is_dir_fully_selected(node):
                 if node["type"] == "file":
                     return selection_map.get(node["path"], False)
                 if node.get("children"):
                     return all(is_dir_fully_selected(c) for c in node["children"])
                 return True # Empty dir considered selected
-
+            
             def collect(node):
                 if node["type"] == "file":
                     if selection_map.get(node["path"], False):
@@ -2379,84 +2511,143 @@ class MergerUI(object):
                         if node.get("children"):
                             for c in node["children"]:
                                 collect(c)
-
+            
             collect(root_node)
-
-            # Fallback
-            if not compressed_paths and any(selection_map.values()):
-                 compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
-
-            # --- Append Logic (Selection Pool) ---
-            # Instead of just setting temp paths, we update the pool.
-            # "Append" means Union of existing pool and new selection.
-
-            new_selection = compressed_paths
+            
+            # Normalize compressed paths
+            compressed_paths = [normalize_path(p) for p in compressed_paths]
+            
+            # Calculate raw paths (all selected file paths) for UI truth
+            raw_paths = [normalize_path(item["path"]) for item in flat_items if item["selected"]]
+            
+            # Handle different modes
+            if mode == 'remove':
+                # Remove from pool
+                if root_name in self.saved_prescan_selections:
+                    del self.saved_prescan_selections[root_name]
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Removed selection pool for {root_name}", "success", 1.5)
+                sheet.close()
+                return
+            
+            # Get current selection mode
+            current_mode = selection_state['mode']
+            
             # Check if we have an existing selection for this repo
             existing = self.saved_prescan_selections.get(root_name)
-
-            final_selection = None
-
-            # Cases:
-            # 1. New is ALL (we can't really detect "ALL" easily here unless we check vs total file count,
-            #    but assuming user selected everything manually or hit 'All').
-            #    Let's check if ALL items are selected.
-            all_selected = all(item["selected"] for item in flat_items)
-
-            if all_selected:
-                final_selection = None # Mark as ALL
-            else:
-                if existing is None and root_name in self.saved_prescan_selections:
-                    # Existing was ALL. Union(ALL, anything) = ALL.
-                    final_selection = None
-                else:
-                    # Existing was Partial (list) or None (nothing)
-                    current_set = set(new_selection)
-                    if existing:
-                        current_set.update(existing)
-                    final_selection = sorted(list(current_set))
-
-            # Save to pool
-            if final_selection is None:
-                # Explicitly ALL
-                self.saved_prescan_selections[root_name] = None
-            elif not final_selection:
-                # Empty -> Remove from pool? Or keep empty?
-                # If user unselected everything, "Append" logic suggests we keep old?
-                # No, "Append" applies when ADDING to a pool.
-                # If I am in the edit view, I see the current state (Old + Changes).
-                # If I uncheck something, I expect it removed.
-                # So "Append" happens at LOAD time (loading old), effectively.
-                # When saving back, we save the VISIBLE state.
-                # The logic inside 'do_merge' captures the FINAL state of the edit session.
-                # So we just save `new_selection`?
-                # Wait. If I opened the dialog, I loaded `existing`.
-                # If I added files, `new_selection` contains `existing + added`.
-                # So `final_selection` is just `new_selection` (or `compressed_paths`).
-                # The "Union" happened when we initialized the UI!
-
-                # So here we just save what is currently selected.
-                self.saved_prescan_selections[root_name] = new_selection
-                if not new_selection:
-                    # Cleanup empty entry
+            
+            if mode == 'replace':
+                # Replace mode: overwrite existing selection
+                if current_mode == 'all':
+                    # ALL selected
+                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                elif current_mode == 'none':
+                    # Nothing selected - remove from pool
                     if root_name in self.saved_prescan_selections:
                         del self.saved_prescan_selections[root_name]
-            else:
-                self.saved_prescan_selections[root_name] = final_selection
-
-            # Persist immediately
-            self.save_last_state()
-
-            # Set temp paths for immediate run (though run_merge should look at pool now)
-            # We'll update run_merge to prefer pool.
-            # But for backward compat/robustness we can set it here too?
-            # Actually, let's rely on pool in run_merge.
-
+                else:
+                    # Partial selection - store both raw and compressed
+                    if compressed_paths or raw_paths:
+                        self.saved_prescan_selections[root_name] = {
+                            "raw": raw_paths if raw_paths else None,
+                            "compressed": compressed_paths if compressed_paths else None
+                        }
+                    else:
+                        # Empty selection - remove from pool
+                        if root_name in self.saved_prescan_selections:
+                            del self.saved_prescan_selections[root_name]
+                
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Replaced selection pool for {root_name}", "success", 1.5)
+                
+            elif mode == 'append':
+                # Append mode: union with existing selection
+                if current_mode == 'none':
+                    # Nothing selected in current view - no-op with feedback
+                    if console:
+                        console.hud_alert("No changes: no items selected in append mode", "error", 2.0)
+                    return # Don't close dialog
+                
+                if current_mode == 'all':
+                    # ALL selected - ALL overrides everything
+                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                else:
+                    # Partial selection - union both raw and compressed
+                    if existing and isinstance(existing, dict):
+                        existing_raw = existing.get("raw")
+                        existing_compressed = existing.get("compressed")
+                        
+                        if existing_raw is None and existing_compressed is None:
+                            # Existing was ALL. Union(ALL, Partial) = ALL
+                            self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                        else:
+                            # Union of existing and new for both fields
+                            merged_raw = set(existing_raw or [])
+                            merged_raw.update(raw_paths)
+                            
+                            merged_compressed = set(existing_compressed or [])
+                            merged_compressed.update(compressed_paths)
+                            
+                            self.saved_prescan_selections[root_name] = {
+                                "raw": sorted(list(merged_raw)) if merged_raw else None,
+                                "compressed": sorted(list(merged_compressed)) if merged_compressed else None
+                            }
+                    else:
+                        # No existing or legacy format - just save current
+                        self.saved_prescan_selections[root_name] = {
+                            "raw": raw_paths if raw_paths else None,
+                            "compressed": compressed_paths if compressed_paths else None
+                        }
+                
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
+            
             sheet.close()
             # Trigger merge
             self.run_merge(None)
-
-        btn_merge.action = do_merge
-        sheet.add_subview(btn_merge)
+        
+        # Remove button (left side)
+        btn_remove = ui.Button(title="Remove")
+        btn_remove.frame = (10, bar_y, 80, 40)
+        btn_remove.flex = "RT" # Right margin flex, Top margin flex
+        btn_remove.background_color = "#ff3b30"
+        btn_remove.tint_color = "white"
+        btn_remove.corner_radius = 6
+        btn_remove.action = lambda s: _pool_update('remove')
+        sheet.add_subview(btn_remove)
+        
+        # Cancel button (right side)
+        btn_cancel = ui.Button(title="Cancel")
+        btn_cancel.frame = (sheet.width - 310, bar_y, 70, 40)
+        btn_cancel.flex = "LT" # Left margin flex, Top margin flex
+        btn_cancel.background_color = "#444444"
+        btn_cancel.tint_color = "white"
+        btn_cancel.corner_radius = 6
+        btn_cancel.action = lambda s: sheet.close()
+        sheet.add_subview(btn_cancel)
+        
+        # Replace button (right side)
+        btn_replace = ui.Button(title="Replace")
+        btn_replace.frame = (sheet.width - 230, bar_y, 110, 40)
+        btn_replace.flex = "LT" # Left margin flex, Top margin flex
+        btn_replace.background_color = "#007aff"
+        btn_replace.tint_color = "white"
+        btn_replace.corner_radius = 6
+        btn_replace.action = lambda s: _pool_update('replace')
+        sheet.add_subview(btn_replace)
+        
+        # Append button (right side)
+        btn_append = ui.Button(title="Append")
+        btn_append.frame = (sheet.width - 110, bar_y, 100, 40)
+        btn_append.flex = "LT" # Left margin flex, Top margin flex
+        btn_append.background_color = "#34c759"
+        btn_append.tint_color = "white"
+        btn_append.corner_radius = 6
+        btn_append.action = lambda s: _pool_update('append')
+        sheet.add_subview(btn_append)
 
         sheet.present("sheet")
 
@@ -2627,15 +2818,24 @@ class MergerUI(object):
             # Dictionary.get() returns None if missing.
             # We need to distinguish "Explicit ALL (None)" vs "Missing (None)".
 
+            # Resolve include_paths for this specific repo
+            # 1. Check pool - use compressed field for backend efficiency
+            pool_entry = self.saved_prescan_selections.get(name)
+
             use_include_paths = None
-            if name in self.saved_prescan_selections:
-                val = self.saved_prescan_selections[name]
-                if val is None:
-                    # Explicit ALL -> include_paths = None (meaning all)
-                    use_include_paths = None
+            if pool_entry:
+                if isinstance(pool_entry, dict):
+                    # Structured format - use compressed for backend
+                    compressed = pool_entry.get("compressed")
+                    if compressed is None:
+                        # Explicit ALL -> include_paths = None (meaning all)
+                        use_include_paths = None
+                    else:
+                        # List of compressed paths
+                        use_include_paths = compressed
                 else:
-                    # List of paths
-                    use_include_paths = val
+                    # Legacy format (shouldn't happen after migration)
+                    use_include_paths = pool_entry if pool_entry else None
             else:
                 # Not in pool -> Default behavior (All, filtered by ext/path_filter)
                 use_include_paths = None
