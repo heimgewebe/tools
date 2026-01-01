@@ -15,9 +15,12 @@ let currentPickerPath = null;
 let currentPickerToken = null; // For token-based navigation
 
 let prescanCurrentTree = null;
-let prescanSelection = new Set(); // Stores paths of selected files (and implicitly dirs)
+// prescanSelection is Tri-State:
+// null = ALL selected
+// Set() = Partial/None (empty set = none)
+let prescanSelection = new Set();
 let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
-let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set, compressed: Array }
+let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set|null, compressed: Array|null }
 
 // Available Extras
 const EXTRAS_OPTIONS = [
@@ -59,18 +62,53 @@ function normalizePath(p) {
     return p;
 }
 
+// Helper to collect all file paths from the current tree for materialization
+function getAllPathsInTree(treeNode) {
+    const paths = new Set();
+    function visit(node) {
+        if (node.type === 'file') {
+             const p = normalizePath(node.path);
+             if (p) paths.add(p);
+        }
+        if (node.children) node.children.forEach(visit);
+    }
+    visit(treeNode);
+    return paths;
+}
+
 // --- Invariant State Wrappers ---
 
 function setSelectionState(path, isSelected) {
     const p = normalizePath(path);
     if (p === null) return;
-    if (isSelected) prescanSelection.add(p);
-    else prescanSelection.delete(p);
+
+    if (prescanSelection === null) {
+        // Current state is ALL
+        if (isSelected) return; // Already selected
+
+        // Deselecting one item from ALL -> Materialize
+        // We must convert "ALL" (concept) to "Set of all paths" (concrete) minus the one being deselected.
+        if (prescanCurrentTree) {
+             prescanSelection = getAllPathsInTree(prescanCurrentTree.tree);
+             prescanSelection.delete(p);
+        } else {
+             // Fallback if no tree (shouldn't happen)
+             prescanSelection = new Set();
+        }
+    } else {
+        // Current state is Partial (Set)
+        if (isSelected) prescanSelection.add(p);
+        else prescanSelection.delete(p);
+    }
 }
 
 function isPathSelected(path) {
     const p = normalizePath(path);
     if (p === null) return false;
+
+    // If selection is null, it means EVERYTHING is selected
+    if (prescanSelection === null) return true;
+
     return prescanSelection.has(p);
 }
 
@@ -93,12 +131,19 @@ function loadSavedPrescanSelections() {
         const raw = JSON.parse(localStorage.getItem(PRESCAN_SAVED_KEY) || "{}");
         const m = new Map();
         for (const [repo, obj] of Object.entries(raw)) {
-            // Apply normalization on load to be safe
-            const rawList = Array.isArray(obj.raw) ? obj.raw : [];
-            // Filter out nulls from normalizePath
-            const rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
+            // raw can be null (ALL) or array
+            let rawSet = null;
+            if (obj.raw !== null) {
+                const rawList = Array.isArray(obj.raw) ? obj.raw : [];
+                rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
+            }
 
-            const compressed = Array.isArray(obj.compressed) ? obj.compressed.map(normalizePath).filter(p => p !== null) : [];
+            // compressed can be null (ALL) or array
+            let compressed = null;
+            if (obj.compressed !== null) {
+                compressed = Array.isArray(obj.compressed) ? obj.compressed.map(normalizePath).filter(p => p !== null) : [];
+            }
+
             m.set(repo, { raw: rawSet, compressed });
         }
         return m;
@@ -110,7 +155,10 @@ function loadSavedPrescanSelections() {
 function persistSavedPrescanSelections() {
     const obj = {};
     for (const [repo, sel] of savedPrescanSelections.entries()) {
-        obj[repo] = { raw: Array.from(sel.raw || []), compressed: sel.compressed || [] };
+        obj[repo] = {
+            raw: sel.raw ? Array.from(sel.raw) : null,
+            compressed: sel.compressed
+        };
     }
     localStorage.setItem(PRESCAN_SAVED_KEY, JSON.stringify(obj));
 }
@@ -216,9 +264,16 @@ async function fetchRepos(hub) {
             let badgeHtml = '';
             if (savedPrescanSelections.has(repo)) {
                 const sel = savedPrescanSelections.get(repo);
-                const compressedCount = sel.compressed ? sel.compressed.length : 0;
-                const rawCount = sel.raw ? sel.raw.size : 0;
-                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${rawCount} selected items (compressed to ${compressedCount} path rules)">Selection</span>`;
+                let title = "";
+                if (sel.compressed === null) {
+                    title = "ALL included (Full Repo)";
+                } else {
+                    const compressedCount = sel.compressed.length;
+                    const rawCount = sel.raw ? sel.raw.size : 0;
+                    title = `${rawCount} selected items (compressed to ${compressedCount} path rules)`;
+                }
+
+                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${title}">Selection</span>`;
             }
 
             div.innerHTML = `
@@ -314,6 +369,118 @@ function renderSets() {
         badge.appendChild(del);
         div.appendChild(badge);
     });
+}
+
+// --- Selection Pool Management (New) ---
+
+function renderSelectionPool() {
+    const container = document.getElementById('selectionPool');
+    if (!container) return; // Guard if element missing
+
+    container.innerHTML = '';
+    const pool = savedPrescanSelections;
+
+    if (pool.size === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+    container.classList.remove('hidden');
+
+    // Header
+    const header = document.createElement('div');
+    header.className = "font-bold text-blue-300 text-xs mb-2 flex justify-between items-center border-b border-gray-700 pb-1";
+    header.innerHTML = `<span>Active Pool (${pool.size})</span> <button onclick="clearPool()" class="text-red-400 hover:text-white text-[10px]">Clear</button>`;
+    container.appendChild(header);
+
+    // List
+    pool.forEach((val, repo) => {
+        const div = document.createElement('div');
+        div.className = "flex justify-between items-center text-xs bg-gray-700 p-1 rounded mb-1";
+
+        let info = "";
+        if (val.compressed === null) info = "ALL";
+        else info = `${val.compressed.length} rules`;
+
+        div.innerHTML = `
+            <span class="font-mono truncate w-24 font-bold text-gray-300">${repo}</span>
+            <span class="text-gray-400">${info}</span>
+            <button onclick="removeFromPool('${repo}')" class="text-red-400 hover:text-white ml-2">×</button>
+        `;
+        container.appendChild(div);
+    });
+
+    // Run Button
+    const btn = document.createElement('button');
+    btn.className = "w-full bg-green-700 hover:bg-green-600 text-white text-xs font-bold py-1 rounded mt-2";
+    btn.innerText = "Run Merge from Pool";
+    btn.onclick = runPoolMerge;
+    container.appendChild(btn);
+}
+
+function clearPool() {
+    if(confirm("Clear the entire selection pool?")) {
+        savedPrescanSelections.clear();
+        persistSavedPrescanSelections();
+        renderSelectionPool();
+        fetchRepos(document.getElementById('hubPath').value);
+    }
+}
+
+function removeFromPool(repo) {
+    savedPrescanSelections.delete(repo);
+    persistSavedPrescanSelections();
+    renderSelectionPool();
+    fetchRepos(document.getElementById('hubPath').value);
+}
+
+async function runPoolMerge(e) {
+    if (e) e.preventDefault();
+    if (savedPrescanSelections.size === 0) return;
+
+    // Use default config from form for context (profile, mode, etc.)
+    const commonPayload = {
+        hub: document.getElementById('hubPath').value,
+        merges_dir: document.getElementById('mergesPath').value || null,
+        level: document.getElementById('profile').value,
+        mode: document.getElementById('mode').value,
+        max_bytes: document.getElementById('maxBytes').value,
+        split_size: document.getElementById('splitSize').value,
+        plan_only: document.getElementById('planOnly').checked,
+        code_only: document.getElementById('codeOnly').checked,
+        json_sidecar: document.querySelector('input[value="json_sidecar"]').checked,
+        path_filter: null, // Pool overrides global filters
+        extensions: null,  // Pool overrides global filters
+        extras: Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).join(',')
+    };
+
+    const jobsToStart = [];
+    savedPrescanSelections.forEach((val, repo) => {
+        // Explicit payload for each repo in the pool
+        jobsToStart.push({
+            ...commonPayload,
+            repos: [repo],
+            include_paths: val.compressed // Can be null (ALL) or array
+        });
+    });
+
+    // Submit jobs
+    try {
+        for (const payload of jobsToStart) {
+             const res = await apiFetch(`${API_BASE}/jobs`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+
+            if (res.status === 401) throw new Error("Unauthorized.");
+            if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+
+            const job = await res.json();
+            streamLogs(job.id);
+        }
+    } catch (e) {
+        alert("Failed to start pool jobs: " + e.message);
+    }
 }
 
 // --- Config Management ---
@@ -650,6 +817,11 @@ async function startJob(e) {
     };
 
     try {
+        // Legacy "Batch" Strategy for selected repos in list
+        // If items are in the pool, they should ideally be run via "Run Pool".
+        // BUT, existing behavior was to run custom jobs for them.
+        // We will maintain this for now but it might be redundant.
+
         // Multi-repo selection strategy (Weg 1: Separate jobs for custom, batch for rest)
         const customRepos = [];
         const standardRepos = [];
@@ -664,7 +836,7 @@ async function startJob(e) {
 
         const jobsToStart = [];
 
-        // 1. Custom Jobs
+        // 1. Custom Jobs (from selection pool)
         for (const repo of customRepos) {
             const sel = savedPrescanSelections.get(repo);
             const payload = { ...commonPayload, repos: [repo], include_paths: sel.compressed };
@@ -747,6 +919,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Render extras immediately
     renderExtras();
     renderSets();
+    renderSelectionPool(); // New
     restoreConfig();
 
     // Optional: accept token from URL once, then scrub it from the address bar.
@@ -1011,9 +1184,15 @@ async function startPrescan() {
 
     // Reset or load selection
     if (savedPrescanSelections.has(repo)) {
-        prescanSelection = new Set(savedPrescanSelections.get(repo).raw);
+        // Handle Tri-state load
+        const saved = savedPrescanSelections.get(repo);
+        if (saved.raw === null) {
+            prescanSelection = null; // ALL
+        } else {
+            prescanSelection = new Set(saved.raw);
+        }
     } else {
-        prescanSelection.clear();
+        prescanSelection = new Set(); // Empty by default
     }
     prescanExpandedPaths.clear();
 
@@ -1043,7 +1222,8 @@ async function startPrescan() {
         }
 
         // Initial Selection: Recommended (instead of All) if empty
-        if (prescanSelection.size === 0) {
+        // Only run recommendation if we started fresh (prescanSelection is empty set, not null/all)
+        if (prescanSelection !== null && prescanSelection.size === 0) {
             prescanRecommended();
         }
 
@@ -1166,16 +1346,27 @@ function renderPrescanTree() {
 function isDirSelected(node) {
     // A dir is selected if all its children are selected
     if (!node.children || node.children.length === 0) return false;
+
+    // If prescanSelection is null (ALL), then everything is selected
+    if (prescanSelection === null) return true;
+
     return node.children.every(c => c.type === 'dir' ? isDirSelected(c) : isPathSelected(c.path));
 }
 
 function isDirPartial(node) {
     // True if some children selected
     if (!node.children || node.children.length === 0) return false;
+
+    // If ALL, it's not partial, it's full
+    if (prescanSelection === null) return false;
+
     return node.children.some(c => c.type === 'dir' ? (isDirSelected(c) || isDirPartial(c)) : isPathSelected(c.path));
 }
 
 function togglePrescanNode(rootNode, checked) {
+    // If user clicked "Check" on root node while in "Partial" mode, it's effectively "Check All"
+    // BUT this function is called for sub-nodes too.
+
     // Iterative approach to avoid call stack overflow on deep trees
     const stack = [rootNode];
     while (stack.length > 0) {
@@ -1193,8 +1384,14 @@ function togglePrescanNode(rootNode, checked) {
 
 function prescanToggleAll(checked) {
     if (!prescanCurrentTree) return;
-    // O(N) data update is fine, DOM was the bottleneck
-    togglePrescanNode(prescanCurrentTree.tree, checked);
+
+    // No recursion, no iteration. Pure State Switch.
+    if (checked) {
+        prescanSelection = null; // ALL
+    } else {
+        prescanSelection = new Set(); // NONE
+    }
+
     renderPrescanTree();
 }
 
@@ -1258,46 +1455,54 @@ function prescanRecommended() {
 
 async function applyPrescanSelection() {
     // Semantics: empty selection means "remove manual override" (back to standard behavior)
+    // prescanSelection === null means "ALL" (explicitly select entire repo)
 
-    // Path Compression Logic
-    const compressedPaths = [];
-    function collectPaths(node) {
-        const path = normalizePath(node.path);
+    const repo = prescanCurrentTree.root;
 
-        if (node.type === 'file') {
-            // Only add if path is valid AND selected
-            if (path !== null && isPathSelected(path)) {
-                compressedPaths.push(path);
-            }
-        } else if (node.type === 'dir') {
-            // If valid path AND fully selected, add dir
-            if (path !== null && isDirSelected(node)) {
-                compressedPaths.push(path);
-            } else {
-                // Otherwise descend (also descends if path is null/invalid but has children)
-                if (node.children) node.children.forEach(collectPaths);
-            }
+    if (prescanSelection === null) {
+        // ALL selected
+        // We treat this as an explicit override to include everything (as opposed to "standard" which might mean default filters?)
+        // Actually, if include_paths is null, it means "All files".
+        savedPrescanSelections.set(repo, { raw: null, compressed: null });
+    } else {
+        if (prescanSelection.size === 0) {
+             // Nothing selected -> Remove manual override
+             savedPrescanSelections.delete(repo);
+        } else {
+             // Partial selection -> Calculate compressed
+             const compressedPaths = [];
+             function collectPaths(node) {
+                 const path = normalizePath(node.path);
+
+                 if (node.type === 'file') {
+                     // Only add if path is valid AND selected
+                     if (path !== null && isPathSelected(path)) {
+                         compressedPaths.push(path);
+                     }
+                 } else if (node.type === 'dir') {
+                     // If valid path AND fully selected, add dir
+                     if (path !== null && isDirSelected(node)) {
+                         compressedPaths.push(path);
+                     } else {
+                         // Otherwise descend (also descends if path is null/invalid but has children)
+                         if (node.children) node.children.forEach(collectPaths);
+                     }
+                 }
+             }
+             collectPaths(prescanCurrentTree.tree);
+
+             savedPrescanSelections.set(repo, {
+                 raw: new Set(prescanSelection),
+                 compressed: compressedPaths
+             });
         }
     }
-    collectPaths(prescanCurrentTree.tree);
 
-    // Save to State
-    const repo = prescanCurrentTree.root;
-    if (compressedPaths.length === 0) {
-        // Remove manual selection override if nothing selected
-        savedPrescanSelections.delete(repo);
-    } else {
-        savedPrescanSelections.set(repo, {
-            raw: new Set(prescanSelection),
-            compressed: compressedPaths
-        });
-    }
     persistSavedPrescanSelections();
-
     closePrescan();
 
-    // Update UI (Badges)
-    // fetchRepos will now preserve checked state
+    // Update UI (Selection Pool + Badges)
+    renderSelectionPool();
     await fetchRepos(document.getElementById('hubPath').value);
 }
 
