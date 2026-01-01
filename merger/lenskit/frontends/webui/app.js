@@ -552,7 +552,10 @@ function removeFromPool(repo) {
 
 async function runPoolMerge(e) {
     if (e) e.preventDefault();
-    if (window.__prescanOpen) return; // HARD GUARD
+    if (window.__prescanOpen) {
+        alert("Prescan ist offen. Bitte schließen und dann Merge starten.");
+        return; // HARD GUARD
+    }
 
     if (savedPrescanSelections.size === 0) return;
 
@@ -902,7 +905,10 @@ async function loadArtifacts() {
 
 async function startJob(e) {
     e.preventDefault();
-    if (window.__prescanOpen) return; // HARD GUARD
+    if (window.__prescanOpen) {
+        alert("Prescan ist offen. Bitte schließen und dann Merge starten.");
+        return; // HARD GUARD
+    }
 
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true;
@@ -1287,6 +1293,10 @@ async function downloadWithAuth(url, name) {
 }
 
 // --- Prescan Logic ---
+// ARCHITECTURE:
+// - Prescan → Selection Pool (modify only, never triggers merge)
+// - Merge → Explicit action from main view via job submission buttons
+// - No implicit transition from prescan to merge execution
 
 async function startPrescan() {
     window.__prescanOpen = true; // Engage Guard
