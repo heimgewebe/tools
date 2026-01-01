@@ -97,6 +97,11 @@ function getAllPathsInTree(treeNode) {
 
 // Materialize raw file paths from tree using compressed rules
 // This reconstructs the UI truth from compressed backend rules
+// TODO(perf): Prefix-matching over compressed paths is O(n*m) where n=files, m=compressed paths.
+// Consider optimizing via:
+// - sorted prefixes with early break
+// - prefix trie structure
+// - precomputed directory → files mapping
 function materializeRawFromCompressed(treeNode, compressedSet) {
     const paths = new Set();
     
@@ -1664,6 +1669,7 @@ async function applyPrescanSelectionInternal(append) {
                  }
              } else {
                  // Replace Mode or No Previous State
+                 // prescanSelection contains only files (enforced by togglePrescanNode and helper functions)
                  savedPrescanSelections.set(repo, {
                      raw: new Set(prescanSelection),
                      compressed: currentCompressed
