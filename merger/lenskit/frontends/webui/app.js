@@ -847,14 +847,19 @@ async function startJob(e) {
              throw new Error("No repos selected.");
         }
 
-        // Standard Job (Batch or Per-Repo depending on mode, but here we send list)
-        // If mode is pro-repo, the backend or this loop should handle it.
-        // Actually the backend 'jobs' endpoint usually takes a list and one mode.
-        // If mode is 'pro-repo', the runner iterates?
-        // Let's assume sending the list is correct for now as per previous logic.
+        // Handle Mode: "pro-repo" implies individual job submission for deterministic behavior.
+        // "gesamt" (Combined) implies a single batch job.
+        const mode = document.getElementById('mode').value;
 
-        const payload = { ...commonPayload, repos: selectedRepos };
-        jobsToStart.push(payload);
+        if (mode === 'pro-repo') {
+            // Split into individual jobs
+            selectedRepos.forEach(repo => {
+                jobsToStart.push({ ...commonPayload, repos: [repo] });
+            });
+        } else {
+            // Batch job
+            jobsToStart.push({ ...commonPayload, repos: selectedRepos });
+        }
 
         // Sequential launch
         for (const payload of jobsToStart) {
