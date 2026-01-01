@@ -2256,6 +2256,21 @@ class MergerUI(object):
         sheet.background_color = "#111111"
         sheet.frame = (0, 0, 600, 800)
 
+        # Track selection mode explicitly for better state management
+        # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
+        selection_state = {
+            'mode': 'partial',  # 'all', 'partial', or 'none'
+            'materialized_all': None  # Stores all paths when materializing from ALL state
+        }
+        
+        # Initialize selection mode based on current selection
+        if existing_pool_paths is None and root_name in self.saved_prescan_selections:
+            selection_state['mode'] = 'all'
+        elif not any(item["selected"] for item in flat_items):
+            selection_state['mode'] = 'none'
+        else:
+            selection_state['mode'] = 'partial'
+
         # Header Stats
         stats_lbl = ui.Label(frame=(10, 10, 580, 20))
         stats_lbl.text = f"{prescan_data['file_count']} files • {parse_human_size(str(prescan_data['total_bytes']))} bytes total" # approximate
@@ -2270,6 +2285,11 @@ class MergerUI(object):
 
         def toggle_all(val):
             for i in flat_items: i["selected"] = val
+            # Update selection mode
+            if val:
+                selection_state['mode'] = 'all'
+            else:
+                selection_state['mode'] = 'none'
             tv.reload_data()
 
         btn_all = ui.Button(title="All")
@@ -2320,7 +2340,23 @@ class MergerUI(object):
                 # Toggle logic
                 item = flat_items[row]
                 new_state = not item["selected"]
+                
+                # Handle ALL state materialization if needed
+                if selection_state['mode'] == 'all' and not new_state:
+                    # Deselecting from ALL state - materialize all paths first
+                    selection_state['materialized_all'] = set(i["path"] for i in flat_items)
+                    selection_state['mode'] = 'partial'
+                
                 self._set_selected_recursive(item, new_state)
+                
+                # Update selection mode after change
+                if all(i["selected"] for i in flat_items):
+                    selection_state['mode'] = 'all'
+                elif not any(i["selected"] for i in flat_items):
+                    selection_state['mode'] = 'none'
+                else:
+                    selection_state['mode'] = 'partial'
+                
                 tv.reload_data()
 
             def _set_selected_recursive(self, item, state):
@@ -2341,32 +2377,28 @@ class MergerUI(object):
         tv.delegate = ds
         sheet.add_subview(tv)
 
-        # Bottom Bar: Cancel / Merge
+        # Bottom Bar: Remove / Cancel / Replace / Append
         bar_y = sheet.height - 50
-
-        btn_merge = ui.Button(title="Merge Selected")
-        btn_merge.frame = (sheet.width - 160, bar_y, 150, 40)
-        btn_merge.flex = "LT" # Left margin flex, Top margin flex
-        btn_merge.background_color = "#007aff"
-        btn_merge.tint_color = "white"
-        btn_merge.corner_radius = 6
-
-        def do_merge(sender):
-            # Path Compression
-            # If a dir is fully selected, pass dir. Else pass selected files.
-
+        
+        # Shared pool update logic
+        def _pool_update(mode):
+            """
+            Update the prescan selection pool.
+            mode: 'replace', 'append', or 'remove'
+            """
+            # Path Compression: If a dir is fully selected, pass dir. Else pass selected files.
             compressed_paths = []
-
+            
             # Create a map for quick lookup of selection status by path
             selection_map = {item["path"]: item["selected"] for item in flat_items}
-
+            
             def is_dir_fully_selected(node):
                 if node["type"] == "file":
                     return selection_map.get(node["path"], False)
                 if node.get("children"):
                     return all(is_dir_fully_selected(c) for c in node["children"])
                 return True # Empty dir considered selected
-
+            
             def collect(node):
                 if node["type"] == "file":
                     if selection_map.get(node["path"], False):
@@ -2379,84 +2411,129 @@ class MergerUI(object):
                         if node.get("children"):
                             for c in node["children"]:
                                 collect(c)
-
+            
             collect(root_node)
-
+            
             # Fallback
             if not compressed_paths and any(selection_map.values()):
-                 compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
-
-            # --- Append Logic (Selection Pool) ---
-            # Instead of just setting temp paths, we update the pool.
-            # "Append" means Union of existing pool and new selection.
-
-            new_selection = compressed_paths
+                compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
+            
+            # Handle different modes
+            if mode == 'remove':
+                # Remove from pool
+                if root_name in self.saved_prescan_selections:
+                    del self.saved_prescan_selections[root_name]
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Removed selection pool for {root_name}", "success", 1.5)
+                sheet.close()
+                return
+            
+            # Get current selection mode
+            current_mode = selection_state['mode']
+            
             # Check if we have an existing selection for this repo
             existing = self.saved_prescan_selections.get(root_name)
-
-            final_selection = None
-
-            # Cases:
-            # 1. New is ALL (we can't really detect "ALL" easily here unless we check vs total file count,
-            #    but assuming user selected everything manually or hit 'All').
-            #    Let's check if ALL items are selected.
-            all_selected = all(item["selected"] for item in flat_items)
-
-            if all_selected:
-                final_selection = None # Mark as ALL
-            else:
-                if existing is None and root_name in self.saved_prescan_selections:
-                    # Existing was ALL. Union(ALL, anything) = ALL.
-                    final_selection = None
-                else:
-                    # Existing was Partial (list) or None (nothing)
-                    current_set = set(new_selection)
-                    if existing:
-                        current_set.update(existing)
-                    final_selection = sorted(list(current_set))
-
-            # Save to pool
-            if final_selection is None:
-                # Explicitly ALL
-                self.saved_prescan_selections[root_name] = None
-            elif not final_selection:
-                # Empty -> Remove from pool? Or keep empty?
-                # If user unselected everything, "Append" logic suggests we keep old?
-                # No, "Append" applies when ADDING to a pool.
-                # If I am in the edit view, I see the current state (Old + Changes).
-                # If I uncheck something, I expect it removed.
-                # So "Append" happens at LOAD time (loading old), effectively.
-                # When saving back, we save the VISIBLE state.
-                # The logic inside 'do_merge' captures the FINAL state of the edit session.
-                # So we just save `new_selection`?
-                # Wait. If I opened the dialog, I loaded `existing`.
-                # If I added files, `new_selection` contains `existing + added`.
-                # So `final_selection` is just `new_selection` (or `compressed_paths`).
-                # The "Union" happened when we initialized the UI!
-
-                # So here we just save what is currently selected.
-                self.saved_prescan_selections[root_name] = new_selection
-                if not new_selection:
-                    # Cleanup empty entry
+            
+            if mode == 'replace':
+                # Replace mode: overwrite existing selection
+                if current_mode == 'all':
+                    # ALL selected
+                    self.saved_prescan_selections[root_name] = None
+                elif current_mode == 'none':
+                    # Nothing selected - remove from pool
                     if root_name in self.saved_prescan_selections:
                         del self.saved_prescan_selections[root_name]
-            else:
-                self.saved_prescan_selections[root_name] = final_selection
-
-            # Persist immediately
-            self.save_last_state()
-
-            # Set temp paths for immediate run (though run_merge should look at pool now)
-            # We'll update run_merge to prefer pool.
-            # But for backward compat/robustness we can set it here too?
-            # Actually, let's rely on pool in run_merge.
-
+                else:
+                    # Partial selection
+                    if compressed_paths:
+                        self.saved_prescan_selections[root_name] = compressed_paths
+                    else:
+                        # Empty selection - remove from pool
+                        if root_name in self.saved_prescan_selections:
+                            del self.saved_prescan_selections[root_name]
+                
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Replaced selection pool for {root_name}", "success", 1.5)
+                
+            elif mode == 'append':
+                # Append mode: union with existing selection
+                if current_mode == 'none':
+                    # Nothing selected in current view - no-op with feedback
+                    if console:
+                        console.hud_alert("No changes: no items selected in append mode", "error", 2.0)
+                    return # Don't close dialog
+                
+                if current_mode == 'all':
+                    # ALL selected - ALL overrides everything
+                    self.saved_prescan_selections[root_name] = None
+                else:
+                    # Partial selection
+                    if existing is None and root_name in self.saved_prescan_selections:
+                        # Existing was ALL. Union(ALL, Partial) = ALL
+                        self.saved_prescan_selections[root_name] = None
+                    else:
+                        # Union of existing and new
+                        current_set = set(compressed_paths)
+                        if existing:
+                            current_set.update(existing)
+                        final_selection = sorted(list(current_set))
+                        
+                        if final_selection:
+                            self.saved_prescan_selections[root_name] = final_selection
+                        else:
+                            # Empty - shouldn't happen but handle it
+                            if root_name in self.saved_prescan_selections:
+                                del self.saved_prescan_selections[root_name]
+                
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
+            
             sheet.close()
             # Trigger merge
             self.run_merge(None)
-
-        btn_merge.action = do_merge
-        sheet.add_subview(btn_merge)
+        
+        # Remove button (left side)
+        btn_remove = ui.Button(title="Remove")
+        btn_remove.frame = (10, bar_y, 80, 40)
+        btn_remove.flex = "RT" # Right margin flex, Top margin flex
+        btn_remove.background_color = "#ff3b30"
+        btn_remove.tint_color = "white"
+        btn_remove.corner_radius = 6
+        btn_remove.action = lambda s: _pool_update('remove')
+        sheet.add_subview(btn_remove)
+        
+        # Cancel button (right side)
+        btn_cancel = ui.Button(title="Cancel")
+        btn_cancel.frame = (sheet.width - 310, bar_y, 70, 40)
+        btn_cancel.flex = "LT" # Left margin flex, Top margin flex
+        btn_cancel.background_color = "#444444"
+        btn_cancel.tint_color = "white"
+        btn_cancel.corner_radius = 6
+        btn_cancel.action = lambda s: sheet.close()
+        sheet.add_subview(btn_cancel)
+        
+        # Replace button (right side)
+        btn_replace = ui.Button(title="Replace")
+        btn_replace.frame = (sheet.width - 230, bar_y, 110, 40)
+        btn_replace.flex = "LT" # Left margin flex, Top margin flex
+        btn_replace.background_color = "#007aff"
+        btn_replace.tint_color = "white"
+        btn_replace.corner_radius = 6
+        btn_replace.action = lambda s: _pool_update('replace')
+        sheet.add_subview(btn_replace)
+        
+        # Append button (right side)
+        btn_append = ui.Button(title="Append")
+        btn_append.frame = (sheet.width - 110, bar_y, 100, 40)
+        btn_append.flex = "LT" # Left margin flex, Top margin flex
+        btn_append.background_color = "#34c759"
+        btn_append.tint_color = "white"
+        btn_append.corner_radius = 6
+        btn_append.action = lambda s: _pool_update('append')
+        sheet.add_subview(btn_append)
 
         sheet.present("sheet")
 
