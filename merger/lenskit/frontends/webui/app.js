@@ -48,10 +48,6 @@ function selectionIsNone() {
     return prescanSelection !== null && prescanSelection.size === 0;
 }
 
-function selectionCountRaw() {
-    return selectionIsAll() ? "ALL" : prescanSelection.size;
-}
-
 function selectionResetNone() {
     prescanSelection = new Set();
 }
