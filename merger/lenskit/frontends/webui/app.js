@@ -1025,6 +1025,21 @@ function streamLogs(jobId) {
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
+    // Global ESC handler for modals
+    document.addEventListener('keydown', (e) => {
+        if (e.key === "Escape") {
+            const prescan = document.getElementById('prescanModal');
+            if (prescan && !prescan.classList.contains('hidden')) {
+                closePrescan();
+                return;
+            }
+            const picker = document.getElementById('pickerModal');
+            if (picker && !picker.classList.contains('hidden')) {
+                closePicker();
+            }
+        }
+    });
+
     // Render extras immediately
     renderExtras();
     renderSets();
