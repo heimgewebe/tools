@@ -2207,6 +2207,11 @@ class MergerUI(object):
         """
         Shows the Prescan UI (Tree View) for the selected repository.
         Currently limited to single repo selection for simplicity.
+        
+        ARCHITECTURE:
+        - Prescan → Selection Pool (modify only, never triggers merge)
+        - Merge → Explicit action from main view via Run Merge button
+        - No implicit transition from prescan to merge execution
         """
         selected = self._get_selected_repos()
         if len(selected) != 1:
@@ -2358,22 +2363,26 @@ class MergerUI(object):
                     if is_recommended(item["path"]):
                         item["selected"] = True
 
-        # Create Sheet
-        # Fix: Use custom View subclass with will_close to ensure guard reset
-        # Delegate pattern (view_did_close) is unreliable for direct ui.View instances
+        # Create Sheet with reliable close handling
+        # ARCHITECTURE NOTE: Prescan → Selection Pool (modify only)
+        # Merge → Explicit action from main view (never triggered from prescan)
         class PrescanSheet(ui.View):
+            """
+            Custom View subclass that reliably resets the prescan guard on close.
+            ui.View's will_close() is called on all close paths: Apply, Cancel, Swipe-Down, errors.
+            """
             def __init__(self, parent):
                 super().__init__()
                 self._parent = parent
+                self.name = f"Prescan: {root_name}"
+                self.background_color = "#111111"
+                self.frame = (0, 0, 600, 800)
 
             def will_close(self):
-                # Critical: Reset guard when sheet closes (Apply, Cancel, Swipe)
+                """Reset guard flag when prescan sheet closes."""
                 self._parent._prescan_active = False
 
         sheet = PrescanSheet(self)
-        sheet.name = f"Prescan: {root_name}"
-        sheet.background_color = "#111111"
-        sheet.frame = (0, 0, 600, 800)
 
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
