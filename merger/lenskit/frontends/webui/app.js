@@ -552,7 +552,10 @@ function removeFromPool(repo) {
 
 async function runPoolMerge(e) {
     if (e) e.preventDefault();
-    if (window.__prescanOpen) return; // HARD GUARD
+    if (window.__prescanOpen) {
+        alert("Prescan ist offen. Bitte schließen und dann Merge starten.");
+        return;
+    }
 
     if (savedPrescanSelections.size === 0) return;
 
@@ -902,7 +905,10 @@ async function loadArtifacts() {
 
 async function startJob(e) {
     e.preventDefault();
-    if (window.__prescanOpen) return; // HARD GUARD
+    if (window.__prescanOpen) {
+        alert("Prescan ist offen. Bitte schließen und dann Merge starten.");
+        return;
+    }
 
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true;

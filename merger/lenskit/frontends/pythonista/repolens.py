@@ -2359,19 +2359,21 @@ class MergerUI(object):
                         item["selected"] = True
 
         # Create Sheet
-        sheet = ui.View()
+        # Fix: Use custom View subclass with will_close to ensure guard reset
+        # Delegate pattern (view_did_close) is unreliable for direct ui.View instances
+        class PrescanSheet(ui.View):
+            def __init__(self, parent):
+                super().__init__()
+                self._parent = parent
+
+            def will_close(self):
+                # Critical: Reset guard when sheet closes (Apply, Cancel, Swipe)
+                self._parent._prescan_active = False
+
+        sheet = PrescanSheet(self)
         sheet.name = f"Prescan: {root_name}"
         sheet.background_color = "#111111"
         sheet.frame = (0, 0, 600, 800)
-
-        # Delegate to handle closing
-        class PrescanDelegate (object):
-            def __init__(self, parent):
-                self.parent = parent
-            def view_did_close(self, sender):
-                self.parent._prescan_active = False
-
-        sheet.delegate = PrescanDelegate(self)
 
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
