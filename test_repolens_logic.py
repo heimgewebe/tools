@@ -25,6 +25,7 @@ sys.modules['lenskit.core.merge'] = type('MockCore', (), {
 # We need to add the path to sys.path
 sys.path.append('merger/lenskit/frontends/pythonista')
 import repolens
+from repolens import normalize_path
 
 # Subclass MergerUI to test logic without UI
 class TestUI(repolens.MergerUI):
@@ -53,8 +54,6 @@ class TestUI(repolens.MergerUI):
 
 def test_normalize_path():
     """Test path normalization"""
-    from repolens import normalize_path
-    
     assert normalize_path("./src/main.py") == "src/main.py", "Should remove leading ./"
     assert normalize_path("src/dir/") == "src/dir", "Should remove trailing /"
     assert normalize_path("") == ".", "Empty should become ."

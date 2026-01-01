@@ -545,7 +545,7 @@ class MergerUI(object):
         # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
         # - raw: None (ALL) or list of all selected file paths (for UI truth)
         # - compressed: None (ALL) or list of compressed paths (dirs/files for backend)
-        self.saved_prescan_selections: Dict[str, Dict[str, Any]] = {}
+        self.saved_prescan_selections: Dict[str, Dict[str, Optional[List[str]]]] = {}
 
         # Auto-run / warm the extractor on startup (best-effort).
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
@@ -1405,15 +1405,17 @@ class MergerUI(object):
                 else:
                     # Partial - keep both raw and compressed
                     # Normalize paths for consistency
-                    normalized_raw = [normalize_path(p) for p in raw] if raw else None
-                    normalized_compressed = [normalize_path(p) for p in compressed] if compressed else None
+                    normalized_raw = [normalize_path(p) for p in raw] if (raw and isinstance(raw, list)) else None
+                    normalized_compressed = [normalize_path(p) for p in compressed] if (compressed and isinstance(compressed, list)) else None
                     deserialized[repo] = {
                         "raw": normalized_raw,
                         "compressed": normalized_compressed
                     }
             elif isinstance(selection, list):
                 # Legacy format: simple list - use for both raw and compressed
-                normalized = [normalize_path(p) for p in selection]
+                # Filter out None values and validate strings
+                valid_paths = [p for p in selection if isinstance(p, str)]
+                normalized = [normalize_path(p) for p in valid_paths] if valid_paths else None
                 deserialized[repo] = {"raw": normalized, "compressed": normalized}
             else:
                 # Unknown format - skip
