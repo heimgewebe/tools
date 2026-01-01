@@ -2359,12 +2359,16 @@ class MergerUI(object):
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
         selection_state = {
-            'mode': 'partial',  # 'all', 'partial', or 'none'
-            'materialized_all': None  # Stores all paths when materializing from ALL state
+            'mode': 'partial'  # 'all', 'partial', or 'none'
         }
         
         # Initialize selection mode based on current selection
-        if existing_pool_paths is None and root_name in self.saved_prescan_selections:
+        # Check if existing pool entry is in ALL state (both raw and compressed are None)
+        is_all = (isinstance(existing_pool_entry, dict) and 
+                  existing_pool_entry.get("raw") is None and 
+                  existing_pool_entry.get("compressed") is None)
+        
+        if is_all:
             selection_state['mode'] = 'all'
         elif not any(item["selected"] for item in flat_items):
             selection_state['mode'] = 'none'
@@ -2441,10 +2445,9 @@ class MergerUI(object):
                 item = flat_items[row]
                 new_state = not item["selected"]
                 
-                # Handle ALL state materialization if needed
+                # Handle ALL state transition
                 if selection_state['mode'] == 'all' and not new_state:
-                    # Deselecting from ALL state - materialize all paths first
-                    selection_state['materialized_all'] = set(i["path"] for i in flat_items)
+                    # Deselecting from ALL state - switch to partial selection mode
                     selection_state['mode'] = 'partial'
                 
                 self._set_selected_recursive(item, new_state)
@@ -2811,15 +2814,8 @@ class MergerUI(object):
                 pass
 
             # Resolve include_paths for this specific repo
-            # 1. Check pool
-            repo_include = self.saved_prescan_selections.get(name)
-
-            # If repo_include is None, it means "ALL" (explicitly selected as ALL) or "Not in pool" (default behavior)?
-            # Dictionary.get() returns None if missing.
-            # We need to distinguish "Explicit ALL (None)" vs "Missing (None)".
-
-            # Resolve include_paths for this specific repo
-            # 1. Check pool - use compressed field for backend efficiency
+            # Check pool - use compressed field for backend efficiency
+            # Note: None can mean either "explicit ALL" or "not in pool" - we distinguish by checking key existence
             pool_entry = self.saved_prescan_selections.get(name)
 
             use_include_paths = None
