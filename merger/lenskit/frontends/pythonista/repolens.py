@@ -121,6 +121,41 @@ except Exception:
 _ACTIVE_MERGER_VIEW = None
 
 
+def normalize_path(p: str) -> str:
+    """
+    Normalize a path for consistent comparisons.
+    Similar to WebUI's normalizePath function.
+    
+    Rules:
+    - Remove leading "./"
+    - Remove trailing "/" (except for root)
+    - Keep "/" as separator
+    - Empty string becomes "."
+    """
+    if not isinstance(p, str):
+        return "."
+    
+    p = p.strip()
+    
+    # Handle absolute root
+    if p == "/":
+        return "/"
+    
+    # Remove leading "./"
+    if p.startswith("./"):
+        p = p[2:]
+    
+    # Remove trailing "/" (but not if it's just "/")
+    if len(p) > 1 and p.endswith("/"):
+        p = p[:-1]
+    
+    # Empty becomes "."
+    if p == "":
+        return "."
+    
+    return p
+
+
 def safe_script_path() -> Path:
     """
     Versucht, den Pfad dieses Skripts robust zu bestimmen.
@@ -505,6 +540,12 @@ class MergerUI(object):
         self._state_path = (self.hub / LAST_STATE_FILENAME).resolve()
         # Beim Start nur die persistierte Ignore-Liste laden – nicht die gesamte UI-Config
         self._load_ignored_repos_from_state()
+
+        # Saved Prescan Selections (Pool)
+        # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
+        # - raw: None (ALL) or list of all selected file paths (for UI truth)
+        # - compressed: None (ALL) or list of compressed paths (dirs/files for backend)
+        self.saved_prescan_selections: Dict[str, Dict[str, Optional[List[str]]]] = {}
 
         # Auto-run / warm the extractor on startup (best-effort).
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
@@ -1316,6 +1357,71 @@ class MergerUI(object):
         if isinstance(data, dict):
             self.ignored_repos = set(data.get("ignored_repos", []))
 
+    def _serialize_prescan_pool(self) -> Dict[str, Any]:
+        """
+        Serialize prescan pool to structured format.
+        Internal format is already {"raw": ..., "compressed": ...}.
+        """
+        serialized = {}
+        for repo, selection in self.saved_prescan_selections.items():
+            if isinstance(selection, dict):
+                # Already in structured format
+                serialized[repo] = {
+                    "raw": selection.get("raw"),
+                    "compressed": selection.get("compressed")
+                }
+            else:
+                # Shouldn't happen with new code, but handle legacy just in case
+                if selection is None:
+                    serialized[repo] = {"raw": None, "compressed": None}
+                elif isinstance(selection, list):
+                    serialized[repo] = {"raw": selection, "compressed": selection}
+        return serialized
+
+    def _deserialize_prescan_pool(self, pool_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """
+        Deserialize prescan pool with migration support.
+        Handles legacy formats and converts to structured internal representation.
+        
+        Internal representation (structured):
+        - {"raw": None, "compressed": None}: ALL state
+        - {"raw": list[str], "compressed": list[str]}: Partial selection
+        
+        Returns dict mapping repo -> {"raw": ..., "compressed": ...}
+        """
+        deserialized = {}
+        for repo, selection in pool_data.items():
+            if selection is None:
+                # ALL state in legacy format
+                deserialized[repo] = {"raw": None, "compressed": None}
+            elif isinstance(selection, dict):
+                # Structured format - preserve both fields
+                raw = selection.get("raw")
+                compressed = selection.get("compressed")
+                
+                if raw is None and compressed is None:
+                    # ALL state
+                    deserialized[repo] = {"raw": None, "compressed": None}
+                else:
+                    # Partial - keep both raw and compressed
+                    # Normalize paths for consistency
+                    normalized_raw = [normalize_path(p) for p in raw] if (raw and isinstance(raw, list)) else None
+                    normalized_compressed = [normalize_path(p) for p in compressed] if (compressed and isinstance(compressed, list)) else None
+                    deserialized[repo] = {
+                        "raw": normalized_raw,
+                        "compressed": normalized_compressed
+                    }
+            elif isinstance(selection, list):
+                # Legacy format: simple list - use for both raw and compressed
+                # Filter out None values and validate strings
+                valid_paths = [p for p in selection if isinstance(p, str)]
+                normalized = [normalize_path(p) for p in valid_paths] if valid_paths else None
+                deserialized[repo] = {"raw": normalized, "compressed": normalized}
+            else:
+                # Unknown format - skip
+                pass
+        return deserialized
+
     def save_last_state(self, ignore_only: bool = False) -> None:
         """
         Speichert den UI-Zustand in einer JSON-Datei.
@@ -1372,6 +1478,7 @@ class MergerUI(object):
                         "heatmap": self.extras_config.heatmap,
                         "json_sidecar": self.extras_config.json_sidecar,
                     },
+                    "prescan_pool": self._serialize_prescan_pool(),
                 }
             )
 
@@ -1435,6 +1542,9 @@ class MergerUI(object):
                 self.extras_config.heatmap = extras_data["heatmap"]
             if "json_sidecar" in extras_data:
                 self.extras_config.json_sidecar = extras_data["json_sidecar"]
+
+        # Restore Prescan Pool (with migration support)
+        self.saved_prescan_selections = self._deserialize_prescan_pool(data.get("prescan_pool", {}))
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
@@ -2181,32 +2291,89 @@ class MergerUI(object):
         for item in flat_items:
             item["selected"] = False
 
-        # Run heuristic logic (same as prescanRecommended)
-        def is_recommended(path_str):
-            path = path_str.lower()
-            # Critical
-            if "readme" in path or path.endswith(".ai-context.yml"):
-                return True
-            # Code
-            parts = path.split('/')
-            if "src" in parts or "contracts" in parts or "docs" in parts:
-                if "test" not in path:
-                     return True
-            return False
+        # Load existing selection from pool if available
+        # This supports the "Append" workflow by initializing with previous state
+        existing_pool_entry = self.saved_prescan_selections.get(root_name)
 
-        for item in flat_items:
-            if item["type"] == "file":
-                if is_recommended(item["path"]):
-                    item["selected"] = True
+        # Logic:
+        # - If pool has entry (dict):
+        #   - If raw is None: ALL state - select everything
+        #   - If raw is list: Use raw for UI truth (not compressed)
+        # - If no pool entry:
+        #   - Run Heuristic (Recommended).
 
-        # Update directory selection state based on files (bottom-up propagation isn't strictly needed for flat list if we check children on render, but let's be consistent)
-        # Actually, for presentation we just check items.
+        if existing_pool_entry:
+            if isinstance(existing_pool_entry, dict):
+                raw = existing_pool_entry.get("raw")
+                if raw is None:
+                    # ALL state - select everything
+                    for item in flat_items:
+                        item["selected"] = True
+                elif isinstance(raw, list):
+                    # Partial selection from pool - use raw for UI truth
+                    # Normalize paths for consistent matching
+                    pool_set = set(normalize_path(p) for p in raw)
+                    for item in flat_items:
+                        normalized_item_path = normalize_path(item["path"])
+                        # Direct match
+                        if normalized_item_path in pool_set:
+                            item["selected"] = True
+                        else:
+                            # Check if parent dir is in pool (for compressed paths)
+                            parts = normalized_item_path.split('/')
+                            for i in range(len(parts)):
+                                sub = "/".join(parts[:i+1])
+                                if sub in pool_set:
+                                    item["selected"] = True
+                                    break
+            else:
+                # Legacy format - shouldn't happen after migration
+                # Run heuristic as fallback
+                pass
+        else:
+            # No existing selection -> Heuristic
+            # Run heuristic logic (same as prescanRecommended)
+            def is_recommended(path_str):
+                path = path_str.lower()
+                # Critical
+                if "readme" in path or path.endswith(".ai-context.yml"):
+                    return True
+                # Code
+                parts = path.split('/')
+                if "src" in parts or "contracts" in parts or "docs" in parts:
+                    if "test" not in path:
+                         return True
+                return False
+
+            for item in flat_items:
+                if item["type"] == "file":
+                    if is_recommended(item["path"]):
+                        item["selected"] = True
 
         # Create Sheet
         sheet = ui.View()
         sheet.name = f"Prescan: {root_name}"
         sheet.background_color = "#111111"
         sheet.frame = (0, 0, 600, 800)
+
+        # Track selection mode explicitly for better state management
+        # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
+        selection_state = {
+            'mode': 'partial'  # 'all', 'partial', or 'none'
+        }
+        
+        # Initialize selection mode based on current selection
+        # Check if existing pool entry is in ALL state (both raw and compressed are None)
+        is_all = (isinstance(existing_pool_entry, dict) and 
+                  existing_pool_entry.get("raw") is None and 
+                  existing_pool_entry.get("compressed") is None)
+        
+        if is_all:
+            selection_state['mode'] = 'all'
+        elif not any(item["selected"] for item in flat_items):
+            selection_state['mode'] = 'none'
+        else:
+            selection_state['mode'] = 'partial'
 
         # Header Stats
         stats_lbl = ui.Label(frame=(10, 10, 580, 20))
@@ -2222,6 +2389,11 @@ class MergerUI(object):
 
         def toggle_all(val):
             for i in flat_items: i["selected"] = val
+            # Update selection mode
+            if val:
+                selection_state['mode'] = 'all'
+            else:
+                selection_state['mode'] = 'none'
             tv.reload_data()
 
         btn_all = ui.Button(title="All")
@@ -2272,7 +2444,22 @@ class MergerUI(object):
                 # Toggle logic
                 item = flat_items[row]
                 new_state = not item["selected"]
+                
+                # Handle ALL state transition
+                if selection_state['mode'] == 'all' and not new_state:
+                    # Deselecting from ALL state - switch to partial selection mode
+                    selection_state['mode'] = 'partial'
+                
                 self._set_selected_recursive(item, new_state)
+                
+                # Update selection mode after change
+                if all(i["selected"] for i in flat_items):
+                    selection_state['mode'] = 'all'
+                elif not any(i["selected"] for i in flat_items):
+                    selection_state['mode'] = 'none'
+                else:
+                    selection_state['mode'] = 'partial'
+                
                 tv.reload_data()
 
             def _set_selected_recursive(self, item, state):
@@ -2293,38 +2480,28 @@ class MergerUI(object):
         tv.delegate = ds
         sheet.add_subview(tv)
 
-        # Bottom Bar: Cancel / Merge
+        # Bottom Bar: Remove / Cancel / Replace / Append
         bar_y = sheet.height - 50
-
-        btn_merge = ui.Button(title="Merge Selected")
-        btn_merge.frame = (sheet.width - 160, bar_y, 150, 40)
-        btn_merge.flex = "LT" # Left margin flex, Top margin flex
-        btn_merge.background_color = "#007aff"
-        btn_merge.tint_color = "white"
-        btn_merge.corner_radius = 6
-
-        def do_merge(sender):
-            # Path Compression
-            # If a dir is fully selected, pass dir. Else pass selected files.
-
-            # Helper to check directory completeness against FLAT items
-            # This is tricky without tree traversal.
-            # Let's rely on the tree structure we traversed earlier?
-            # 'root_node' is available in closure.
-
+        
+        # Shared pool update logic
+        def _pool_update(mode):
+            """
+            Update the prescan selection pool.
+            mode: 'replace', 'append', or 'remove'
+            """
+            # Path Compression: If a dir is fully selected, pass dir. Else pass selected files.
             compressed_paths = []
-
+            
             # Create a map for quick lookup of selection status by path
             selection_map = {item["path"]: item["selected"] for item in flat_items}
-
+            
             def is_dir_fully_selected(node):
                 if node["type"] == "file":
                     return selection_map.get(node["path"], False)
                 if node.get("children"):
                     return all(is_dir_fully_selected(c) for c in node["children"])
-                return True # Empty dir considered selected? Or false? Let's say false for safety unless explicitly selected (which dirs aren't directly in this map logic except implicitly)
-                # Actually, empty dirs don't matter for file inclusion.
-
+                return True # Empty dir considered selected
+            
             def collect(node):
                 if node["type"] == "file":
                     if selection_map.get(node["path"], False):
@@ -2337,22 +2514,152 @@ class MergerUI(object):
                         if node.get("children"):
                             for c in node["children"]:
                                 collect(c)
-
+            
             collect(root_node)
-
-            # Fallback
-            if not compressed_paths and any(selection_map.values()):
-                 # Should not happen if logic is correct, but safety net:
-                 compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
-
-            self._temp_include_paths = compressed_paths
-
+            
+            # Normalize compressed paths
+            compressed_paths = [normalize_path(p) for p in compressed_paths]
+            
+            # Calculate raw paths (all selected file paths) for UI truth
+            # CRITICAL: raw must contain ONLY files, never directories
+            raw_paths = [
+                normalize_path(item["path"]) for item in flat_items 
+                if item["selected"] and item["type"] == "file"
+            ]
+            
+            # Handle different modes
+            if mode == 'remove':
+                # Remove from pool
+                if root_name in self.saved_prescan_selections:
+                    del self.saved_prescan_selections[root_name]
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Removed selection pool for {root_name}", "success", 1.5)
+                sheet.close()
+                return
+            
+            # Get current selection mode
+            current_mode = selection_state['mode']
+            
+            # Check if we have an existing selection for this repo
+            existing = self.saved_prescan_selections.get(root_name)
+            
+            if mode == 'replace':
+                # Replace mode: overwrite existing selection
+                if current_mode == 'all':
+                    # ALL selected
+                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                elif current_mode == 'none':
+                    # Nothing selected - remove from pool
+                    if root_name in self.saved_prescan_selections:
+                        del self.saved_prescan_selections[root_name]
+                else:
+                    # Partial selection - store both raw and compressed
+                    if compressed_paths or raw_paths:
+                        self.saved_prescan_selections[root_name] = {
+                            "raw": raw_paths if raw_paths else None,
+                            "compressed": compressed_paths if compressed_paths else None
+                        }
+                    else:
+                        # Empty selection - remove from pool
+                        if root_name in self.saved_prescan_selections:
+                            del self.saved_prescan_selections[root_name]
+                
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Replaced selection pool for {root_name}", "success", 1.5)
+                
+            elif mode == 'append':
+                # Append mode: union with existing selection
+                if current_mode == 'none':
+                    # Nothing selected in current view - no-op with feedback
+                    if console:
+                        console.hud_alert("No changes: no items selected in append mode", "error", 2.0)
+                    return # Don't close dialog
+                
+                if current_mode == 'all':
+                    # ALL selected - ALL overrides everything
+                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                else:
+                    # Partial selection - union both raw and compressed
+                    if existing and isinstance(existing, dict):
+                        existing_raw = existing.get("raw")
+                        existing_compressed = existing.get("compressed")
+                        
+                        if existing_raw is None and existing_compressed is None:
+                            # Existing was ALL. Union(ALL, Partial) = ALL
+                            self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                        else:
+                            # Union of existing and new for both fields
+                            # DEFENSIVE: Filter existing_raw to ensure files-only contract
+                            # (protects against legacy/corrupted data where raw might contain dirs)
+                            file_paths_set = {normalize_path(item["path"]) for item in flat_items if item["type"] == "file"}
+                            filtered_existing_raw = [p for p in (existing_raw or []) if p in file_paths_set]
+                            
+                            merged_raw = set(filtered_existing_raw)
+                            merged_raw.update(raw_paths)
+                            
+                            merged_compressed = set(existing_compressed or [])
+                            merged_compressed.update(compressed_paths)
+                            
+                            self.saved_prescan_selections[root_name] = {
+                                "raw": sorted(list(merged_raw)) if merged_raw else None,
+                                "compressed": sorted(list(merged_compressed)) if merged_compressed else None
+                            }
+                    else:
+                        # No existing or legacy format - just save current
+                        self.saved_prescan_selections[root_name] = {
+                            "raw": raw_paths if raw_paths else None,
+                            "compressed": compressed_paths if compressed_paths else None
+                        }
+                
+                self.save_last_state()
+                if console:
+                    console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
+            
             sheet.close()
             # Trigger merge
             self.run_merge(None)
-
-        btn_merge.action = do_merge
-        sheet.add_subview(btn_merge)
+        
+        # Remove button (left side)
+        btn_remove = ui.Button(title="Remove")
+        btn_remove.frame = (10, bar_y, 80, 40)
+        btn_remove.flex = "RT" # Right margin flex, Top margin flex
+        btn_remove.background_color = "#ff3b30"
+        btn_remove.tint_color = "white"
+        btn_remove.corner_radius = 6
+        btn_remove.action = lambda s: _pool_update('remove')
+        sheet.add_subview(btn_remove)
+        
+        # Cancel button (right side)
+        btn_cancel = ui.Button(title="Cancel")
+        btn_cancel.frame = (sheet.width - 310, bar_y, 70, 40)
+        btn_cancel.flex = "LT" # Left margin flex, Top margin flex
+        btn_cancel.background_color = "#444444"
+        btn_cancel.tint_color = "white"
+        btn_cancel.corner_radius = 6
+        btn_cancel.action = lambda s: sheet.close()
+        sheet.add_subview(btn_cancel)
+        
+        # Replace button (right side)
+        btn_replace = ui.Button(title="Replace")
+        btn_replace.frame = (sheet.width - 230, bar_y, 110, 40)
+        btn_replace.flex = "LT" # Left margin flex, Top margin flex
+        btn_replace.background_color = "#007aff"
+        btn_replace.tint_color = "white"
+        btn_replace.corner_radius = 6
+        btn_replace.action = lambda s: _pool_update('replace')
+        sheet.add_subview(btn_replace)
+        
+        # Append button (right side)
+        btn_append = ui.Button(title="Append")
+        btn_append.frame = (sheet.width - 110, bar_y, 100, 40)
+        btn_append.flex = "LT" # Left margin flex, Top margin flex
+        btn_append.background_color = "#34c759"
+        btn_append.tint_color = "white"
+        btn_append.corner_radius = 6
+        btn_append.action = lambda s: _pool_update('append')
+        sheet.add_subview(btn_append)
 
         sheet.present("sheet")
 
@@ -2459,11 +2766,16 @@ class MergerUI(object):
 
         path_contains = (self.path_field.text or "").strip() or None
 
-        # Consume temp include paths if set by Prescan
-        include_paths = getattr(self, "_temp_include_paths", None)
-        # Clear it immediately so next run doesn't inherit it
-        if hasattr(self, "_temp_include_paths"):
-            del self._temp_include_paths
+        # Resolve include paths from Selection Pool (saved_prescan_selections)
+        # Prioritize pool over temp paths (if we deprecate temp paths).
+        # We need include_paths for EACH repo if mode is "pro-repo" OR "combined"?
+        # 'scan_repo' takes `include_paths`.
+        # `write_reports_v2` logic for combined?
+
+        # `scan_repo` is called per repo in the loop below.
+        # We need to fetch the specific include paths for `name`.
+
+        # Note: self.saved_prescan_selections keys are repo names.
 
         detail_idx = self.seg_detail.selected_index
         detail = ["overview", "summary", "dev", "max"][detail_idx]
@@ -2509,7 +2821,31 @@ class MergerUI(object):
                 _ui.delay(lambda: None, 0.0)
             except Exception:
                 pass
-            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=include_paths)
+
+            # Resolve include_paths for this specific repo
+            # Check pool - use compressed field for backend efficiency
+            # Note: None can mean either "explicit ALL" or "not in pool" - we distinguish by checking key existence
+            pool_entry = self.saved_prescan_selections.get(name)
+
+            use_include_paths = None
+            if pool_entry:
+                if isinstance(pool_entry, dict):
+                    # Structured format - use compressed for backend
+                    compressed = pool_entry.get("compressed")
+                    if compressed is None:
+                        # Explicit ALL -> include_paths = None (meaning all)
+                        use_include_paths = None
+                    else:
+                        # List of compressed paths
+                        use_include_paths = compressed
+                else:
+                    # Legacy format (shouldn't happen after migration)
+                    use_include_paths = pool_entry if pool_entry else None
+            else:
+                # Not in pool -> Default behavior (All, filtered by ext/path_filter)
+                use_include_paths = None
+
+            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
             summaries.append(summary)
 
         if not summaries:

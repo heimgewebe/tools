@@ -271,9 +271,13 @@
                 <!-- Tree Content -->
             </div>
 
-            <div class="flex justify-end gap-2 mt-4 pt-2 border-t border-gray-700">
-                <button onclick="closePrescan()" class="px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
-                <button onclick="applyPrescanSelection()" class="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white font-bold rounded">Apply Selection</button>
+            <div class="flex justify-between mt-4 pt-2 border-t border-gray-700">
+                <button onclick="removePrescanSelection()" class="px-4 py-2 text-sm bg-red-700 hover:bg-red-600 text-white rounded">Remove from Pool</button>
+                <div class="flex gap-2">
+                    <button onclick="closePrescan()" class="px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
+                    <button onclick="applyPrescanSelectionReplace()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-bold rounded">Replace</button>
+                    <button onclick="applyPrescanSelectionAppend()" class="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white font-bold rounded">Append</button>
+                </div>
             </div>
         </div>
     </div>

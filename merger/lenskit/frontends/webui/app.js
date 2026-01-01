@@ -49,6 +49,7 @@ function selectionIsNone() {
 }
 
 function selectionResetNone() {
+    // NONE state is represented by an empty Set (not null), distinct from ALL which uses null
     prescanSelection = new Set();
 }
 
@@ -94,28 +95,92 @@ function getAllPathsInTree(treeNode) {
     return paths;
 }
 
+// Materialize raw file paths from tree using compressed rules
+// This reconstructs the UI truth from compressed backend rules
+// TODO(perf): Prefix-matching over compressed paths is O(n*m) where n=files, m=compressed paths.
+// Consider optimizing via:
+// - sorted prefixes with early break
+// - prefix trie structure
+// - precomputed directory → files mapping
+function materializeRawFromCompressed(treeNode, compressedSet) {
+    const paths = new Set();
+    
+    function visit(node) {
+        const normalizedPath = normalizePath(node.path);
+        if (!normalizedPath) return;
+        
+        // Check if this path matches any compressed rule
+        if (compressedSet.has(normalizedPath)) {
+            // Direct match - if it's a file, add it; if it's a dir, add all files under it
+            if (node.type === 'file') {
+                paths.add(normalizedPath);
+            } else if (node.children) {
+                // It's a directory - add all files under it
+                node.children.forEach(visit);
+            }
+            // Already handled children for matched directories, so return early
+            return;
+        }
+        
+        if (node.type === 'file') {
+            // Check if any parent directory is in compressed set (prefix match)
+            for (const compressedPath of compressedSet) {
+                if (normalizedPath.startsWith(compressedPath + '/')) {
+                    paths.add(normalizedPath);
+                    break;
+                }
+            }
+        }
+        
+        // Continue traversing for directory nodes that didn't match directly
+        if (node.children) {
+            node.children.forEach(visit);
+        }
+    }
+    
+    visit(treeNode);
+    return paths;
+}
+
+// Ensures prescanSelection is a Set for mutations when currently in ALL state
+// Returns true if materialization succeeded, false if failed
+function selectionEnsureSetForMutation() {
+    if (prescanSelection !== null) {
+        return true; // Already a Set
+    }
+    
+    // Need to materialize ALL state
+    if (prescanCurrentTree && prescanCurrentTree.tree) {
+        prescanSelection = getAllPathsInTree(prescanCurrentTree.tree);
+        return true;
+    }
+    
+    // Unable to materialize - log warning and keep ALL state
+    console.warn('prescanCurrentTree is not available; cannot materialize ALL state for mutation. Keeping ALL state.');
+    return false;
+}
+
 function setSelectionState(path, isSelected) {
     const p = normalizePath(path);
     if (p === null) return;
 
-    if (selectionIsAll()) {
+    // Fix 1: Null-Guard for ALL state
+    if (prescanSelection === null) {
         // Current state is ALL
         if (isSelected) return; // Already selected
 
         // Deselecting one item from ALL -> Materialize
-        // We must convert "ALL" (concept) to "Set of all paths" (concrete) minus the one being deselected.
-        if (prescanCurrentTree) {
-             prescanSelection = getAllPathsInTree(prescanCurrentTree.tree);
-             prescanSelection.delete(p);
-        } else {
-             // Fallback if no tree (shouldn't happen)
-             selectionResetNone();
+        if (!selectionEnsureSetForMutation()) {
+            // Cannot materialize - keep ALL state
+            return;
         }
-    } else {
-        // Current state is Partial (Set)
-        if (isSelected) prescanSelection.add(p);
-        else prescanSelection.delete(p);
+        prescanSelection.delete(p);
+        return;
     }
+
+    // Current state is Partial (Set)
+    if (isSelected) prescanSelection.add(p);
+    else prescanSelection.delete(p);
 }
 
 function isPathSelected(path) {
@@ -177,6 +242,35 @@ function persistSavedPrescanSelections() {
         };
     }
     localStorage.setItem(PRESCAN_SAVED_KEY, JSON.stringify(obj));
+}
+
+// Simple notification system for user feedback
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 px-4 py-3 rounded shadow-lg z-50 transition-opacity duration-300 ${
+        type === 'success' ? 'bg-green-600 text-white' :
+        type === 'warning' ? 'bg-yellow-600 text-white' :
+        type === 'error' ? 'bg-red-600 text-white' :
+        'bg-blue-600 text-white'
+    }`;
+    notification.textContent = message;
+    notification.style.opacity = '0';
+    
+    document.body.appendChild(notification);
+    
+    // Fade in
+    setTimeout(() => {
+        notification.style.opacity = '1';
+    }, 10);
+    
+    // Fade out and remove after 3 seconds
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        setTimeout(() => {
+            document.body.removeChild(notification);
+        }, 300);
+    }, 3000);
 }
 
 function getToken() {
@@ -1457,36 +1551,67 @@ function prescanRecommended() {
     renderPrescanTree();
 }
 
-async function applyPrescanSelection() {
+async function applyPrescanSelectionReplace() {
+    await applyPrescanSelectionInternal(false);
+}
+
+async function applyPrescanSelectionAppend() {
+    await applyPrescanSelectionInternal(true);
+}
+
+async function removePrescanSelection() {
+    const repo = prescanCurrentTree.root;
+    savedPrescanSelections.delete(repo);
+    persistSavedPrescanSelections();
+    closePrescan();
+    
+    // Update UI (Selection Pool + Badges)
+    renderSelectionPool();
+    await fetchRepos(document.getElementById('hubPath').value);
+    
+    // Show feedback
+    showNotification(`Removed selection pool for ${repo}`, 'info');
+}
+
+async function applyPrescanSelectionInternal(append) {
     // Semantics: empty selection means "remove manual override" (back to standard behavior)
     // prescanSelection === null means "ALL" (explicitly select entire repo)
 
     const repo = prescanCurrentTree.root;
+    const prev = savedPrescanSelections.get(repo) || null;
 
     if (selectionIsAll()) {
         // ALL selected
-        // We treat this as an explicit override to include everything (as opposed to "standard" which might mean default filters?)
-        // Actually, if include_paths is null, it means "All files".
+        // ALL overrides everything (Union with ALL is ALL).
         savedPrescanSelections.set(repo, { raw: null, compressed: null });
     } else {
         if (selectionIsNone()) {
-             // Nothing selected -> Remove manual override
-             savedPrescanSelections.delete(repo);
+             // Nothing selected in current view.
+             // If Replace: Remove manual override (delete from pool).
+             // If Append: Do nothing (keep previous state) but inform the user.
+             if (!append) {
+                 savedPrescanSelections.delete(repo);
+             } else {
+                 // Provide feedback so the user understands why no changes were applied.
+                 showNotification('No changes were applied because no items are selected in append mode.', 'warning');
+                 return; // Don't close the dialog
+             }
         } else {
-             // Partial selection -> Calculate compressed
-             const compressedPaths = [];
+             // Partial selection in current view.
+             // Calculate compressed paths for the *current* selection.
+             const currentCompressed = [];
              function collectPaths(node) {
                  const path = normalizePath(node.path);
 
                  if (node.type === 'file') {
                      // Only add if path is valid AND selected
                      if (path !== null && isPathSelected(path)) {
-                         compressedPaths.push(path);
+                         currentCompressed.push(path);
                      }
                  } else if (node.type === 'dir') {
                      // If valid path AND fully selected, add dir
                      if (path !== null && isDirSelected(node)) {
-                         compressedPaths.push(path);
+                         currentCompressed.push(path);
                      } else {
                          // Otherwise descend (also descends if path is null/invalid but has children)
                          if (node.children) node.children.forEach(collectPaths);
@@ -1495,10 +1620,64 @@ async function applyPrescanSelection() {
              }
              collectPaths(prescanCurrentTree.tree);
 
-             savedPrescanSelections.set(repo, {
-                 raw: new Set(prescanSelection),
-                 compressed: compressedPaths
-             });
+             // Merge Logic
+             if (prev && append) {
+                 if (prev.compressed === null) {
+                     // Previous was ALL. New is Partial. Result: ALL.
+                     // Note: When merging ALL with Partial in append mode, the result is ALL.
+                     // This may be counterintuitive if user intentionally deselected items.
+                     // We keep ALL as union of ALL and anything is ALL.
+                     savedPrescanSelections.set(repo, prev);
+                 } else {
+                     // Previous was Partial. New is Partial.
+                     // 1. Merge Compressed Rules (for Backend)
+                     const mergedCompressed = new Set([...(prev.compressed || []), ...currentCompressed]);
+
+                     // 2. Merge Raw Sets (for UI consistency)
+                     // If we don't merge raw, reloading the pool will show incomplete checkboxes.
+                     let mergedRaw = null;
+                     if (prev.raw && prescanSelection) {
+                         // Union of both sets
+                         mergedRaw = new Set([...prev.raw, ...prescanSelection]);
+                     } else if (prescanSelection) {
+                         // Prev raw missing? Use current.
+                         mergedRaw = new Set(prescanSelection);
+                     } else if (prev.raw instanceof Set) {
+                         // Current selection is null but prev.raw exists as a Set.
+                         // This could happen if previous had raw but current is ALL state.
+                         // Create a new Set to avoid mutations to previous selection.
+                         mergedRaw = new Set(prev.raw);
+                     }
+                     
+                     // If both prev.raw and prescanSelection are falsy, mergedRaw would remain null,
+                     // while mergedCompressed may still contain paths. To avoid losing the raw
+                     // representation (and causing UI inconsistencies on reload), fall back to
+                     // materializing raw from the tree using compressed rules.
+                     if (!mergedRaw && mergedCompressed.size > 0) {
+                         if (prescanCurrentTree && prescanCurrentTree.tree) {
+                             mergedRaw = materializeRawFromCompressed(prescanCurrentTree.tree, mergedCompressed);
+                         } else {
+                             // Cannot materialize raw without tree. Keep raw as null (degraded state).
+                             // This maintains the files-only contract: raw is either null or contains only files.
+                             // UI will need to handle this degraded state on reload (tree required for full restore).
+                             console.warn('Cannot materialize raw from compressed without tree; raw will be null (degraded)');
+                             mergedRaw = null;
+                         }
+                     }
+
+                     savedPrescanSelections.set(repo, {
+                         raw: mergedRaw,
+                         compressed: Array.from(mergedCompressed)
+                     });
+                 }
+             } else {
+                 // Replace Mode or No Previous State
+                 // prescanSelection contains only files (enforced by togglePrescanNode and helper functions)
+                 savedPrescanSelections.set(repo, {
+                     raw: new Set(prescanSelection),
+                     compressed: currentCompressed
+                 });
+             }
         }
     }
 
@@ -1508,9 +1687,14 @@ async function applyPrescanSelection() {
     // Update UI (Selection Pool + Badges)
     renderSelectionPool();
     await fetchRepos(document.getElementById('hubPath').value);
+    
+    // Show feedback
+    const mode = append ? 'appended to' : 'replaced';
+    showNotification(`Selection ${mode} pool for ${repo}`, 'success');
 }
 
-// Deprecated function name kept for safety but functionality moved to applyPrescanSelection
-function runMergeFromPrescan() {
-    applyPrescanSelection();
+// Deprecated function name kept for backward compatibility
+async function applyPrescanSelection() {
+    // Default to replace mode for backward compatibility
+    await applyPrescanSelectionReplace();
 }
