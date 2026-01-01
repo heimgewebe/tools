@@ -14,6 +14,9 @@ let currentPickerTarget = null;
 let currentPickerPath = null;
 let currentPickerToken = null; // For token-based navigation
 
+// Guard: strictly prevent merge when prescan is open
+window.__prescanOpen = false;
+
 let prescanCurrentTree = null;
 // prescanSelection is Tri-State:
 // null = ALL selected
@@ -21,6 +24,10 @@ let prescanCurrentTree = null;
 let prescanSelection = new Set();
 let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
 let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set|null, compressed: Array|null }
+
+// DOCS: savedPrescanSelections acts as the "Selection Pool".
+// It is strictly separated from the active "Merge Targets" (which are built in startJob).
+// Prescan operations only modify this pool, never the Merge Targets directly.
 
 // Available Extras
 const EXTRAS_OPTIONS = [
@@ -545,6 +552,8 @@ function removeFromPool(repo) {
 
 async function runPoolMerge(e) {
     if (e) e.preventDefault();
+    if (window.__prescanOpen) return; // HARD GUARD
+
     if (savedPrescanSelections.size === 0) return;
 
     // Use default config from form for context (profile, mode, etc.)
@@ -893,6 +902,8 @@ async function loadArtifacts() {
 
 async function startJob(e) {
     e.preventDefault();
+    if (window.__prescanOpen) return; // HARD GUARD
+
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true;
     btn.innerText = "Starting...";
@@ -1263,14 +1274,18 @@ async function downloadWithAuth(url, name) {
 // --- Prescan Logic ---
 
 async function startPrescan() {
+    window.__prescanOpen = true; // Engage Guard
+
     const repos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
 
     if (repos.length === 0) {
         alert("Please select at least one repository first.");
+        window.__prescanOpen = false; // Disengage if early exit
         return;
     }
     if (repos.length > 1) {
         alert("Prescan currently supports single repo selection for editing. Please select only one.");
+        window.__prescanOpen = false; // Disengage if early exit
         return;
     }
 
@@ -1336,6 +1351,7 @@ function closePrescan() {
     document.getElementById('prescanModal').classList.add('hidden');
     prescanCurrentTree = null;
     prescanExpandedPaths.clear();
+    window.__prescanOpen = false; // Disengage Guard
 }
 
 function renderPrescanTree() {

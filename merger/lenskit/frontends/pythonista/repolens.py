@@ -541,6 +541,9 @@ class MergerUI(object):
         # Beim Start nur die persistierte Ignore-Liste laden – nicht die gesamte UI-Config
         self._load_ignored_repos_from_state()
 
+        # Flag to strictly prevent merge when prescan is active
+        self._prescan_active = False
+
         # Saved Prescan Selections (Pool)
         # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
         # - raw: None (ALL) or list of all selected file paths (for UI truth)
@@ -2221,6 +2224,9 @@ class MergerUI(object):
             _notify("Core merge module not found", "error")
             return
 
+        # Engage Guard
+        self._prescan_active = True
+
         # Show Loading HUD
         if console:
             console.show_activity("Scanning structure...")
@@ -2234,6 +2240,8 @@ class MergerUI(object):
             except Exception as e:
                 def err():
                     if console: console.alert("Prescan Failed", str(e), "OK", hide_cancel_button=True)
+                    # Reset flag on failure
+                    self._prescan_active = False
                 ui.delay(err, 0)
             finally:
                 if console:
@@ -2355,6 +2363,15 @@ class MergerUI(object):
         sheet.name = f"Prescan: {root_name}"
         sheet.background_color = "#111111"
         sheet.frame = (0, 0, 600, 800)
+
+        # Delegate to handle closing
+        class PrescanDelegate (object):
+            def __init__(self, parent):
+                self.parent = parent
+            def view_did_close(self, sender):
+                self.parent._prescan_active = False
+
+        sheet.delegate = PrescanDelegate(self)
 
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
@@ -2618,8 +2635,7 @@ class MergerUI(object):
                     console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
             
             sheet.close()
-            # Trigger merge
-            self.run_merge(None)
+            # No auto-merge!
         
         # Remove button (left side)
         btn_remove = ui.Button(title="Remove")
@@ -2712,6 +2728,11 @@ class MergerUI(object):
         UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
         sonst wirkt Pythonista "eingefroren" – besonders bei Multi-Repo.
         """
+        if getattr(self, "_prescan_active", False):
+            if console:
+                console.hud_alert("Prescan active - merge blocked", "error")
+            return
+
         # Snapshot UI state on main thread to avoid thread-safety issues in background
         self._pending_plan_only = self.plan_only_switch.value
         # Use getattr for code_only just in case (legacy robustness)
