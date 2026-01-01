@@ -95,24 +95,6 @@ function getAllPathsInTree(treeNode) {
     return paths;
 }
 
-// Ensures prescanSelection is a Set for mutations when currently in ALL state
-// Returns true if materialization succeeded, false if failed
-function selectionEnsureSetForMutation() {
-    if (prescanSelection !== null) {
-        return true; // Already a Set
-    }
-    
-    // Need to materialize ALL state
-    if (prescanCurrentTree && prescanCurrentTree.tree) {
-        prescanSelection = getAllPathsInTree(prescanCurrentTree.tree);
-        return true;
-    }
-    
-    // Unable to materialize - log warning and keep ALL state
-    console.warn('prescanCurrentTree is not available; cannot materialize ALL state for mutation. Keeping ALL state.');
-    return false;
-}
-
 function setSelectionState(path, isSelected) {
     const p = normalizePath(path);
     if (p === null) return;
@@ -123,11 +105,13 @@ function setSelectionState(path, isSelected) {
         if (isSelected) return; // Already selected
 
         // Deselecting one item from ALL -> Materialize
-        if (!selectionEnsureSetForMutation()) {
-            // Cannot materialize - keep ALL state
-            return;
+        if (prescanCurrentTree) {
+             prescanSelection = getAllPathsInTree(prescanCurrentTree.tree);
+             prescanSelection.delete(p);
+        } else {
+             // Fallback: Materialize as empty set (safe)
+             prescanSelection = new Set();
         }
-        prescanSelection.delete(p);
         return;
     }
 
@@ -166,15 +150,17 @@ function loadSavedPrescanSelections() {
         const m = new Map();
         for (const [repo, obj] of Object.entries(raw)) {
             // raw can be null (ALL) or array
+            // If raw was a Set in memory but serialized, it might be an empty object if not handled.
+            // We expect Array from persistence.
             let rawSet = null;
-            if (obj.raw !== null) {
+            if (obj.raw !== null && obj.raw !== undefined) {
                 const rawList = Array.isArray(obj.raw) ? obj.raw : [];
                 rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
             }
 
             // compressed can be null (ALL) or array
             let compressed = null;
-            if (obj.compressed !== null) {
+            if (obj.compressed !== null && obj.compressed !== undefined) {
                 compressed = Array.isArray(obj.compressed) ? obj.compressed.map(normalizePath).filter(p => p !== null) : [];
             }
 
@@ -189,41 +175,20 @@ function loadSavedPrescanSelections() {
 function persistSavedPrescanSelections() {
     const obj = {};
     for (const [repo, sel] of savedPrescanSelections.entries()) {
+        // Ensure 'raw' Set is converted to Array for JSON serialization
+        let rawArray = null;
+        if (sel.raw instanceof Set) {
+            rawArray = Array.from(sel.raw);
+        } else if (Array.isArray(sel.raw)) {
+            rawArray = sel.raw;
+        }
+
         obj[repo] = {
-            raw: sel.raw ? Array.from(sel.raw) : null,
+            raw: rawArray,
             compressed: sel.compressed
         };
     }
     localStorage.setItem(PRESCAN_SAVED_KEY, JSON.stringify(obj));
-}
-
-// Simple notification system for user feedback
-function showNotification(message, type = 'info') {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.className = `fixed top-4 right-4 px-4 py-3 rounded shadow-lg z-50 transition-opacity duration-300 ${
-        type === 'success' ? 'bg-green-600 text-white' :
-        type === 'warning' ? 'bg-yellow-600 text-white' :
-        type === 'error' ? 'bg-red-600 text-white' :
-        'bg-blue-600 text-white'
-    }`;
-    notification.textContent = message;
-    notification.style.opacity = '0';
-    
-    document.body.appendChild(notification);
-    
-    // Fade in
-    setTimeout(() => {
-        notification.style.opacity = '1';
-    }, 10);
-    
-    // Fade out and remove after 3 seconds
-    setTimeout(() => {
-        notification.style.opacity = '0';
-        setTimeout(() => {
-            document.body.removeChild(notification);
-        }, 300);
-    }, 3000);
 }
 
 function getToken() {
@@ -1504,34 +1469,17 @@ function prescanRecommended() {
     renderPrescanTree();
 }
 
-async function applyPrescanSelectionReplace() {
-    await applyPrescanSelectionInternal(false);
-}
-
-async function applyPrescanSelectionAppend() {
-    await applyPrescanSelectionInternal(true);
-}
-
-async function removePrescanSelection() {
-    const repo = prescanCurrentTree.root;
-    savedPrescanSelections.delete(repo);
-    persistSavedPrescanSelections();
-    closePrescan();
-    
-    // Update UI (Selection Pool + Badges)
-    renderSelectionPool();
-    await fetchRepos(document.getElementById('hubPath').value);
-    
-    // Show feedback
-    showNotification(`Removed selection pool for ${repo}`, 'info');
-}
-
-async function applyPrescanSelectionInternal(append) {
+async function applyPrescanSelection() {
     // Semantics: empty selection means "remove manual override" (back to standard behavior)
     // prescanSelection === null means "ALL" (explicitly select entire repo)
 
     const repo = prescanCurrentTree.root;
     const prev = savedPrescanSelections.get(repo) || null;
+    // APPEND MODE:
+    // If true, we merge the new selection with the existing one (Union).
+    // If false (Replace), we overwrite the existing selection.
+    // Currently enabled by default to support accumulation workflows.
+    const append = true;
 
     if (selectionIsAll()) {
         // ALL selected
@@ -1541,13 +1489,9 @@ async function applyPrescanSelectionInternal(append) {
         if (selectionIsNone()) {
              // Nothing selected in current view.
              // If Replace: Remove manual override (delete from pool).
-             // If Append: Do nothing (keep previous state) but inform the user.
+             // If Append: Do nothing (keep previous state).
              if (!append) {
                  savedPrescanSelections.delete(repo);
-             } else {
-                 // Provide feedback so the user understands why no changes were applied.
-                 showNotification('No changes were applied because no items are selected in append mode.', 'warning');
-                 return; // Don't close the dialog
              }
         } else {
              // Partial selection in current view.
@@ -1577,9 +1521,7 @@ async function applyPrescanSelectionInternal(append) {
              if (prev && append) {
                  if (prev.compressed === null) {
                      // Previous was ALL. New is Partial. Result: ALL.
-                     // Note: When merging ALL with Partial in append mode, the result is ALL.
-                     // This may be counterintuitive if user intentionally deselected items.
-                     // We keep ALL as union of ALL and anything is ALL.
+                     // (Keep existing ALL)
                      savedPrescanSelections.set(repo, prev);
                  } else {
                      // Previous was Partial. New is Partial.
@@ -1595,15 +1537,7 @@ async function applyPrescanSelectionInternal(append) {
                      } else if (prescanSelection) {
                          // Prev raw missing? Use current.
                          mergedRaw = new Set(prescanSelection);
-                     } else if (prev.raw instanceof Set) {
-                         // Current selection is null but prev.raw exists as a Set.
-                         // This could happen if previous had raw but current is ALL state.
-                         // Create a new Set to avoid mutations to previous selection.
-                         mergedRaw = new Set(prev.raw);
                      }
-                     // Note: If both prev.raw and prescanSelection are falsy, mergedRaw remains null.
-                     // This creates an inconsistency where the merged selection loses raw representation.
-                     // However, compressed paths are still maintained, so backend functionality is preserved.
 
                      savedPrescanSelections.set(repo, {
                          raw: mergedRaw,
@@ -1626,14 +1560,9 @@ async function applyPrescanSelectionInternal(append) {
     // Update UI (Selection Pool + Badges)
     renderSelectionPool();
     await fetchRepos(document.getElementById('hubPath').value);
-    
-    // Show feedback
-    const mode = append ? 'appended to' : 'replaced';
-    showNotification(`Selection ${mode} pool for ${repo}`, 'success');
 }
 
-// Deprecated function name kept for backward compatibility
-async function applyPrescanSelection() {
-    // Default to replace mode for backward compatibility
-    await applyPrescanSelectionReplace();
+// Deprecated function name kept for safety but functionality moved to applyPrescanSelection
+function runMergeFromPrescan() {
+    applyPrescanSelection();
 }
