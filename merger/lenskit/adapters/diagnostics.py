@@ -37,7 +37,7 @@ def rebuild(hub_path: Path) -> Dict[str, Any]:
 
     try:
         fleet_data = json.loads(fleet_snap_path.read_text(encoding="utf-8"))
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to load fleet snapshot")
         diag = {
             "status": "error",

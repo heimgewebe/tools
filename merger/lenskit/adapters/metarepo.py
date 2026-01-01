@@ -5,15 +5,13 @@ metarepo_sync.py – Synchronization engine for metarepo-managed files.
 Implements strict manifest-based sync with managed markers.
 """
 
-import os
-import sys
 import json
 import hashlib
 import datetime
 import shutil
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 
 # YAML is mandatory for this service feature
 import yaml
@@ -149,7 +147,6 @@ def sync_repo(
     Sync a single repository against the manifest.
     """
 
-    repo_name = repo_root.name
     managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
 
     report = {
