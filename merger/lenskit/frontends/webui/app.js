@@ -1595,11 +1595,11 @@ async function applyPrescanSelectionInternal(append) {
                      } else if (prescanSelection) {
                          // Prev raw missing? Use current.
                          mergedRaw = new Set(prescanSelection);
-                     } else if (prev.raw) {
-                         // Current selection is null but prev.raw exists.
+                     } else if (prev.raw instanceof Set) {
+                         // Current selection is null but prev.raw exists as a Set.
                          // This could happen if previous had raw but current is ALL state.
-                         // Keep prev.raw for consistency.
-                         mergedRaw = prev.raw;
+                         // Create a new Set to avoid mutations to previous selection.
+                         mergedRaw = new Set(prev.raw);
                      }
                      // Note: If both prev.raw and prescanSelection are falsy, mergedRaw remains null.
                      // This creates an inconsistency where the merged selection loses raw representation.
