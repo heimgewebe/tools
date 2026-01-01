@@ -113,7 +113,11 @@ function materializeRawFromCompressed(treeNode, compressedSet) {
                 // It's a directory - add all files under it
                 node.children.forEach(visit);
             }
-        } else if (node.type === 'file') {
+            // Already handled children for matched directories, so return early
+            return;
+        }
+        
+        if (node.type === 'file') {
             // Check if any parent directory is in compressed set (prefix match)
             for (const compressedPath of compressedSet) {
                 if (normalizedPath.startsWith(compressedPath + '/')) {
@@ -123,7 +127,7 @@ function materializeRawFromCompressed(treeNode, compressedSet) {
             }
         }
         
-        // Continue traversing for directory nodes
+        // Continue traversing for directory nodes that didn't match directly
         if (node.children) {
             node.children.forEach(visit);
         }
