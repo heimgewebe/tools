@@ -38,6 +38,24 @@ const DEFAULT_EXTRAS = [
     'json_sidecar'
 ];
 
+// --- Invariant State Wrappers ---
+
+function selectionIsAll() {
+    return prescanSelection === null;
+}
+
+function selectionIsNone() {
+    return prescanSelection !== null && prescanSelection.size === 0;
+}
+
+function selectionResetNone() {
+    prescanSelection = new Set();
+}
+
+function selectionSetAll() {
+    prescanSelection = null;
+}
+
 // --- Utilities ---
 
 function normalizePath(p) {
@@ -76,13 +94,11 @@ function getAllPathsInTree(treeNode) {
     return paths;
 }
 
-// --- Invariant State Wrappers ---
-
 function setSelectionState(path, isSelected) {
     const p = normalizePath(path);
     if (p === null) return;
 
-    if (prescanSelection === null) {
+    if (selectionIsAll()) {
         // Current state is ALL
         if (isSelected) return; // Already selected
 
@@ -93,7 +109,7 @@ function setSelectionState(path, isSelected) {
              prescanSelection.delete(p);
         } else {
              // Fallback if no tree (shouldn't happen)
-             prescanSelection = new Set();
+             selectionResetNone();
         }
     } else {
         // Current state is Partial (Set)
@@ -107,7 +123,7 @@ function isPathSelected(path) {
     if (p === null) return false;
 
     // If selection is null, it means EVERYTHING is selected
-    if (prescanSelection === null) return true;
+    if (selectionIsAll()) return true;
 
     return prescanSelection.has(p);
 }
@@ -817,40 +833,28 @@ async function startJob(e) {
     };
 
     try {
-        // Legacy "Batch" Strategy for selected repos in list
-        // If items are in the pool, they should ideally be run via "Run Pool".
-        // BUT, existing behavior was to run custom jobs for them.
-        // We will maintain this for now but it might be redundant.
-
-        // Multi-repo selection strategy (Weg 1: Separate jobs for custom, batch for rest)
-        const customRepos = [];
-        const standardRepos = [];
-
-        selectedRepos.forEach(repo => {
-            if (savedPrescanSelections.has(repo)) {
-                customRepos.push(repo);
-            } else {
-                standardRepos.push(repo);
-            }
-        });
+        // Run Merge Strategy: STRICTLY Batch / Single based on checkboxes.
+        // Ignores Pool (Pool is run via Run Merge from Pool).
+        // This ensures clear separation of intent.
 
         const jobsToStart = [];
 
-        // 1. Custom Jobs (from selection pool)
-        for (const repo of customRepos) {
-            const sel = savedPrescanSelections.get(repo);
-            const payload = { ...commonPayload, repos: [repo], include_paths: sel.compressed };
-            jobsToStart.push(payload);
-        }
-
-        // 2. Standard Job (Batch)
-        if (standardRepos.length > 0) {
-            const payload = { ...commonPayload, repos: standardRepos };
-            jobsToStart.push(payload);
-        }
-
-        if (jobsToStart.length === 0) {
+        if (selectedRepos.length === 0) {
              throw new Error("No repos selected.");
+        }
+
+        // Handle Mode: "pro-repo" implies individual job submission for deterministic behavior.
+        // "gesamt" (Combined) implies a single batch job.
+        const mode = document.getElementById('mode').value;
+
+        if (mode === 'pro-repo') {
+            // Split into individual jobs
+            selectedRepos.forEach(repo => {
+                jobsToStart.push({ ...commonPayload, repos: [repo] });
+            });
+        } else {
+            // Batch job
+            jobsToStart.push({ ...commonPayload, repos: selectedRepos });
         }
 
         // Sequential launch
@@ -1187,12 +1191,12 @@ async function startPrescan() {
         // Handle Tri-state load
         const saved = savedPrescanSelections.get(repo);
         if (saved.raw === null) {
-            prescanSelection = null; // ALL
+            selectionSetAll();
         } else {
             prescanSelection = new Set(saved.raw);
         }
     } else {
-        prescanSelection = new Set(); // Empty by default
+        selectionResetNone();
     }
     prescanExpandedPaths.clear();
 
@@ -1223,7 +1227,7 @@ async function startPrescan() {
 
         // Initial Selection: Recommended (instead of All) if empty
         // Only run recommendation if we started fresh (prescanSelection is empty set, not null/all)
-        if (prescanSelection !== null && prescanSelection.size === 0) {
+        if (selectionIsNone()) {
             prescanRecommended();
         }
 
@@ -1348,7 +1352,7 @@ function isDirSelected(node) {
     if (!node.children || node.children.length === 0) return false;
 
     // If prescanSelection is null (ALL), then everything is selected
-    if (prescanSelection === null) return true;
+    if (selectionIsAll()) return true;
 
     return node.children.every(c => c.type === 'dir' ? isDirSelected(c) : isPathSelected(c.path));
 }
@@ -1358,7 +1362,7 @@ function isDirPartial(node) {
     if (!node.children || node.children.length === 0) return false;
 
     // If ALL, it's not partial, it's full
-    if (prescanSelection === null) return false;
+    if (selectionIsAll()) return false;
 
     return node.children.some(c => c.type === 'dir' ? (isDirSelected(c) || isDirPartial(c)) : isPathSelected(c.path));
 }
@@ -1387,9 +1391,9 @@ function prescanToggleAll(checked) {
 
     // No recursion, no iteration. Pure State Switch.
     if (checked) {
-        prescanSelection = null; // ALL
+        selectionSetAll();
     } else {
-        prescanSelection = new Set(); // NONE
+        selectionResetNone();
     }
 
     renderPrescanTree();
@@ -1459,13 +1463,13 @@ async function applyPrescanSelection() {
 
     const repo = prescanCurrentTree.root;
 
-    if (prescanSelection === null) {
+    if (selectionIsAll()) {
         // ALL selected
         // We treat this as an explicit override to include everything (as opposed to "standard" which might mean default filters?)
         // Actually, if include_paths is null, it means "All files".
         savedPrescanSelections.set(repo, { raw: null, compressed: null });
     } else {
-        if (prescanSelection.size === 0) {
+        if (selectionIsNone()) {
              // Nothing selected -> Remove manual override
              savedPrescanSelections.delete(repo);
         } else {
