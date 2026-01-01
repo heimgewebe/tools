@@ -1,6 +1,5 @@
 
-import pytest
-from unittest.mock import MagicMock
+
 from merger.lenskit.service.models import Job, JobRequest
 
 def test_sse_contract(service_client, monkeypatch):

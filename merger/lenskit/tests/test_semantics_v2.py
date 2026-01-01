@@ -1,7 +1,6 @@
 import unittest
 import tempfile
 import shutil
-import json
 from pathlib import Path
 import sys
 import os
@@ -10,7 +9,7 @@ import os
 # We need to add 'merger' which is ../.. from tests/
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from lenskit.core.merge import HealthCollector, FileInfo, scan_repo, is_critical_file, RepoHealth, iter_report_blocks, ExtrasConfig, EPISTEMIC_HUMILITY_WARNING
+from lenskit.core.merge import HealthCollector, scan_repo, iter_report_blocks, EPISTEMIC_HUMILITY_WARNING
 
 class TestSemanticsV2(unittest.TestCase):
     def setUp(self):

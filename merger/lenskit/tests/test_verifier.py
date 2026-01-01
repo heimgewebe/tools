@@ -1,5 +1,4 @@
 import json
-import shutil
 import tempfile
 import pytest
 import subprocess

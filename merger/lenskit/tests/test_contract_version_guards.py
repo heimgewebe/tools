@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import pytest
 
 # Define forbidden strings
 FORBIDDEN_STRINGS = [

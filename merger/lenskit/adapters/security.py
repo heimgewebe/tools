@@ -8,7 +8,6 @@ import re
 
 from fastapi import HTTPException, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from ..core.path_security import resolve_secure_path
 
 security_scheme = HTTPBearer(auto_error=False)
 

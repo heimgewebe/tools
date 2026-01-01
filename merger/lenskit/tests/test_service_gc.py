@@ -1,7 +1,5 @@
 
-import pytest
 import uuid
-from pathlib import Path
 from merger.lenskit.service.models import Job, Artifact, JobRequest
 
 def test_gc_deletes_real_artifacts(service_client):
@@ -14,7 +12,6 @@ def test_gc_deletes_real_artifacts(service_client):
 
     # 2. Create Job and Artifact
     # Construct Job cleanly
-    job_id = str(uuid.uuid4())
     req = JobRequest()
     job = Job.create(req)
     # Override ID to match our test setup if needed, but create() gives random UUID.

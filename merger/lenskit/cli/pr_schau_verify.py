@@ -23,7 +23,7 @@ import json
 import hashlib
 import argparse
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 try:
     import jsonschema
@@ -135,17 +135,8 @@ def verify_full(bundle_path: Path, data: Dict[str, Any]) -> None:
     # 4. Guard: No-Truncate
     # Scan all parts for forbidden text
     if not (policy == "truncate" and not is_complete):
-        # Broader set of forbidden substrings
-        forbidden_substrings = [
-            "Content truncated at", "content truncated at",
-            "truncated at", "cut off", "omitted (size >",
-            "content omitted"
-        ]
-        # Allow "omitted (size >" if it's explicitly about binary or excluded files, not generic truncation.
-        # Wait, the contract says "No silent truncation". Binary omission is explicit.
+        # The contract says "No silent truncation". Binary omission is explicit.
         # However, "content truncated at" usually implies the file reader gave up.
-        # Let's keep it robust but careful. The generator uses "Omitted (Size > ...)" for files > limit.
-        # This is allowed if it's a file-level omission (handled by 'mixed' scope), but 'truncation' usually means 'partial file'.
         # For now, we strictly guard against 'truncated at' which implies partial read.
         strict_forbidden = ["Content truncated at", "content truncated at", "truncated at"]
 

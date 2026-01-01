@@ -1,6 +1,5 @@
 
-import pytest
-from pathlib import Path
+
 from merger.lenskit.core.merge import scan_repo
 
 def test_scan_repo_include_paths_tri_state(tmp_path):

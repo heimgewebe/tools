@@ -1,9 +1,8 @@
 import os
-import json
 import logging
 import time
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 from datetime import datetime
 import fnmatch
 
@@ -69,8 +68,6 @@ class AtlasScanner:
             "stats": {"files": 0, "bytes": 0}
         }
 
-        stack = [(self.root, 0, self.tree)]
-
         # For top dirs, we need to aggregate size.
         # Since we traverse depth-first (stack), we can't easily aggregate up without post-processing or recursion.
         # Let's stick to os.walk for simplicity and performance, but we need to map it to our tree.
@@ -109,7 +106,6 @@ class AtlasScanner:
             dirs[:] = [d for d in dirs if not self._is_excluded(current_root / d)]
 
             # Process files
-            file_stats = []
             dir_bytes = 0
 
             for f in files:

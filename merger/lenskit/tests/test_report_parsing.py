@@ -1,11 +1,9 @@
 
 import re
-import pytest
-import shutil
 import sys
 import os
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Dict
 
 # Add parent directory to path to allow importing lenskit
 # Matches existing test pattern: merger/lenskit/tests -> ../.. -> merger/
@@ -45,7 +43,6 @@ class ReportParser:
 
         stack = [] # List of dicts: {type, start_content, attrs}
 
-        pos = 0
         for match in token_pattern.finditer(self.content):
             is_begin = match.group(1) is not None
 

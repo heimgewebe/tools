@@ -815,7 +815,7 @@ class HealthCollector:
                 sync_detail = f"mode={mode} add={summ.get('add',0)} upd={summ.get('update',0)} blk={summ.get('blocked',0)} err={summ.get('error',0)}"
                 lines.append(f"- **Meta Sync:** {health.meta_sync_status} ({sync_detail})")
             else:
-                 lines.append(f"- **Meta Sync:** unknown")
+                 lines.append("- **Meta Sync:** unknown")
 
             # Feindynamik-Scanner (Risiken)
             risks = []
@@ -2960,7 +2960,6 @@ def iter_report_blocks(
     total_size = sum(fi.size for fi in files)
     text_files = [fi for fi in files if fi.is_text]
     included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
-    truncation_count = sum(1 for _, s in processed_files if s == "truncated")
 
     # Calculate Epistemic Metrics (SR-Fix-5, 6, 7)
     # Single Source of Truth

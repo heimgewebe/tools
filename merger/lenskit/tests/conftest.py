@@ -2,13 +2,11 @@
 import pytest
 import shutil
 import tempfile
-import uuid
 from pathlib import Path
 from fastapi.testclient import TestClient
 
 # Canonical imports only - strict environment check
 from merger.lenskit.service.app import app, init_service, state
-from merger.lenskit.service.models import JobRequest
 
 @pytest.fixture
 def service_client():

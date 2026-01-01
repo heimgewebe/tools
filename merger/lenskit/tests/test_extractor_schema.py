@@ -1,10 +1,8 @@
 import json
-import shutil
 import tempfile
-from typing import Dict, Any
 import pytest
+from typing import Dict, Any
 from pathlib import Path
-from datetime import datetime, timezone
 from merger.lenskit.core.extractor import generate_review_bundle, _compute_sha256
 
 # Path to the schema file
