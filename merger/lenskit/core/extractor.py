@@ -26,7 +26,6 @@ import datetime
 import json
 import hashlib
 import fnmatch
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
 
@@ -628,7 +627,7 @@ def generate_review_bundle(
             if item.get("sha256"):
                 block.append(f"- SHA256: `{item['sha256']}`")
             else:
-                block.append(f"- SHA256: (n/a)")
+                block.append("- SHA256: (n/a)")
 
             # Security / Binary / Size checks
             skip_content = False

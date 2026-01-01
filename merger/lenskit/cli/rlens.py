@@ -27,7 +27,7 @@ except ImportError:
     try:
         from merger.lenskit.service.app import app, init_service
     except ImportError as e:
-        print(f"[rlens] Fatal Error: Could not import 'lenskit.service.app'.", file=sys.stderr)
+        print("[rlens] Fatal Error: Could not import 'lenskit.service.app'.", file=sys.stderr)
         print(f"[rlens] Debug info: sys.path={sys.path}", file=sys.stderr)
         print(f"[rlens] Original error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -105,7 +105,7 @@ def main():
     # Check 2: Root FS Capability vs Loopback
     allow_fs_root = os.environ.get("RLENS_ALLOW_FS_ROOT", "0") == "1"
     if allow_fs_root and not _is_loopback_host(args.host):
-        print(f"[rlens] Security Error: RLENS_ALLOW_FS_ROOT=1 requires loopback host (localhost/127.0.0.1).", file=sys.stderr)
+        print("[rlens] Security Error: RLENS_ALLOW_FS_ROOT=1 requires loopback host (localhost/127.0.0.1).", file=sys.stderr)
         print(f"[rlens] Current host: {args.host}", file=sys.stderr)
         sys.exit(1)
 

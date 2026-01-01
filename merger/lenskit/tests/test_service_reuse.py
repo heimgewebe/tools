@@ -1,6 +1,4 @@
 
-import pytest
-from merger.lenskit.service.models import JobRequest
 
 def test_explicit_reuse_policy(service_client):
     ctx = service_client

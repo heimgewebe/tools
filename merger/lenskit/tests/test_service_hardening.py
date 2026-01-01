@@ -1,11 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
-import os
 import tempfile
-import time
 from merger.lenskit.service.app import app, init_service, state
-from merger.lenskit.service.models import JobRequest, Job, Artifact
+from merger.lenskit.service.models import JobRequest, Artifact
 from datetime import datetime
 import uuid
 

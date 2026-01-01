@@ -1,6 +1,5 @@
 
 import pytest
-from pathlib import Path
 from merger.lenskit.core.merge import scan_repo
 
 @pytest.fixture

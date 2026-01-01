@@ -1,12 +1,11 @@
 import concurrent.futures
-import time
 import sys
 import uuid
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
+from typing import List
 
-from .models import Job, JobRequest, Artifact
+from .models import Artifact
 from .jobstore import JobStore
 from ..adapters.security import validate_source_dir
 
@@ -17,13 +16,11 @@ from ..adapters.security import validate_source_dir
 
 try:
     from lenskit.core.merge import (
-        detect_hub_dir,
         get_merges_dir,
         scan_repo,
         write_reports_v2,
         _normalize_ext_list,
         ExtrasConfig,
-        MergeArtifacts,
         SKIP_ROOTS,
         MERGES_DIR_NAME,
         parse_human_size,
@@ -31,13 +28,11 @@ try:
 except ImportError:
     # Fallback to relative import if running as package
     from ...core.merge import (
-        detect_hub_dir,
         get_merges_dir,
         scan_repo,
         write_reports_v2,
         _normalize_ext_list,
         ExtrasConfig,
-        MergeArtifacts,
         SKIP_ROOTS,
         MERGES_DIR_NAME,
         parse_human_size,

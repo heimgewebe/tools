@@ -14,7 +14,6 @@ from lenskit.core.merge import (
     determine_inclusion_status,
     iter_report_blocks,
     FileInfo,
-    DEBUG_CONFIG
 )
 
 class TestMergeCore(unittest.TestCase):

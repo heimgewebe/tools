@@ -281,7 +281,7 @@ def refresh(hub_path: Path):
                     },
                     "data": {"repos": normed}
                 }
-            except Exception as e:
+            except Exception:
                 logger.exception("Failed to parse repo-matrix.md")
                 fleet_snapshot = {
                     "schema_version": SCHEMA_VERSION,

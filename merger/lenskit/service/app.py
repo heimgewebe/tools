@@ -17,17 +17,17 @@ from datetime import datetime
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
 from .jobstore import JobStore
 from .runner import JobRunner
-from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
-from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token, TrustedPath
+from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name
+from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token
 from ..adapters.atlas import AtlasScanner, render_atlas_md
 from ..adapters.metarepo import sync_from_metarepo
 from ..adapters import sources as sources_refresh
 from ..adapters import diagnostics as diagnostics_rebuild
 
 try:
-    from ..core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION, prescan_repo
+    from ..core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
 except ImportError:
-    from merger.lenskit.core.merge import detect_hub_dir, get_merges_dir, MERGES_DIR_NAME, SPEC_VERSION, prescan_repo
+    from merger.lenskit.core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
@@ -178,7 +178,7 @@ def api_sources_refresh():
         raise HTTPException(status_code=400, detail="Hub not configured")
     try:
         return sources_refresh.refresh(state.hub)
-    except Exception as e:
+    except Exception:
         logger.exception("Sources refresh failed")
         raise HTTPException(status_code=500, detail="Sources refresh failed")
 
@@ -188,7 +188,7 @@ def api_diagnostics_rebuild():
         raise HTTPException(status_code=400, detail="Hub not configured")
     try:
         return diagnostics_rebuild.rebuild(state.hub)
-    except Exception as e:
+    except Exception:
         logger.exception("Diagnostics rebuild failed")
         raise HTTPException(status_code=500, detail="Diagnostics rebuild failed")
 
@@ -249,7 +249,7 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
             result["sync"] = sync_report
         except HTTPException:
             raise
-        except Exception as e:
+        except Exception:
             logger.exception("Sync failed during refresh_all")
             raise HTTPException(status_code=500, detail="Sync failed")
 
@@ -257,7 +257,7 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
     try:
         refresh_res = sources_refresh.refresh(state.hub)
         result["refresh"] = refresh_res
-    except Exception as e:
+    except Exception:
         logger.exception("Sources refresh failed during refresh_all")
         raise HTTPException(status_code=500, detail="Sources refresh failed")
 
@@ -265,7 +265,7 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
     try:
         diag_res = diagnostics_rebuild.rebuild(state.hub)
         result["diagnostics"] = diag_res
-    except Exception as e:
+    except Exception:
         logger.exception("Diagnostics rebuild failed during refresh_all")
         raise HTTPException(status_code=500, detail="Diagnostics rebuild failed")
 
@@ -745,7 +745,6 @@ def export_webmaschine():
     if not hub:
         raise HTTPException(status_code=400, detail="Hub not configured")
 
-    export_root = hub.parent / "exports" / "webmaschine" # Place next to hub or inside?
     # User said: "Erzeugt Verzeichnis exports/webmaschine/"
     # Where? Usually relative to where repolens is running or the repo root?
     # Or inside the Hub? "hub/exports"?

@@ -1,5 +1,5 @@
 
-import pytest
+
 from merger.lenskit.service.models import JobRequest, calculate_job_hash
 
 def test_include_paths_hash_idempotency_tri_state():
