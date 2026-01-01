@@ -49,6 +49,7 @@ function selectionIsNone() {
 }
 
 function selectionResetNone() {
+    // NONE should always be a real Set (never null)
     prescanSelection = new Set();
 }
 
@@ -98,24 +99,25 @@ function setSelectionState(path, isSelected) {
     const p = normalizePath(path);
     if (p === null) return;
 
-    if (selectionIsAll()) {
+    // Fix 1: Null-Guard for ALL state
+    if (prescanSelection === null) {
         // Current state is ALL
         if (isSelected) return; // Already selected
 
         // Deselecting one item from ALL -> Materialize
-        // We must convert "ALL" (concept) to "Set of all paths" (concrete) minus the one being deselected.
         if (prescanCurrentTree) {
              prescanSelection = getAllPathsInTree(prescanCurrentTree.tree);
              prescanSelection.delete(p);
         } else {
-             // Fallback if no tree (shouldn't happen)
-             selectionResetNone();
+             // Fallback: Materialize as empty set (safe)
+             prescanSelection = new Set();
         }
-    } else {
-        // Current state is Partial (Set)
-        if (isSelected) prescanSelection.add(p);
-        else prescanSelection.delete(p);
+        return;
     }
+
+    // Current state is Partial (Set)
+    if (isSelected) prescanSelection.add(p);
+    else prescanSelection.delete(p);
 }
 
 function isPathSelected(path) {
@@ -1462,31 +1464,41 @@ async function applyPrescanSelection() {
     // prescanSelection === null means "ALL" (explicitly select entire repo)
 
     const repo = prescanCurrentTree.root;
+    const prev = savedPrescanSelections.get(repo) || null;
+    // APPEND MODE:
+    // If true, we merge the new selection with the existing one (Union).
+    // If false (Replace), we overwrite the existing selection.
+    // Currently enabled by default to support accumulation workflows.
+    const append = true;
 
     if (selectionIsAll()) {
         // ALL selected
-        // We treat this as an explicit override to include everything (as opposed to "standard" which might mean default filters?)
-        // Actually, if include_paths is null, it means "All files".
+        // ALL overrides everything (Union with ALL is ALL).
         savedPrescanSelections.set(repo, { raw: null, compressed: null });
     } else {
         if (selectionIsNone()) {
-             // Nothing selected -> Remove manual override
-             savedPrescanSelections.delete(repo);
+             // Nothing selected in current view.
+             // If Replace: Remove manual override (delete from pool).
+             // If Append: Do nothing (keep previous state).
+             if (!append) {
+                 savedPrescanSelections.delete(repo);
+             }
         } else {
-             // Partial selection -> Calculate compressed
-             const compressedPaths = [];
+             // Partial selection in current view.
+             // Calculate compressed paths for the *current* selection.
+             const currentCompressed = [];
              function collectPaths(node) {
                  const path = normalizePath(node.path);
 
                  if (node.type === 'file') {
                      // Only add if path is valid AND selected
                      if (path !== null && isPathSelected(path)) {
-                         compressedPaths.push(path);
+                         currentCompressed.push(path);
                      }
                  } else if (node.type === 'dir') {
                      // If valid path AND fully selected, add dir
                      if (path !== null && isDirSelected(node)) {
-                         compressedPaths.push(path);
+                         currentCompressed.push(path);
                      } else {
                          // Otherwise descend (also descends if path is null/invalid but has children)
                          if (node.children) node.children.forEach(collectPaths);
@@ -1495,10 +1507,40 @@ async function applyPrescanSelection() {
              }
              collectPaths(prescanCurrentTree.tree);
 
-             savedPrescanSelections.set(repo, {
-                 raw: new Set(prescanSelection),
-                 compressed: compressedPaths
-             });
+             // Merge Logic
+             if (prev && append) {
+                 if (prev.compressed === null) {
+                     // Previous was ALL. New is Partial. Result: ALL.
+                     // (Keep existing ALL)
+                     savedPrescanSelections.set(repo, prev);
+                 } else {
+                     // Previous was Partial. New is Partial.
+                     // 1. Merge Compressed Rules (for Backend)
+                     const mergedCompressed = new Set([...(prev.compressed || []), ...currentCompressed]);
+
+                     // 2. Merge Raw Sets (for UI consistency)
+                     // If we don't merge raw, reloading the pool will show incomplete checkboxes.
+                     let mergedRaw = null;
+                     if (prev.raw && prescanSelection) {
+                         // Union of both sets
+                         mergedRaw = new Set([...prev.raw, ...prescanSelection]);
+                     } else if (prescanSelection) {
+                         // Prev raw missing? Use current.
+                         mergedRaw = new Set(prescanSelection);
+                     }
+
+                     savedPrescanSelections.set(repo, {
+                         raw: mergedRaw,
+                         compressed: Array.from(mergedCompressed)
+                     });
+                 }
+             } else {
+                 // Replace Mode or No Previous State
+                 savedPrescanSelections.set(repo, {
+                     raw: new Set(prescanSelection),
+                     compressed: currentCompressed
+                 });
+             }
         }
     }
 
