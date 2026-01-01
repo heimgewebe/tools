@@ -506,6 +506,10 @@ class MergerUI(object):
         # Beim Start nur die persistierte Ignore-Liste laden – nicht die gesamte UI-Config
         self._load_ignored_repos_from_state()
 
+        # Saved Prescan Selections (Pool)
+        # repo_name -> list of paths (or None for ALL)
+        self.saved_prescan_selections = {}
+
         # Auto-run / warm the extractor on startup (best-effort).
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
         # without breaking the main UI if anything is missing.
@@ -1372,6 +1376,7 @@ class MergerUI(object):
                         "heatmap": self.extras_config.heatmap,
                         "json_sidecar": self.extras_config.json_sidecar,
                     },
+                    "prescan_pool": self.saved_prescan_selections,
                 }
             )
 
@@ -1435,6 +1440,9 @@ class MergerUI(object):
                 self.extras_config.heatmap = extras_data["heatmap"]
             if "json_sidecar" in extras_data:
                 self.extras_config.json_sidecar = extras_data["json_sidecar"]
+
+        # Restore Prescan Pool
+        self.saved_prescan_selections = data.get("prescan_pool", {})
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
@@ -2181,26 +2189,66 @@ class MergerUI(object):
         for item in flat_items:
             item["selected"] = False
 
-        # Run heuristic logic (same as prescanRecommended)
-        def is_recommended(path_str):
-            path = path_str.lower()
-            # Critical
-            if "readme" in path or path.endswith(".ai-context.yml"):
-                return True
-            # Code
-            parts = path.split('/')
-            if "src" in parts or "contracts" in parts or "docs" in parts:
-                if "test" not in path:
-                     return True
-            return False
+        # Load existing selection from pool if available
+        # This supports the "Append" workflow by initializing with previous state
+        existing_pool_paths = self.saved_prescan_selections.get(root_name)
 
-        for item in flat_items:
-            if item["type"] == "file":
-                if is_recommended(item["path"]):
+        # Logic:
+        # - If pool has entry:
+        #   - If None (ALL): Select everything.
+        #   - If List: Select those paths.
+        # - If no pool entry:
+        #   - Run Heuristic (Recommended).
+
+        if existing_pool_paths is None and root_name in self.saved_prescan_selections:
+            # ALL selected explicitly
+            for item in flat_items:
+                item["selected"] = True
+        elif isinstance(existing_pool_paths, list):
+            # Partial selection from pool
+            pool_set = set(existing_pool_paths)
+            for item in flat_items:
+                # Direct match or folder match?
+                # Pool stores specific file paths or compressed dir paths?
+                # Ideally we store exact paths.
+                # If pool has 'src/', we should select 'src/' and children?
+                # Check normalized paths.
+                if item["path"] in pool_set:
                     item["selected"] = True
 
-        # Update directory selection state based on files (bottom-up propagation isn't strictly needed for flat list if we check children on render, but let's be consistent)
-        # Actually, for presentation we just check items.
+                # Check if parent dir is in pool
+                # (Simple containment check)
+                # This handles compressed paths like 'src/' selecting 'src/main.py'
+                # Note: item["path"] is relative to repo root (e.g. 'src/main.py')
+                # If pool has 'src', it matches 'src'.
+                # For children: we need to check if any parent path is in pool_set.
+
+                parts = item["path"].split('/')
+                # Check cumulative parts: 'src', 'src/sub', etc.
+                for i in range(len(parts)):
+                    sub = "/".join(parts[:i+1])
+                    if sub in pool_set:
+                        item["selected"] = True
+                        break
+        else:
+            # No existing selection -> Heuristic
+            # Run heuristic logic (same as prescanRecommended)
+            def is_recommended(path_str):
+                path = path_str.lower()
+                # Critical
+                if "readme" in path or path.endswith(".ai-context.yml"):
+                    return True
+                # Code
+                parts = path.split('/')
+                if "src" in parts or "contracts" in parts or "docs" in parts:
+                    if "test" not in path:
+                         return True
+                return False
+
+            for item in flat_items:
+                if item["type"] == "file":
+                    if is_recommended(item["path"]):
+                        item["selected"] = True
 
         # Create Sheet
         sheet = ui.View()
@@ -2307,11 +2355,6 @@ class MergerUI(object):
             # Path Compression
             # If a dir is fully selected, pass dir. Else pass selected files.
 
-            # Helper to check directory completeness against FLAT items
-            # This is tricky without tree traversal.
-            # Let's rely on the tree structure we traversed earlier?
-            # 'root_node' is available in closure.
-
             compressed_paths = []
 
             # Create a map for quick lookup of selection status by path
@@ -2322,8 +2365,7 @@ class MergerUI(object):
                     return selection_map.get(node["path"], False)
                 if node.get("children"):
                     return all(is_dir_fully_selected(c) for c in node["children"])
-                return True # Empty dir considered selected? Or false? Let's say false for safety unless explicitly selected (which dirs aren't directly in this map logic except implicitly)
-                # Actually, empty dirs don't matter for file inclusion.
+                return True # Empty dir considered selected
 
             def collect(node):
                 if node["type"] == "file":
@@ -2342,10 +2384,72 @@ class MergerUI(object):
 
             # Fallback
             if not compressed_paths and any(selection_map.values()):
-                 # Should not happen if logic is correct, but safety net:
                  compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
 
-            self._temp_include_paths = compressed_paths
+            # --- Append Logic (Selection Pool) ---
+            # Instead of just setting temp paths, we update the pool.
+            # "Append" means Union of existing pool and new selection.
+
+            new_selection = compressed_paths
+            # Check if we have an existing selection for this repo
+            existing = self.saved_prescan_selections.get(root_name)
+
+            final_selection = None
+
+            # Cases:
+            # 1. New is ALL (we can't really detect "ALL" easily here unless we check vs total file count,
+            #    but assuming user selected everything manually or hit 'All').
+            #    Let's check if ALL items are selected.
+            all_selected = all(item["selected"] for item in flat_items)
+
+            if all_selected:
+                final_selection = None # Mark as ALL
+            else:
+                if existing is None and root_name in self.saved_prescan_selections:
+                    # Existing was ALL. Union(ALL, anything) = ALL.
+                    final_selection = None
+                else:
+                    # Existing was Partial (list) or None (nothing)
+                    current_set = set(new_selection)
+                    if existing:
+                        current_set.update(existing)
+                    final_selection = sorted(list(current_set))
+
+            # Save to pool
+            if final_selection is None:
+                # Explicitly ALL
+                self.saved_prescan_selections[root_name] = None
+            elif not final_selection:
+                # Empty -> Remove from pool? Or keep empty?
+                # If user unselected everything, "Append" logic suggests we keep old?
+                # No, "Append" applies when ADDING to a pool.
+                # If I am in the edit view, I see the current state (Old + Changes).
+                # If I uncheck something, I expect it removed.
+                # So "Append" happens at LOAD time (loading old), effectively.
+                # When saving back, we save the VISIBLE state.
+                # The logic inside 'do_merge' captures the FINAL state of the edit session.
+                # So we just save `new_selection`?
+                # Wait. If I opened the dialog, I loaded `existing`.
+                # If I added files, `new_selection` contains `existing + added`.
+                # So `final_selection` is just `new_selection` (or `compressed_paths`).
+                # The "Union" happened when we initialized the UI!
+
+                # So here we just save what is currently selected.
+                self.saved_prescan_selections[root_name] = new_selection
+                if not new_selection:
+                    # Cleanup empty entry
+                    if root_name in self.saved_prescan_selections:
+                        del self.saved_prescan_selections[root_name]
+            else:
+                self.saved_prescan_selections[root_name] = final_selection
+
+            # Persist immediately
+            self.save_last_state()
+
+            # Set temp paths for immediate run (though run_merge should look at pool now)
+            # We'll update run_merge to prefer pool.
+            # But for backward compat/robustness we can set it here too?
+            # Actually, let's rely on pool in run_merge.
 
             sheet.close()
             # Trigger merge
@@ -2459,11 +2563,16 @@ class MergerUI(object):
 
         path_contains = (self.path_field.text or "").strip() or None
 
-        # Consume temp include paths if set by Prescan
-        include_paths = getattr(self, "_temp_include_paths", None)
-        # Clear it immediately so next run doesn't inherit it
-        if hasattr(self, "_temp_include_paths"):
-            del self._temp_include_paths
+        # Resolve include paths from Selection Pool (saved_prescan_selections)
+        # Prioritize pool over temp paths (if we deprecate temp paths).
+        # We need include_paths for EACH repo if mode is "pro-repo" OR "combined"?
+        # 'scan_repo' takes `include_paths`.
+        # `write_reports_v2` logic for combined?
+
+        # `scan_repo` is called per repo in the loop below.
+        # We need to fetch the specific include paths for `name`.
+
+        # Note: self.saved_prescan_selections keys are repo names.
 
         detail_idx = self.seg_detail.selected_index
         detail = ["overview", "summary", "dev", "max"][detail_idx]
@@ -2509,7 +2618,29 @@ class MergerUI(object):
                 _ui.delay(lambda: None, 0.0)
             except Exception:
                 pass
-            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=include_paths)
+
+            # Resolve include_paths for this specific repo
+            # 1. Check pool
+            repo_include = self.saved_prescan_selections.get(name)
+
+            # If repo_include is None, it means "ALL" (explicitly selected as ALL) or "Not in pool" (default behavior)?
+            # Dictionary.get() returns None if missing.
+            # We need to distinguish "Explicit ALL (None)" vs "Missing (None)".
+
+            use_include_paths = None
+            if name in self.saved_prescan_selections:
+                val = self.saved_prescan_selections[name]
+                if val is None:
+                    # Explicit ALL -> include_paths = None (meaning all)
+                    use_include_paths = None
+                else:
+                    # List of paths
+                    use_include_paths = val
+            else:
+                # Not in pool -> Default behavior (All, filtered by ext/path_filter)
+                use_include_paths = None
+
+            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
             summaries.append(summary)
 
         if not summaries:
