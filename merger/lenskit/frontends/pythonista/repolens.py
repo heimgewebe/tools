@@ -541,6 +541,9 @@ class MergerUI(object):
         # Beim Start nur die persistierte Ignore-Liste laden – nicht die gesamte UI-Config
         self._load_ignored_repos_from_state()
 
+        # Flag to strictly prevent merge when prescan is active
+        self._prescan_active = False
+
         # Saved Prescan Selections (Pool)
         # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
         # - raw: None (ALL) or list of all selected file paths (for UI truth)
@@ -2204,6 +2207,11 @@ class MergerUI(object):
         """
         Shows the Prescan UI (Tree View) for the selected repository.
         Currently limited to single repo selection for simplicity.
+        
+        ARCHITECTURE:
+        - Prescan → Selection Pool (modify only, never triggers merge)
+        - Merge → Explicit action from main view via Run Merge button
+        - No implicit transition from prescan to merge execution
         """
         selected = self._get_selected_repos()
         if len(selected) != 1:
@@ -2221,6 +2229,9 @@ class MergerUI(object):
             _notify("Core merge module not found", "error")
             return
 
+        # Engage Guard
+        self._prescan_active = True
+
         # Show Loading HUD
         if console:
             console.show_activity("Scanning structure...")
@@ -2234,6 +2245,8 @@ class MergerUI(object):
             except Exception as e:
                 def err():
                     if console: console.alert("Prescan Failed", str(e), "OK", hide_cancel_button=True)
+                    # Reset flag on failure
+                    self._prescan_active = False
                 ui.delay(err, 0)
             finally:
                 if console:
@@ -2350,11 +2363,26 @@ class MergerUI(object):
                     if is_recommended(item["path"]):
                         item["selected"] = True
 
-        # Create Sheet
-        sheet = ui.View()
-        sheet.name = f"Prescan: {root_name}"
-        sheet.background_color = "#111111"
-        sheet.frame = (0, 0, 600, 800)
+        # Create Sheet with reliable close handling
+        # ARCHITECTURE NOTE: Prescan → Selection Pool (modify only)
+        # Merge → Explicit action from main view (never triggered from prescan)
+        class PrescanSheet(ui.View):
+            """
+            Custom View subclass that reliably resets the prescan guard on close.
+            ui.View's will_close() is called on all close paths: Apply, Cancel, Swipe-Down, errors.
+            """
+            def __init__(self, parent):
+                super().__init__()
+                self._parent = parent
+                self.name = f"Prescan: {root_name}"
+                self.background_color = "#111111"
+                self.frame = (0, 0, 600, 800)
+
+            def will_close(self):
+                """Reset guard flag when prescan sheet closes."""
+                self._parent._prescan_active = False
+
+        sheet = PrescanSheet(self)
 
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
@@ -2618,8 +2646,7 @@ class MergerUI(object):
                     console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
             
             sheet.close()
-            # Trigger merge
-            self.run_merge(None)
+            # No auto-merge!
         
         # Remove button (left side)
         btn_remove = ui.Button(title="Remove")
@@ -2712,6 +2739,11 @@ class MergerUI(object):
         UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
         sonst wirkt Pythonista "eingefroren" – besonders bei Multi-Repo.
         """
+        if getattr(self, "_prescan_active", False):
+            if console:
+                console.hud_alert("Prescan active - merge blocked", "error")
+            return
+
         # Snapshot UI state on main thread to avoid thread-safety issues in background
         self._pending_plan_only = self.plan_only_switch.value
         # Use getattr for code_only just in case (legacy robustness)
