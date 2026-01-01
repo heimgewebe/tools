@@ -1320,6 +1320,72 @@ class MergerUI(object):
         if isinstance(data, dict):
             self.ignored_repos = set(data.get("ignored_repos", []))
 
+    def _serialize_prescan_pool(self) -> Dict[str, Any]:
+        """
+        Serialize prescan pool to structured format.
+        Converts simple list format to {"raw": list|None, "compressed": list|None}.
+        """
+        serialized = {}
+        for repo, selection in self.saved_prescan_selections.items():
+            if selection is None:
+                # ALL state
+                serialized[repo] = {"raw": None, "compressed": None}
+            elif isinstance(selection, dict):
+                # Already in structured format
+                serialized[repo] = {
+                    "raw": selection.get("raw"),
+                    "compressed": selection.get("compressed")
+                }
+            elif isinstance(selection, list):
+                # Legacy format: simple list - treat as both raw and compressed
+                serialized[repo] = {"raw": selection, "compressed": selection}
+            else:
+                # Unknown format - skip
+                pass
+        return serialized
+
+    def _deserialize_prescan_pool(self, pool_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Deserialize prescan pool with migration support.
+        Handles legacy formats and converts to internal representation.
+        
+        Internal representation:
+        - None: ALL state
+        - list: Partial selection (compressed paths)
+        
+        Structured format (persisted):
+        - {"raw": None|list, "compressed": None|list}
+        """
+        deserialized = {}
+        for repo, selection in pool_data.items():
+            if selection is None:
+                # ALL state in legacy format
+                deserialized[repo] = None
+            elif isinstance(selection, dict):
+                # Structured format
+                raw = selection.get("raw")
+                compressed = selection.get("compressed")
+                
+                if raw is None and compressed is None:
+                    # ALL state
+                    deserialized[repo] = None
+                elif compressed is not None:
+                    # Use compressed for internal representation (backend-efficient)
+                    deserialized[repo] = compressed
+                elif raw is not None:
+                    # Fallback to raw if compressed is missing
+                    deserialized[repo] = raw
+                else:
+                    # Empty or invalid - skip
+                    pass
+            elif isinstance(selection, list):
+                # Legacy format: simple list
+                deserialized[repo] = selection
+            else:
+                # Unknown format - skip
+                pass
+        return deserialized
+
     def save_last_state(self, ignore_only: bool = False) -> None:
         """
         Speichert den UI-Zustand in einer JSON-Datei.
@@ -1376,7 +1442,7 @@ class MergerUI(object):
                         "heatmap": self.extras_config.heatmap,
                         "json_sidecar": self.extras_config.json_sidecar,
                     },
-                    "prescan_pool": self.saved_prescan_selections,
+                    "prescan_pool": self._serialize_prescan_pool(),
                 }
             )
 
@@ -1441,8 +1507,8 @@ class MergerUI(object):
             if "json_sidecar" in extras_data:
                 self.extras_config.json_sidecar = extras_data["json_sidecar"]
 
-        # Restore Prescan Pool
-        self.saved_prescan_selections = data.get("prescan_pool", {})
+        # Restore Prescan Pool (with migration support)
+        self.saved_prescan_selections = self._deserialize_prescan_pool(data.get("prescan_pool", {}))
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
