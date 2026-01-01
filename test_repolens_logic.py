@@ -35,7 +35,7 @@ class TestUI(repolens.MergerUI):
         self._state_path = Path('/tmp/hub/.repoLens-state.json')
         self.extras_config = repolens.ExtrasConfig()
 
-        # Initialize saved selections
+        # Initialize saved selections with structured format
         self.saved_prescan_selections = {}
 
         # Initialize UI elements mocks
@@ -51,151 +51,188 @@ class TestUI(repolens.MergerUI):
         self.info_label = type('Obj', (), {'text': ''})()
 
 
-def test_pool_replace_none_to_delete():
-    """Test Replace: none → delete from pool"""
+def test_normalize_path():
+    """Test path normalization"""
+    from repolens import normalize_path
+    
+    assert normalize_path("./src/main.py") == "src/main.py", "Should remove leading ./"
+    assert normalize_path("src/dir/") == "src/dir", "Should remove trailing /"
+    assert normalize_path("") == ".", "Empty should become ."
+    assert normalize_path("/") == "/", "Root should stay /"
+    assert normalize_path("  src/main.py  ") == "src/main.py", "Should trim whitespace"
+    
+    print("✓ test_normalize_path passed")
+
+
+def test_pool_structured_format():
+    """Test structured format with raw and compressed"""
     ui = TestUI()
     repo = "repo1"
     
-    # Initial state: pool has some selection
-    ui.saved_prescan_selections[repo] = ['src/main.py']
+    # Set structured format
+    ui.saved_prescan_selections[repo] = {
+        "raw": ["src/main.py", "src/utils.py"],
+        "compressed": ["src"]
+    }
     
-    # Replace with empty/none
-    ui.saved_prescan_selections[repo] = None
-    # In replace mode with none, it should delete
-    if repo in ui.saved_prescan_selections and ui.saved_prescan_selections[repo] is None:
-        del ui.saved_prescan_selections[repo]
+    entry = ui.saved_prescan_selections[repo]
+    assert isinstance(entry, dict), "Should be structured dict"
+    assert entry["raw"] == ["src/main.py", "src/utils.py"], "Raw should match"
+    assert entry["compressed"] == ["src"], "Compressed should match"
     
-    assert repo not in ui.saved_prescan_selections, "Replace with none should delete from pool"
-    print("✓ test_pool_replace_none_to_delete passed")
+    print("✓ test_pool_structured_format passed")
 
 
-def test_pool_replace_all():
-    """Test Replace: all → None (ALL state)"""
+def test_pool_all_state():
+    """Test ALL state representation"""
     ui = TestUI()
     repo = "repo1"
     
-    # Replace with ALL
-    ui.saved_prescan_selections[repo] = None
+    # ALL state
+    ui.saved_prescan_selections[repo] = {"raw": None, "compressed": None}
     
-    assert ui.saved_prescan_selections[repo] is None, "Replace with ALL should store None"
-    print("✓ test_pool_replace_all passed")
+    entry = ui.saved_prescan_selections[repo]
+    assert entry["raw"] is None, "Raw should be None for ALL"
+    assert entry["compressed"] is None, "Compressed should be None for ALL"
+    
+    print("✓ test_pool_all_state passed")
 
 
-def test_pool_replace_partial():
-    """Test Replace: partial → list"""
-    ui = TestUI()
-    repo = "repo1"
-    
-    # Replace with partial selection
-    new_paths = ['src/main.py', 'src/utils.py']
-    ui.saved_prescan_selections[repo] = new_paths
-    
-    assert ui.saved_prescan_selections[repo] == new_paths, "Replace with partial should store list"
-    print("✓ test_pool_replace_partial passed")
-
-
-def test_pool_append_union():
-    """Test Append: union of existing and new"""
-    ui = TestUI()
-    repo = "repo1"
-    
-    # Existing selection
-    ui.saved_prescan_selections[repo] = ['src/main.py']
-    
-    # Append new selection
-    new_paths = ['src/utils.py', 'docs/README.md']
-    existing = ui.saved_prescan_selections.get(repo, [])
-    if isinstance(existing, list):
-        merged = sorted(list(set(existing + new_paths)))
-        ui.saved_prescan_selections[repo] = merged
-    
-    expected = ['docs/README.md', 'src/main.py', 'src/utils.py']
-    assert ui.saved_prescan_selections[repo] == expected, "Append should union paths"
-    print("✓ test_pool_append_union passed")
-
-
-def test_pool_append_all_overrides():
-    """Test Append: ALL + partial = ALL"""
-    ui = TestUI()
-    repo = "repo1"
-    
-    # Existing is ALL
-    ui.saved_prescan_selections[repo] = None
-    
-    # Try to append partial - should remain ALL
-    existing = ui.saved_prescan_selections.get(repo)
-    if existing is None and repo in ui.saved_prescan_selections:
-        # Existing is ALL - union of ALL and anything is ALL
-        ui.saved_prescan_selections[repo] = None
-    
-    assert ui.saved_prescan_selections[repo] is None, "Append to ALL should keep ALL"
-    print("✓ test_pool_append_all_overrides passed")
-
-
-def test_pool_serialization():
-    """Test serialization and deserialization"""
+def test_serialization_structured():
+    """Test serialization preserves structure"""
     ui = TestUI()
     
-    # Set up various pool states
-    ui.saved_prescan_selections['repo1'] = None  # ALL
-    ui.saved_prescan_selections['repo2'] = ['src/main.py']  # Partial
+    # Set up structured pools
+    ui.saved_prescan_selections['repo1'] = {"raw": None, "compressed": None}  # ALL
+    ui.saved_prescan_selections['repo2'] = {
+        "raw": ["src/main.py", "src/utils.py"],
+        "compressed": ["src"]
+    }
     
     # Serialize
     serialized = ui._serialize_prescan_pool()
     
-    assert serialized['repo1'] == {'raw': None, 'compressed': None}
-    assert serialized['repo2'] == {'raw': ['src/main.py'], 'compressed': ['src/main.py']}
-    print("✓ test_pool_serialization passed")
+    assert serialized['repo1'] == {"raw": None, "compressed": None}, "ALL state preserved"
+    assert serialized['repo2']['raw'] == ["src/main.py", "src/utils.py"], "Raw preserved"
+    assert serialized['repo2']['compressed'] == ["src"], "Compressed preserved"
+    
+    print("✓ test_serialization_structured passed")
 
 
-def test_pool_deserialization_legacy():
-    """Test deserialization with legacy format"""
+def test_deserialization_legacy():
+    """Test deserialization handles legacy formats"""
     ui = TestUI()
     
-    # Legacy format: simple list
+    # Legacy formats
     legacy_pool = {
-        'repo1': None,  # ALL
-        'repo2': ['src/main.py']  # List
+        'repo1': None,  # ALL in legacy
+        'repo2': ['src/main.py', 'src/utils.py']  # List in legacy
     }
     
     deserialized = ui._deserialize_prescan_pool(legacy_pool)
     
-    assert deserialized['repo1'] is None
-    assert deserialized['repo2'] == ['src/main.py']
-    print("✓ test_pool_deserialization_legacy passed")
+    # Should convert to structured
+    assert deserialized['repo1'] == {"raw": None, "compressed": None}, "Legacy None -> structured ALL"
+    assert deserialized['repo2']['raw'] == deserialized['repo2']['compressed'], "Legacy list -> both fields"
+    
+    print("✓ test_deserialization_legacy passed")
 
 
-def test_pool_deserialization_structured():
-    """Test deserialization with structured format"""
+def test_deserialization_preserves_both_fields():
+    """Test deserialization preserves both raw and compressed"""
     ui = TestUI()
     
-    # Structured format
     structured_pool = {
-        'repo1': {'raw': None, 'compressed': None},  # ALL
-        'repo2': {'raw': ['src/main.py', 'src/utils.py'], 'compressed': ['src/main.py']}  # Partial
+        'repo1': {
+            "raw": ["src/main.py", "src/utils.py", "docs/README.md"],
+            "compressed": ["src", "docs/README.md"]
+        }
     }
     
     deserialized = ui._deserialize_prescan_pool(structured_pool)
     
-    assert deserialized['repo1'] is None
-    # Should use compressed for internal representation
-    assert deserialized['repo2'] == ['src/main.py']
-    print("✓ test_pool_deserialization_structured passed")
+    # Should preserve both fields
+    assert len(deserialized['repo1']['raw']) == 3, "Raw should have 3 paths"
+    assert len(deserialized['repo1']['compressed']) == 2, "Compressed should have 2 paths"
+    
+    print("✓ test_deserialization_preserves_both_fields passed")
+
+
+def test_append_union_both_fields():
+    """Test append unions both raw and compressed fields"""
+    ui = TestUI()
+    repo = "repo1"
+    
+    # Existing selection
+    ui.saved_prescan_selections[repo] = {
+        "raw": ["src/main.py"],
+        "compressed": ["src/main.py"]
+    }
+    
+    # Simulate append operation
+    existing = ui.saved_prescan_selections.get(repo)
+    new_raw = ["src/utils.py", "docs/README.md"]
+    new_compressed = ["src/utils.py", "docs/README.md"]
+    
+    if existing and isinstance(existing, dict):
+        existing_raw = existing.get("raw") or []
+        existing_compressed = existing.get("compressed") or []
+        
+        merged_raw = set(existing_raw)
+        merged_raw.update(new_raw)
+        
+        merged_compressed = set(existing_compressed)
+        merged_compressed.update(new_compressed)
+        
+        ui.saved_prescan_selections[repo] = {
+            "raw": sorted(list(merged_raw)),
+            "compressed": sorted(list(merged_compressed))
+        }
+    
+    entry = ui.saved_prescan_selections[repo]
+    assert len(entry["raw"]) == 3, "Raw should have 3 paths after union"
+    assert len(entry["compressed"]) == 3, "Compressed should have 3 paths after union"
+    assert "src/main.py" in entry["raw"], "Should keep original raw"
+    assert "src/utils.py" in entry["raw"], "Should add new raw"
+    
+    print("✓ test_append_union_both_fields passed")
+
+
+def test_all_plus_partial_equals_all():
+    """Test ALL + partial = ALL in append"""
+    ui = TestUI()
+    repo = "repo1"
+    
+    # Existing is ALL
+    ui.saved_prescan_selections[repo] = {"raw": None, "compressed": None}
+    
+    # Try to append partial
+    existing = ui.saved_prescan_selections.get(repo)
+    if existing and isinstance(existing, dict):
+        if existing.get("raw") is None and existing.get("compressed") is None:
+            # Existing is ALL - keep ALL
+            ui.saved_prescan_selections[repo] = {"raw": None, "compressed": None}
+    
+    entry = ui.saved_prescan_selections[repo]
+    assert entry["raw"] is None, "Should remain ALL"
+    assert entry["compressed"] is None, "Should remain ALL"
+    
+    print("✓ test_all_plus_partial_equals_all passed")
 
 
 def run_all_tests():
     """Run all tests"""
-    print("Running prescan pool tests...")
+    print("Running prescan pool tests with structured format...")
     print()
     
-    test_pool_replace_none_to_delete()
-    test_pool_replace_all()
-    test_pool_replace_partial()
-    test_pool_append_union()
-    test_pool_append_all_overrides()
-    test_pool_serialization()
-    test_pool_deserialization_legacy()
-    test_pool_deserialization_structured()
+    test_normalize_path()
+    test_pool_structured_format()
+    test_pool_all_state()
+    test_serialization_structured()
+    test_deserialization_legacy()
+    test_deserialization_preserves_both_fields()
+    test_append_union_both_fields()
+    test_all_plus_partial_equals_all()
     
     print()
     print("All tests passed! ✓")

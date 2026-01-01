@@ -121,6 +121,41 @@ except Exception:
 _ACTIVE_MERGER_VIEW = None
 
 
+def normalize_path(p: str) -> str:
+    """
+    Normalize a path for consistent comparisons.
+    Similar to WebUI's normalizePath function.
+    
+    Rules:
+    - Remove leading "./"
+    - Remove trailing "/" (except for root)
+    - Keep "/" as separator
+    - Empty string becomes "."
+    """
+    if not isinstance(p, str):
+        return "."
+    
+    p = p.strip()
+    
+    # Handle absolute root
+    if p == "/":
+        return "/"
+    
+    # Remove leading "./"
+    if p.startswith("./"):
+        p = p[2:]
+    
+    # Remove trailing "/" (but not if it's just "/")
+    if len(p) > 1 and p.endswith("/"):
+        p = p[:-1]
+    
+    # Empty becomes "."
+    if p == "":
+        return "."
+    
+    return p
+
+
 def safe_script_path() -> Path:
     """
     Versucht, den Pfad dieses Skripts robust zu bestimmen.
@@ -507,8 +542,10 @@ class MergerUI(object):
         self._load_ignored_repos_from_state()
 
         # Saved Prescan Selections (Pool)
-        # repo_name -> list of paths (or None for ALL)
-        self.saved_prescan_selections = {}
+        # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
+        # - raw: None (ALL) or list of all selected file paths (for UI truth)
+        # - compressed: None (ALL) or list of compressed paths (dirs/files for backend)
+        self.saved_prescan_selections: Dict[str, Dict[str, Any]] = {}
 
         # Auto-run / warm the extractor on startup (best-effort).
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
@@ -1323,64 +1360,61 @@ class MergerUI(object):
     def _serialize_prescan_pool(self) -> Dict[str, Any]:
         """
         Serialize prescan pool to structured format.
-        Converts simple list format to {"raw": list|None, "compressed": list|None}.
+        Internal format is already {"raw": ..., "compressed": ...}.
         """
         serialized = {}
         for repo, selection in self.saved_prescan_selections.items():
-            if selection is None:
-                # ALL state
-                serialized[repo] = {"raw": None, "compressed": None}
-            elif isinstance(selection, dict):
+            if isinstance(selection, dict):
                 # Already in structured format
                 serialized[repo] = {
                     "raw": selection.get("raw"),
                     "compressed": selection.get("compressed")
                 }
-            elif isinstance(selection, list):
-                # Legacy format: simple list - treat as both raw and compressed
-                serialized[repo] = {"raw": selection, "compressed": selection}
             else:
-                # Unknown format - skip
-                pass
+                # Shouldn't happen with new code, but handle legacy just in case
+                if selection is None:
+                    serialized[repo] = {"raw": None, "compressed": None}
+                elif isinstance(selection, list):
+                    serialized[repo] = {"raw": selection, "compressed": selection}
         return serialized
 
-    def _deserialize_prescan_pool(self, pool_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _deserialize_prescan_pool(self, pool_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         """
         Deserialize prescan pool with migration support.
-        Handles legacy formats and converts to internal representation.
+        Handles legacy formats and converts to structured internal representation.
         
-        Internal representation:
-        - None: ALL state
-        - list: Partial selection (compressed paths)
+        Internal representation (structured):
+        - {"raw": None, "compressed": None}: ALL state
+        - {"raw": list[str], "compressed": list[str]}: Partial selection
         
-        Structured format (persisted):
-        - {"raw": None|list, "compressed": None|list}
+        Returns dict mapping repo -> {"raw": ..., "compressed": ...}
         """
         deserialized = {}
         for repo, selection in pool_data.items():
             if selection is None:
                 # ALL state in legacy format
-                deserialized[repo] = None
+                deserialized[repo] = {"raw": None, "compressed": None}
             elif isinstance(selection, dict):
-                # Structured format
+                # Structured format - preserve both fields
                 raw = selection.get("raw")
                 compressed = selection.get("compressed")
                 
                 if raw is None and compressed is None:
                     # ALL state
-                    deserialized[repo] = None
-                elif compressed is not None:
-                    # Use compressed for internal representation (backend-efficient)
-                    deserialized[repo] = compressed
-                elif raw is not None:
-                    # Fallback to raw if compressed is missing
-                    deserialized[repo] = raw
+                    deserialized[repo] = {"raw": None, "compressed": None}
                 else:
-                    # Empty or invalid - skip
-                    pass
+                    # Partial - keep both raw and compressed
+                    # Normalize paths for consistency
+                    normalized_raw = [normalize_path(p) for p in raw] if raw else None
+                    normalized_compressed = [normalize_path(p) for p in compressed] if compressed else None
+                    deserialized[repo] = {
+                        "raw": normalized_raw,
+                        "compressed": normalized_compressed
+                    }
             elif isinstance(selection, list):
-                # Legacy format: simple list
-                deserialized[repo] = selection
+                # Legacy format: simple list - use for both raw and compressed
+                normalized = [normalize_path(p) for p in selection]
+                deserialized[repo] = {"raw": normalized, "compressed": normalized}
             else:
                 # Unknown format - skip
                 pass
@@ -2257,45 +2291,43 @@ class MergerUI(object):
 
         # Load existing selection from pool if available
         # This supports the "Append" workflow by initializing with previous state
-        existing_pool_paths = self.saved_prescan_selections.get(root_name)
+        existing_pool_entry = self.saved_prescan_selections.get(root_name)
 
         # Logic:
-        # - If pool has entry:
-        #   - If None (ALL): Select everything.
-        #   - If List: Select those paths.
+        # - If pool has entry (dict):
+        #   - If raw is None: ALL state - select everything
+        #   - If raw is list: Use raw for UI truth (not compressed)
         # - If no pool entry:
         #   - Run Heuristic (Recommended).
 
-        if existing_pool_paths is None and root_name in self.saved_prescan_selections:
-            # ALL selected explicitly
-            for item in flat_items:
-                item["selected"] = True
-        elif isinstance(existing_pool_paths, list):
-            # Partial selection from pool
-            pool_set = set(existing_pool_paths)
-            for item in flat_items:
-                # Direct match or folder match?
-                # Pool stores specific file paths or compressed dir paths?
-                # Ideally we store exact paths.
-                # If pool has 'src/', we should select 'src/' and children?
-                # Check normalized paths.
-                if item["path"] in pool_set:
-                    item["selected"] = True
-
-                # Check if parent dir is in pool
-                # (Simple containment check)
-                # This handles compressed paths like 'src/' selecting 'src/main.py'
-                # Note: item["path"] is relative to repo root (e.g. 'src/main.py')
-                # If pool has 'src', it matches 'src'.
-                # For children: we need to check if any parent path is in pool_set.
-
-                parts = item["path"].split('/')
-                # Check cumulative parts: 'src', 'src/sub', etc.
-                for i in range(len(parts)):
-                    sub = "/".join(parts[:i+1])
-                    if sub in pool_set:
+        if existing_pool_entry:
+            if isinstance(existing_pool_entry, dict):
+                raw = existing_pool_entry.get("raw")
+                if raw is None:
+                    # ALL state - select everything
+                    for item in flat_items:
                         item["selected"] = True
-                        break
+                elif isinstance(raw, list):
+                    # Partial selection from pool - use raw for UI truth
+                    # Normalize paths for consistent matching
+                    pool_set = set(normalize_path(p) for p in raw)
+                    for item in flat_items:
+                        normalized_item_path = normalize_path(item["path"])
+                        # Direct match
+                        if normalized_item_path in pool_set:
+                            item["selected"] = True
+                        else:
+                            # Check if parent dir is in pool (for compressed paths)
+                            parts = normalized_item_path.split('/')
+                            for i in range(len(parts)):
+                                sub = "/".join(parts[:i+1])
+                                if sub in pool_set:
+                                    item["selected"] = True
+                                    break
+            else:
+                # Legacy format - shouldn't happen after migration
+                # Run heuristic as fallback
+                pass
         else:
             # No existing selection -> Heuristic
             # Run heuristic logic (same as prescanRecommended)
@@ -2480,9 +2512,11 @@ class MergerUI(object):
             
             collect(root_node)
             
-            # Fallback
-            if not compressed_paths and any(selection_map.values()):
-                compressed_paths = [item["path"] for item in flat_items if item["selected"] and item["type"] == "file"]
+            # Normalize compressed paths
+            compressed_paths = [normalize_path(p) for p in compressed_paths]
+            
+            # Calculate raw paths (all selected file paths) for UI truth
+            raw_paths = [normalize_path(item["path"]) for item in flat_items if item["selected"]]
             
             # Handle different modes
             if mode == 'remove':
@@ -2505,15 +2539,18 @@ class MergerUI(object):
                 # Replace mode: overwrite existing selection
                 if current_mode == 'all':
                     # ALL selected
-                    self.saved_prescan_selections[root_name] = None
+                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
                 elif current_mode == 'none':
                     # Nothing selected - remove from pool
                     if root_name in self.saved_prescan_selections:
                         del self.saved_prescan_selections[root_name]
                 else:
-                    # Partial selection
-                    if compressed_paths:
-                        self.saved_prescan_selections[root_name] = compressed_paths
+                    # Partial selection - store both raw and compressed
+                    if compressed_paths or raw_paths:
+                        self.saved_prescan_selections[root_name] = {
+                            "raw": raw_paths if raw_paths else None,
+                            "compressed": compressed_paths if compressed_paths else None
+                        }
                     else:
                         # Empty selection - remove from pool
                         if root_name in self.saved_prescan_selections:
@@ -2533,25 +2570,34 @@ class MergerUI(object):
                 
                 if current_mode == 'all':
                     # ALL selected - ALL overrides everything
-                    self.saved_prescan_selections[root_name] = None
+                    self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
                 else:
-                    # Partial selection
-                    if existing is None and root_name in self.saved_prescan_selections:
-                        # Existing was ALL. Union(ALL, Partial) = ALL
-                        self.saved_prescan_selections[root_name] = None
-                    else:
-                        # Union of existing and new
-                        current_set = set(compressed_paths)
-                        if existing:
-                            current_set.update(existing)
-                        final_selection = sorted(list(current_set))
+                    # Partial selection - union both raw and compressed
+                    if existing and isinstance(existing, dict):
+                        existing_raw = existing.get("raw")
+                        existing_compressed = existing.get("compressed")
                         
-                        if final_selection:
-                            self.saved_prescan_selections[root_name] = final_selection
+                        if existing_raw is None and existing_compressed is None:
+                            # Existing was ALL. Union(ALL, Partial) = ALL
+                            self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
                         else:
-                            # Empty - shouldn't happen but handle it
-                            if root_name in self.saved_prescan_selections:
-                                del self.saved_prescan_selections[root_name]
+                            # Union of existing and new for both fields
+                            merged_raw = set(existing_raw or [])
+                            merged_raw.update(raw_paths)
+                            
+                            merged_compressed = set(existing_compressed or [])
+                            merged_compressed.update(compressed_paths)
+                            
+                            self.saved_prescan_selections[root_name] = {
+                                "raw": sorted(list(merged_raw)) if merged_raw else None,
+                                "compressed": sorted(list(merged_compressed)) if merged_compressed else None
+                            }
+                    else:
+                        # No existing or legacy format - just save current
+                        self.saved_prescan_selections[root_name] = {
+                            "raw": raw_paths if raw_paths else None,
+                            "compressed": compressed_paths if compressed_paths else None
+                        }
                 
                 self.save_last_state()
                 if console:
@@ -2770,15 +2816,24 @@ class MergerUI(object):
             # Dictionary.get() returns None if missing.
             # We need to distinguish "Explicit ALL (None)" vs "Missing (None)".
 
+            # Resolve include_paths for this specific repo
+            # 1. Check pool - use compressed field for backend efficiency
+            pool_entry = self.saved_prescan_selections.get(name)
+
             use_include_paths = None
-            if name in self.saved_prescan_selections:
-                val = self.saved_prescan_selections[name]
-                if val is None:
-                    # Explicit ALL -> include_paths = None (meaning all)
-                    use_include_paths = None
+            if pool_entry:
+                if isinstance(pool_entry, dict):
+                    # Structured format - use compressed for backend
+                    compressed = pool_entry.get("compressed")
+                    if compressed is None:
+                        # Explicit ALL -> include_paths = None (meaning all)
+                        use_include_paths = None
+                    else:
+                        # List of compressed paths
+                        use_include_paths = compressed
                 else:
-                    # List of paths
-                    use_include_paths = val
+                    # Legacy format (shouldn't happen after migration)
+                    use_include_paths = pool_entry if pool_entry else None
             else:
                 # Not in pool -> Default behavior (All, filtered by ext/path_filter)
                 use_include_paths = None
