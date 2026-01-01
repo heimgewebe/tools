@@ -49,7 +49,7 @@ function selectionIsNone() {
 }
 
 function selectionResetNone() {
-    // NONE should always be a real Set (never null)
+    // NONE state is represented by an empty Set (not null), distinct from ALL which uses null
     prescanSelection = new Set();
 }
 
@@ -91,6 +91,44 @@ function getAllPathsInTree(treeNode) {
         }
         if (node.children) node.children.forEach(visit);
     }
+    visit(treeNode);
+    return paths;
+}
+
+// Materialize raw file paths from tree using compressed rules
+// This reconstructs the UI truth from compressed backend rules
+function materializeRawFromCompressed(treeNode, compressedSet) {
+    const paths = new Set();
+    
+    function visit(node) {
+        const normalizedPath = normalizePath(node.path);
+        if (!normalizedPath) return;
+        
+        // Check if this path matches any compressed rule
+        if (compressedSet.has(normalizedPath)) {
+            // Direct match - if it's a file, add it; if it's a dir, add all files under it
+            if (node.type === 'file') {
+                paths.add(normalizedPath);
+            } else if (node.children) {
+                // It's a directory - add all files under it
+                node.children.forEach(visit);
+            }
+        } else if (node.type === 'file') {
+            // Check if any parent directory is in compressed set (prefix match)
+            for (const compressedPath of compressedSet) {
+                if (normalizedPath.startsWith(compressedPath + '/')) {
+                    paths.add(normalizedPath);
+                    break;
+                }
+            }
+        }
+        
+        // Continue traversing for directory nodes
+        if (node.children) {
+            node.children.forEach(visit);
+        }
+    }
+    
     visit(treeNode);
     return paths;
 }
@@ -1601,9 +1639,19 @@ async function applyPrescanSelectionInternal(append) {
                          // Create a new Set to avoid mutations to previous selection.
                          mergedRaw = new Set(prev.raw);
                      }
-                     // Note: If both prev.raw and prescanSelection are falsy, mergedRaw remains null.
-                     // This creates an inconsistency where the merged selection loses raw representation.
-                     // However, compressed paths are still maintained, so backend functionality is preserved.
+                     
+                     // If both prev.raw and prescanSelection are falsy, mergedRaw would remain null,
+                     // while mergedCompressed may still contain paths. To avoid losing the raw
+                     // representation (and causing UI inconsistencies on reload), fall back to
+                     // materializing raw from the tree using compressed rules.
+                     if (!mergedRaw && mergedCompressed.size > 0) {
+                         if (prescanCurrentTree && prescanCurrentTree.tree) {
+                             mergedRaw = materializeRawFromCompressed(prescanCurrentTree.tree, mergedCompressed);
+                         } else {
+                             // Degraded fallback: use compressed as raw
+                             mergedRaw = new Set(mergedCompressed);
+                         }
+                     }
 
                      savedPrescanSelections.set(repo, {
                          raw: mergedRaw,
