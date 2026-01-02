@@ -546,7 +546,8 @@ class MergerUI(object):
 
         # Saved Prescan Selections (Pool)
         # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
-        # - raw: None (ALL) or list of all selected file paths (for UI truth)
+        # POOL CONTRACT:
+        # - raw: None (ALL) or list of all selected FILE paths (UI truth, MUST be files only)
         # - compressed: None (ALL) or list of compressed paths (dirs/files for backend)
         self.saved_prescan_selections: Dict[str, Dict[str, Optional[List[str]]]] = {}
 
@@ -2638,40 +2639,82 @@ class MergerUI(object):
                         # No existing -> just new raw
                         merged_raw = set(raw_paths) if raw_paths else None
 
-                    # If we have a merged raw set, re-compress using the tree
+                    # If we have a merged raw set, re-compress using the tree (Iterative DFS)
                     if merged_raw and len(merged_raw) > 0:
                         new_compressed = []
-                        # We need to simulate 'selected' state for the tree traversal by checking merged_raw
-                        # Re-use tree traversal logic but with explicit check against merged_raw
-                        # Note: flat_items contains all nodes.
 
-                        # Build a map for O(1) lookup
-                        raw_set = set(merged_raw)
+                        # Build a map for O(1) lookup, ensure normalization
+                        raw_set = set(normalize_path(p) for p in merged_raw)
 
-                        def is_node_fully_selected(n):
-                            if n["type"] == "file":
-                                return n["path"] in raw_set
-                            if n.get("children"):
-                                return all(is_node_fully_selected(c) for c in n["children"])
-                            return False # Empty dir
+                        # Phase 1: Determine selection status of all nodes (Post-order simulation)
+                        # We need to know if a dir is fully selected. Since flat_items is flat,
+                        # we can't easily do post-order without recursion.
+                        # BUT: flat_items was built via DFS. We can iterate backwards?
+                        # No, simpler: Build a tree-like structure or map from the flat items?
+                        # Actually, root_node is available and it IS a tree.
 
-                        def collect_recompress(n):
-                            if n["type"] == "file":
-                                if n["path"] in raw_set:
-                                    new_compressed.append(n["path"])
-                            elif n["type"] == "dir":
-                                if is_node_fully_selected(n):
-                                    new_compressed.append(n["path"])
+                        # Iterative Post-Order to mark 'fully_selected'
+                        # We decorate the nodes temporarily or use a map ID->Status
+
+                        node_status = {} # path -> bool (fully selected)
+
+                        # Iterative Post-Order Traversal using 2 stacks
+                        stack1 = [root_node]
+                        stack2 = []
+                        while stack1:
+                            node = stack1.pop()
+                            stack2.append(node)
+                            if node.get("children"):
+                                for c in node["children"]:
+                                    stack1.append(c)
+
+                        # Process stack2 (children before parents)
+                        while stack2:
+                            node = stack2.pop()
+                            path = normalize_path(node["path"])
+
+                            if node["type"] == "file":
+                                node_status[path] = path in raw_set
+                            else: # dir
+                                children = node.get("children", [])
+                                if not children:
+                                    node_status[path] = False # Empty dir not selected
                                 else:
-                                    if n.get("children"):
-                                        for c in n["children"]:
-                                            collect_recompress(c)
+                                    # All children must be fully selected
+                                    all_selected = True
+                                    for c in children:
+                                        c_path = normalize_path(c["path"])
+                                        if not node_status.get(c_path, False):
+                                            all_selected = False
+                                            break
+                                    node_status[path] = all_selected
 
-                        collect_recompress(root_node)
+                        # Phase 2: Collect compressed paths (Pre-order)
+                        # If a node is fully selected, add it and skip children. Else descend.
+                        stack = [root_node]
+                        while stack:
+                            node = stack.pop()
+                            path = normalize_path(node["path"])
+
+                            if node_status.get(path, False):
+                                # Fully selected (Dir or File)
+                                new_compressed.append(path)
+                                # Do NOT push children
+                            else:
+                                # Not fully selected. If dir, push children to check them.
+                                # Push in reverse order to maintain order when popping
+                                if node.get("children"):
+                                    for i in range(len(node["children"]) - 1, -1, -1):
+                                        stack.append(node["children"][i])
+                                elif node["type"] == "file":
+                                    # File not selected? Then don't include.
+                                    # (Should be covered by node_status check above, but logic:
+                                    # if file is false, we do nothing)
+                                    pass
 
                         self.saved_prescan_selections[root_name] = {
-                            "raw": sorted(list(merged_raw)),
-                            "compressed": new_compressed
+                            "raw": sorted(list(raw_set)),
+                            "compressed": [normalize_path(p) for p in new_compressed]
                         }
                     else:
                         # Empty result -> remove
