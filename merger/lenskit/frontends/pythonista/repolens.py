@@ -1508,7 +1508,7 @@ class MergerUI(object):
                     "split_mb": self.split_field.text or "",
                     "plan_only": bool(self.plan_only_switch.value),
                     "code_only": bool(getattr(self, "code_only_switch", False) and self.code_only_switch.value),
-                    "selected_repos": self._get_selected_repos(),
+                    "selected_repos": self._get_selected_repos(explicit_only=True),
                     "extras": {
                         "health": self.extras_config.health,
                         "organism_index": self.extras_config.organism_index,
@@ -1619,11 +1619,11 @@ class MergerUI(object):
         cell.selected_background_view = selected_bg
         return cell
 
-    def _get_selected_repos(self) -> List[str]:
+    def _get_selected_repos(self, explicit_only: bool = False) -> List[str]:
         tv = self.tv
         rows = tv.selected_rows or []
         if not rows:
-            return list(self.repos)
+            return [] if explicit_only else list(self.repos)
         names: List[str] = []
         for section, row in rows:
             if 0 <= row < len(self.repos):
@@ -3067,15 +3067,26 @@ class MergerUI(object):
         selection_source = "default(all)"
 
         # Build normalized maps once (avoid N^2 drift pain)
-        repo_norm_map = {normalize_repo_id(r): r for r in self.repos}
+        repo_norm_map = {}
+        for r in self.repos:
+            norm = normalize_repo_id(r)
+            if norm in repo_norm_map:
+                # Collision detected
+                msg = f"Repo collision: '{r}' and '{repo_norm_map[norm]}' normalize to same ID '{norm}'."
+                print(f"[repoLens] WARNING: {msg}", file=sys.stderr)
+            else:
+                repo_norm_map[norm] = r
+
         pool_raw = getattr(self, "saved_prescan_selections", None) or {}
         pool_norm = {}
         if isinstance(pool_raw, dict):
             for k, v in pool_raw.items():
-                pool_norm[normalize_repo_id(k)] = v
+                n_key = normalize_repo_id(k)
+                if n_key: # Ignore empty keys
+                    pool_norm[n_key] = v
 
         # Pool repos that actually exist in current hub
-        pool_active_repos = [repo_norm_map[nk] for nk in pool_norm.keys() if nk in repo_norm_map]
+        pool_active_repos = sorted(list({repo_norm_map[nk] for nk in pool_norm.keys() if nk in repo_norm_map}))
 
         if rows:
             # Explicit UI selection
@@ -3091,6 +3102,9 @@ class MergerUI(object):
             # Default All
             selection_source = "default(all)"
             selected_repos = list(self.repos)
+
+        # Deduplicate and Sort
+        selected_repos = sorted(list(set(selected_repos)))
 
         if not selected_repos:
             if console:
@@ -3153,11 +3167,12 @@ class MergerUI(object):
         # HUD / Log Feedback
         pool_keys_total = len(pool_norm) if isinstance(pool_norm, dict) else 0
         pool_keys_matched = len(pool_active_repos)
+
         msg = f"Selection: {selection_source.upper()} ({len(selected_repos)} repos)"
         if selection_source == "pool":
             msg += f" / pool matched {pool_keys_matched}/{pool_keys_total}"
-        if repos_with_filters > 0:
-            msg += f" / {total_paths} paths"
+        elif repos_with_filters > 0:
+            msg += f" / {total_paths} paths from pool"
 
         if console:
             console.hud_alert(msg, "info", 1.5)
