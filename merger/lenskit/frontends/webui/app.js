@@ -497,6 +497,24 @@ function renderSets() {
 
 // --- Selection Pool Management (New) ---
 
+function togglePoolPanel() {
+    const container = document.getElementById('selectionPool');
+    if (!container) return;
+
+    // Toggle hidden class
+    if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        // Render if empty just to show it's empty
+        if (savedPrescanSelections.size === 0) {
+            container.innerHTML = '<div class="text-gray-500 text-xs italic p-1">Pool is empty</div>';
+        } else {
+            renderSelectionPool();
+        }
+    } else {
+        container.classList.add('hidden');
+    }
+}
+
 function renderSelectionPool() {
     const container = document.getElementById('selectionPool');
     if (!container) return; // Guard if element missing

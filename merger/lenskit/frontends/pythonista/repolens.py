@@ -764,13 +764,25 @@ class MergerUI(object):
         bottom_container.add_subview(path_label)
 
         self.path_field = ui.TextField(
-            frame=(140, cy, cw - 150, 28),
+            frame=(140, cy, cw - 200, 28),
             placeholder="z. B. merger/, src/, docs/",
         )
         _style_textfield(self.path_field)
         self.path_field.autocorrection_type = False
         self.path_field.spellchecking_type = False
         _wrap_textfield_in_dark_bg(bottom_container, self.path_field)
+
+        # Fix 2: Pool Button
+        pool_btn = ui.Button(title="Pool")
+        pool_btn.frame = (cw - 50, cy, 40, 28)
+        pool_btn.flex = "L"
+        pool_btn.background_color = "#555555"
+        pool_btn.tint_color = "white"
+        pool_btn.corner_radius = 4
+        pool_btn.font = ("<System-Bold>", 12)
+        pool_btn.action = self.show_pool_viewer
+        bottom_container.add_subview(pool_btn)
+
         cy += 36
 
         # --- Detail: eigene Zeile ---
@@ -2524,43 +2536,49 @@ class MergerUI(object):
             Update the prescan selection pool.
             mode: 'replace', 'append', or 'remove'
             """
-            # Path Compression: If a dir is fully selected, pass dir. Else pass selected files.
-            compressed_paths = []
-            
             # Create a map for quick lookup of selection status by path
+            # Note: We rely on the UI state (flat_items) where possible.
             selection_map = {item["path"]: item["selected"] for item in flat_items}
+
+            # FIX 1: Materialize raw paths correctly (DFS).
+            # If a directory is selected, ALL its descendants must be in raw_paths.
+            # We cannot rely solely on flat_items["selected"] for files if the user only clicked the folder.
             
-            def is_dir_fully_selected(node):
-                if node["type"] == "file":
-                    return selection_map.get(node["path"], False)
-                if node.get("children"):
-                    return all(is_dir_fully_selected(c) for c in node["children"])
-                return True # Empty dir considered selected
-            
-            def collect(node):
-                if node["type"] == "file":
-                    if selection_map.get(node["path"], False):
-                        compressed_paths.append(node["path"])
-                elif node["type"] == "dir":
-                    if is_dir_fully_selected(node):
-                        compressed_paths.append(node["path"])
-                        # Stop traversing
+            materialized_raw = []
+            compressed_paths = []
+
+            def collect_materialized(node):
+                path = node["path"]
+                # Check selection state from map (populated by UI toggles)
+                is_selected = selection_map.get(path, False)
+
+                if is_selected:
+                    if node["type"] == "file":
+                        materialized_raw.append(path)
+                        compressed_paths.append(path)
                     else:
-                        if node.get("children"):
-                            for c in node["children"]:
-                                collect(c)
-            
-            collect(root_node)
-            
-            # Normalize compressed paths
-            compressed_paths = [normalize_path(p) for p in compressed_paths]
-            
-            # Calculate raw paths (all selected file paths) for UI truth
-            # CRITICAL: raw must contain ONLY files, never directories
-            raw_paths = [
-                normalize_path(item["path"]) for item in flat_items 
-                if item["selected"] and item["type"] == "file"
-            ]
+                        # Directory is selected -> fully selected
+                        compressed_paths.append(path)
+                        # Materialize all descendants for raw truth
+                        collect_all_descendants(node)
+                else:
+                    # Not selected -> descend
+                    if node["type"] == "dir" and node.get("children"):
+                        for c in node["children"]:
+                            collect_materialized(c)
+
+            def collect_all_descendants(node):
+                if node["type"] == "file":
+                    materialized_raw.append(node["path"])
+                elif node.get("children"):
+                    for c in node["children"]:
+                        collect_all_descendants(c)
+
+            collect_materialized(root_node)
+
+            # Normalize and deduplicate
+            raw_paths = sorted(list(set(normalize_path(p) for p in materialized_raw)))
+            compressed_paths = sorted(list(set(normalize_path(p) for p in compressed_paths)))
             
             # Handle different modes
             if mode == 'remove':
@@ -2814,6 +2832,106 @@ class MergerUI(object):
         if ui:
             # Use minimal args for compatibility
             ui.alert("Preset Applied", msg, "OK")
+
+    def show_pool_viewer(self, sender):
+        """Shows the current Selection Pool content."""
+        pool = self.saved_prescan_selections
+
+        sheet = ui.View()
+        sheet.name = "Selection Pool"
+        sheet.background_color = "#111111"
+        sheet.frame = (0, 0, 500, 600)
+
+        if not pool:
+            lbl = ui.Label(frame=(0, 0, 500, 600))
+            lbl.text = "Pool is empty."
+            lbl.alignment = ui.ALIGN_CENTER
+            lbl.text_color = "gray"
+            sheet.add_subview(lbl)
+        else:
+            tv = ui.TableView()
+            tv.frame = (0, 0, 500, 540)
+            tv.flex = "WH"
+            tv.background_color = "#111111"
+            tv.separator_color = "#333333"
+
+            # Convert pool to list
+            items = []
+            for repo, data in pool.items():
+                info = "ALL"
+                if data and isinstance(data, dict):
+                    if data.get("raw") is not None:
+                        count = len(data["raw"])
+                        info = f"{count} files"
+                items.append({"repo": repo, "info": info})
+
+            items.sort(key=lambda x: x["repo"])
+
+            class PoolDS(object):
+                def tableview_number_of_rows(self, tv, section):
+                    return len(items)
+
+                def tableview_cell_for_row(self, tv, section, row):
+                    item = items[row]
+                    cell = ui.TableViewCell('value1')
+                    cell.text_label.text = item["repo"]
+                    cell.detail_text_label.text = item["info"]
+                    cell.text_label.text_color = "white"
+                    cell.detail_text_label.text_color = "#888888"
+                    cell.background_color = "#111111"
+                    return cell
+
+                def tableview_can_edit(self, tv, section, row):
+                    return True
+
+                def tableview_delete(self, tv, section, row):
+                    repo = items[row]["repo"]
+                    if repo in pool:
+                        del pool[repo]
+                        # Persist immediately
+                        # self is MergerUI instance
+                        # But here we are in inner class. Need access to self.
+                        # We can attach save callback or pass self.
+                        pass # handled below in wrapper
+                    items.pop(row)
+                    tv.delete_rows([row])
+
+            ds = PoolDS()
+            tv.data_source = ds
+            tv.delegate = ds
+            sheet.add_subview(tv)
+
+            # We need to save state on delete.
+            # Let's monkey-patch the delete method to call save.
+            original_delete = ds.tableview_delete
+            def delete_wrapper(tv, section, row):
+                original_delete(tv, section, row)
+                self.save_last_state()
+                self._update_repo_info()
+            ds.tableview_delete = delete_wrapper
+
+            # Bottom Bar
+            bar = ui.View(frame=(0, 540, 500, 60))
+            bar.flex = "WT"
+            bar.background_color = "#222222"
+
+            btn_clear = ui.Button(title="Clear Pool")
+            btn_clear.frame = (10, 10, 100, 40)
+            btn_clear.background_color = "#ff3b30"
+            btn_clear.tint_color = "white"
+            btn_clear.corner_radius = 6
+            def clear_action(sender):
+                pool.clear()
+                self.save_last_state()
+                self._update_repo_info()
+                sheet.close()
+                if console: console.hud_alert("Pool cleared")
+            btn_clear.action = clear_action
+            bar.add_subview(btn_clear)
+
+            sheet.add_subview(bar)
+
+        sheet.present("sheet")
 
     def run_merge(self, sender) -> None:
         """
