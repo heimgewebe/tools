@@ -3235,7 +3235,7 @@ class MergerUI(object):
                 lines = [
                     "---",
                     "pool_status:",
-                    f"  restrictive_repos: [{', '.join(restrictive_repos)}]",
+                    f"  restrictive_repos: {json.dumps(restrictive_repos)}",
                     f"  split_mode: {str(is_split_mode).lower()}",
                     "---",
                     "# Bundle Merge Report",
