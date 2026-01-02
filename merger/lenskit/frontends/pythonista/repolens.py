@@ -1365,6 +1365,11 @@ class MergerUI(object):
                 rows.append((0, idx))
 
         if not rows:
+            # Explicitly clear selection if list is empty
+            try:
+                self.tv.selected_rows = []
+            except Exception:
+                pass
             return
 
         tv = self.tv
@@ -1589,9 +1594,9 @@ class MergerUI(object):
         # Update hint text to match restored profile
         self.on_profile_changed(None)
 
-        selected = data.get("selected_repos") or []
-        if selected:
-            # Direkt anwenden – ohne ui.delay, das auf manchen Wegen nicht verfügbar ist
+        selected = data.get("selected_repos")
+        if selected is not None:
+            # Direkt anwenden – auch wenn leer (zum Leeren der Auswahl)
             self._apply_selected_repo_names(selected)
 
         if sender and console:
@@ -1623,23 +1628,7 @@ class MergerUI(object):
         tv = self.tv
         rows = tv.selected_rows or []
         if not rows:
-            # Pool-first behavior:
-            # If user selected no repos explicitly, but pool contains selections,
-            # interpret intent as "merge the pool" (not "scan everything").
-            pool = getattr(self, "saved_prescan_selections", None) or {}
-            if isinstance(pool, dict) and len(pool) > 0:
-                # Keep UI order (self.repos) to reduce surprise
-                pool_repos = [r for r in self.repos if r in pool]
-                if pool_repos:
-                    try:
-                        if console:
-                            console.hud_alert(f"Pool active: {len(pool_repos)} repos", duration=0.8)
-                    except Exception:
-                        pass
-                    return pool_repos
-
-            # Default fallback: no explicit selection, no pool -> treat as ALL
-            return list(self.repos)
+            return [] if explicit_only else list(self.repos)
         names: List[str] = []
         for section, row in rows:
             if 0 <= row < len(self.repos):
@@ -3187,8 +3176,12 @@ class MergerUI(object):
         msg = f"Selection: {selection_source.upper()} ({len(selected_repos)} repos)"
         if selection_source == "pool":
             msg += f" / pool matched {pool_keys_matched}/{pool_keys_total}"
-        elif repos_with_filters > 0:
-            msg += f" / {total_paths} paths from pool"
+
+        if repos_with_filters > 0:
+            if selection_source == "pool":
+                msg += f" / {total_paths} paths"
+            else:
+                msg += f" / {total_paths} paths from pool"
 
         if console:
             console.hud_alert(msg, "info", 1.5)
