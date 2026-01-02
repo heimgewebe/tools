@@ -382,15 +382,21 @@ async function fetchRepos(hub) {
             if (savedPrescanSelections.has(repo)) {
                 const sel = savedPrescanSelections.get(repo);
                 let title = "";
+                let label = "POOL";
+                let colorClass = "bg-blue-900 text-blue-200";
+
                 if (sel.compressed === null) {
-                    title = "ALL included (Full Repo)";
+                    title = "POOL: ALL included (Full Repo)";
+                    label = "POOL: ALL";
+                    colorClass = "bg-green-900 text-green-200";
                 } else {
                     const compressedCount = sel.compressed.length;
                     const rawCount = sel.raw ? sel.raw.size : 0;
                     title = `${rawCount} selected items (compressed to ${compressedCount} path rules)`;
+                    label = `POOL: ${compressedCount} paths`;
                 }
 
-                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${title}">Selection</span>`;
+                badgeHtml = `<span class="ml-auto text-[10px] ${colorClass} px-1 rounded font-mono" title="${title}">${label}</span>`;
             }
 
             div.innerHTML = `
@@ -970,25 +976,44 @@ async function startJob(e) {
             return null;
         };
 
-        // Determine if we should force pro-repo due to pool selections
-        // If any selected repo has a specific pool selection, we should use per-repo payloads
-        // to ensure the correct paths are applied to the correct repo.
-        const hasPoolSelection = selectedRepos.some(r => savedPrescanSelections.has(r));
+        // Helper to check if pool has restrictive selection (Partial)
+        const hasRestrictivePoolSelection = (repo) => {
+            if (!savedPrescanSelections.has(repo)) return false;
+            const sel = savedPrescanSelections.get(repo);
+            // null = ALL -> not restrictive
+            if (sel === null || sel.compressed === null) return false;
+            return Array.isArray(sel.compressed) && sel.compressed.length > 0;
+        };
 
-        if (mode === 'pro-repo' || hasPoolSelection) {
-            if (hasPoolSelection && mode !== 'pro-repo') {
-                console.log("Pool selection active: forcing pro-repo mode for safety.");
+        // Determine if we should force pro-repo due to restrictive pool selections
+        // If any selected repo has a specific pool selection that is PARTIAL, we MUST use per-repo payloads
+        // to ensure the correct paths are applied to the correct repo.
+        // A pool entry with "ALL" (null) is not restrictive and allows batch processing.
+        const hasRestrictiveSelection = selectedRepos.some(hasRestrictivePoolSelection);
+
+        if (mode === 'pro-repo' || hasRestrictiveSelection) {
+            if (hasRestrictiveSelection && mode !== 'pro-repo') {
+                console.log("Restrictive pool selection active: forcing pro-repo mode for safety.");
             }
             // Split into individual jobs
             selectedRepos.forEach(repo => {
-                jobsToStart.push({
+                const paths = getIncludePaths(repo);
+                const payload = {
                     ...commonPayload,
-                    repos: [repo],
-                    include_paths: getIncludePaths(repo)
-                });
+                    repos: [repo]
+                };
+                // Only set include_paths if it is a partial selection (array)
+                // If it is null (ALL or global default), we omit it to keep payload clean
+                // and rely on backend default (which is ALL).
+                if (Array.isArray(paths)) {
+                    payload.include_paths = paths;
+                }
+
+                jobsToStart.push(payload);
             });
         } else {
-            // Batch job (Standard, no pool overrides)
+            // Batch job (Standard, no restrictive pool overrides)
+            // Even if "ALL" is in the pool, it maps to standard batch behavior.
             jobsToStart.push({ ...commonPayload, repos: selectedRepos });
         }
 
