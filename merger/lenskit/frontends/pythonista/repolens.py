@@ -2897,7 +2897,48 @@ class MergerUI(object):
                     cell.text_label.text_color = "white"
                     cell.detail_text_label.text_color = "#888888"
                     cell.background_color = "#111111"
+                    cell.accessory_type = 'detail_button'
                     return cell
+
+                def tableview_accessory_button_tapped(self, tv, section, row):
+                    self.show_inspector(row)
+
+                def tableview_did_select(self, tv, section, row):
+                    self.show_inspector(row)
+
+                def show_inspector(self, row):
+                    item = items[row]
+                    repo = item["repo"]
+                    entry = pool.get(repo)
+
+                    if not entry or not isinstance(entry, dict):
+                        return
+
+                    raw = entry.get("raw")
+                    compressed = entry.get("compressed")
+
+                    msg = f"Repo: {repo}\n\n"
+
+                    if raw is None and compressed is None:
+                        msg += "State: ALL files included."
+                    else:
+                        r_count = len(raw) if raw else 0
+                        c_count = len(compressed) if compressed else 0
+                        msg += f"State: Partial\nFiles: {r_count}\nRules: {c_count}\n\n"
+
+                        if compressed:
+                            msg += "Rules (Compressed):\n"
+                            # Limit display
+                            display_rules = compressed[:15]
+                            for r in display_rules:
+                                msg += f"- {r}\n"
+                            if len(compressed) > 15:
+                                msg += f"... and {len(compressed)-15} more"
+
+                    if console:
+                        console.alert("Pool Details", msg, "OK", hide_cancel_button=True)
+                    elif ui:
+                        ui.alert("Pool Details", msg, "OK")
 
                 def tableview_can_edit(self, tv, section, row):
                     return True
@@ -3174,6 +3215,29 @@ class MergerUI(object):
             else:
                 print("No report generated.")
             return
+
+        # Generate Bundle Index if multiple artifacts (Post-Step)
+        if len(all_out_paths) > 1:
+            try:
+                now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+                bundle_path = merges_dir / f"bundle-merge_{now_ts}.md"
+
+                lines = [
+                    "# Bundle Merge Report",
+                    f"- Generated: {now_ts}",
+                    f"- Parts: {len(all_out_paths)}",
+                    "",
+                    "## Index",
+                ]
+
+                for p in all_out_paths:
+                    lines.append(f"- [{p.name}]({p.name})")
+
+                bundle_path.write_text("\n".join(lines), encoding="utf-8")
+                # Prepend to be the primary result
+                all_out_paths.insert(0, bundle_path)
+            except Exception as e:
+                print(f"Failed to create bundle index: {e}", file=sys.stderr)
 
         # Summary Feedback
         count = len(all_out_paths)
