@@ -764,13 +764,25 @@ class MergerUI(object):
         bottom_container.add_subview(path_label)
 
         self.path_field = ui.TextField(
-            frame=(140, cy, cw - 150, 28),
+            frame=(140, cy, cw - 200, 28),
             placeholder="z. B. merger/, src/, docs/",
         )
         _style_textfield(self.path_field)
         self.path_field.autocorrection_type = False
         self.path_field.spellchecking_type = False
         _wrap_textfield_in_dark_bg(bottom_container, self.path_field)
+
+        # Fix 2: Pool Button
+        pool_btn = ui.Button(title="Pool")
+        pool_btn.frame = (cw - 50, cy, 40, 28)
+        pool_btn.flex = "L"
+        pool_btn.background_color = "#555555"
+        pool_btn.tint_color = "white"
+        pool_btn.corner_radius = 4
+        pool_btn.font = ("<System-Bold>", 12)
+        pool_btn.action = self.show_pool_viewer
+        bottom_container.add_subview(pool_btn)
+
         cy += 36
 
         # --- Detail: eigene Zeile ---
@@ -2524,43 +2536,49 @@ class MergerUI(object):
             Update the prescan selection pool.
             mode: 'replace', 'append', or 'remove'
             """
-            # Path Compression: If a dir is fully selected, pass dir. Else pass selected files.
-            compressed_paths = []
-            
             # Create a map for quick lookup of selection status by path
+            # Note: We rely on the UI state (flat_items) where possible.
             selection_map = {item["path"]: item["selected"] for item in flat_items}
+
+            # FIX 1: Materialize raw paths correctly (DFS).
+            # If a directory is selected, ALL its descendants must be in raw_paths.
+            # We cannot rely solely on flat_items["selected"] for files if the user only clicked the folder.
             
-            def is_dir_fully_selected(node):
-                if node["type"] == "file":
-                    return selection_map.get(node["path"], False)
-                if node.get("children"):
-                    return all(is_dir_fully_selected(c) for c in node["children"])
-                return True # Empty dir considered selected
-            
-            def collect(node):
-                if node["type"] == "file":
-                    if selection_map.get(node["path"], False):
-                        compressed_paths.append(node["path"])
-                elif node["type"] == "dir":
-                    if is_dir_fully_selected(node):
-                        compressed_paths.append(node["path"])
-                        # Stop traversing
+            materialized_raw = []
+            compressed_paths = []
+
+            def collect_materialized(node):
+                path = node["path"]
+                # Check selection state from map (populated by UI toggles)
+                is_selected = selection_map.get(path, False)
+
+                if is_selected:
+                    if node["type"] == "file":
+                        materialized_raw.append(path)
+                        compressed_paths.append(path)
                     else:
-                        if node.get("children"):
-                            for c in node["children"]:
-                                collect(c)
-            
-            collect(root_node)
-            
-            # Normalize compressed paths
-            compressed_paths = [normalize_path(p) for p in compressed_paths]
-            
-            # Calculate raw paths (all selected file paths) for UI truth
-            # CRITICAL: raw must contain ONLY files, never directories
-            raw_paths = [
-                normalize_path(item["path"]) for item in flat_items 
-                if item["selected"] and item["type"] == "file"
-            ]
+                        # Directory is selected -> fully selected
+                        compressed_paths.append(path)
+                        # Materialize all descendants for raw truth
+                        collect_all_descendants(node)
+                else:
+                    # Not selected -> descend
+                    if node["type"] == "dir" and node.get("children"):
+                        for c in node["children"]:
+                            collect_materialized(c)
+
+            def collect_all_descendants(node):
+                if node["type"] == "file":
+                    materialized_raw.append(node["path"])
+                elif node.get("children"):
+                    for c in node["children"]:
+                        collect_all_descendants(c)
+
+            collect_materialized(root_node)
+
+            # Normalize and deduplicate
+            raw_paths = sorted(list(set(normalize_path(p) for p in materialized_raw)))
+            compressed_paths = sorted(list(set(normalize_path(p) for p in compressed_paths)))
             
             # Handle different modes
             if mode == 'remove':
@@ -2750,8 +2768,9 @@ class MergerUI(object):
         sheet.add_subview(btn_cancel)
         
         # Replace button (right side)
-        btn_replace = ui.Button(title="Replace")
-        btn_replace.frame = (sheet.width - 230, bar_y, 110, 40)
+        # "Store to Pool (Replace)" - abbreviated for mobile UI if needed, but clarity is prioritized
+        btn_replace = ui.Button(title="Store (Replace)")
+        btn_replace.frame = (sheet.width - 250, bar_y, 120, 40)
         btn_replace.flex = "LT" # Left margin flex, Top margin flex
         btn_replace.background_color = "#007aff"
         btn_replace.tint_color = "white"
@@ -2760,8 +2779,9 @@ class MergerUI(object):
         sheet.add_subview(btn_replace)
         
         # Append button (right side)
-        btn_append = ui.Button(title="Append")
-        btn_append.frame = (sheet.width - 110, bar_y, 100, 40)
+        # "Store to Pool (Append)"
+        btn_append = ui.Button(title="Store (Append)")
+        btn_append.frame = (sheet.width - 120, bar_y, 110, 40)
         btn_append.flex = "LT" # Left margin flex, Top margin flex
         btn_append.background_color = "#34c759"
         btn_append.tint_color = "white"
@@ -2814,6 +2834,153 @@ class MergerUI(object):
         if ui:
             # Use minimal args for compatibility
             ui.alert("Preset Applied", msg, "OK")
+
+    def show_pool_viewer(self, sender):
+        """Shows the current Selection Pool content."""
+        pool = self.saved_prescan_selections
+
+        sheet = ui.View()
+        sheet.name = "Selection Pool"
+        sheet.background_color = "#111111"
+        sheet.frame = (0, 0, 500, 600)
+
+        if not pool:
+            lbl = ui.Label(frame=(0, 0, 500, 600))
+            lbl.text = "Pool is empty."
+            lbl.alignment = ui.ALIGN_CENTER
+            lbl.text_color = "gray"
+            sheet.add_subview(lbl)
+        else:
+            tv = ui.TableView()
+            tv.frame = (0, 0, 500, 540)
+            tv.flex = "WH"
+            tv.background_color = "#111111"
+            tv.separator_color = "#333333"
+
+            # Helper to format info
+            def format_pool_info(data):
+                if not data or not isinstance(data, dict):
+                    return "Invalid state"
+
+                # Check for ALL state (both None)
+                raw = data.get("raw")
+                compressed = data.get("compressed")
+
+                if raw is None and compressed is None:
+                    return "ALL"
+
+                # Partial state
+                raw_count = len(raw) if raw else 0
+                compressed_count = len(compressed) if compressed else 0
+                return f"Partial: {raw_count} files / {compressed_count} rules"
+
+            # Convert pool to list
+            items = []
+            for repo, data in pool.items():
+                info = format_pool_info(data)
+                items.append({"repo": repo, "info": info})
+
+            items.sort(key=lambda x: x["repo"])
+
+            class PoolDS(object):
+                def __init__(self, parent_ui):
+                    self.parent = parent_ui
+
+                def tableview_number_of_rows(self, tv, section):
+                    return len(items)
+
+                def tableview_cell_for_row(self, tv, section, row):
+                    item = items[row]
+                    cell = ui.TableViewCell('value1')
+                    cell.text_label.text = item["repo"]
+                    cell.detail_text_label.text = item["info"]
+                    cell.text_label.text_color = "white"
+                    cell.detail_text_label.text_color = "#888888"
+                    cell.background_color = "#111111"
+                    cell.accessory_type = 'detail_button'
+                    return cell
+
+                def tableview_accessory_button_tapped(self, tv, section, row):
+                    self.show_inspector(row)
+
+                def tableview_did_select(self, tv, section, row):
+                    self.show_inspector(row)
+
+                def show_inspector(self, row):
+                    item = items[row]
+                    repo = item["repo"]
+                    entry = pool.get(repo)
+
+                    if not entry or not isinstance(entry, dict):
+                        return
+
+                    raw = entry.get("raw")
+                    compressed = entry.get("compressed")
+
+                    msg = f"Repo: {repo}\n\n"
+
+                    if raw is None and compressed is None:
+                        msg += "State: ALL files included."
+                    else:
+                        r_count = len(raw) if raw else 0
+                        c_count = len(compressed) if compressed else 0
+                        msg += f"State: Partial\nFiles: {r_count}\nRules: {c_count}\n\n"
+
+                        if compressed:
+                            msg += "Rules (Compressed):\n"
+                            # Limit display
+                            display_rules = compressed[:15]
+                            for r in display_rules:
+                                msg += f"- {r}\n"
+                            if len(compressed) > 15:
+                                msg += f"... and {len(compressed)-15} more"
+
+                    if console:
+                        console.alert("Pool Details", msg, "OK", hide_cancel_button=True)
+                    elif ui:
+                        ui.alert("Pool Details", msg, "OK")
+
+                def tableview_can_edit(self, tv, section, row):
+                    return True
+
+                def tableview_delete(self, tv, section, row):
+                    repo = items[row]["repo"]
+                    if repo in pool:
+                        del pool[repo]
+                        # Persist immediately using parent reference
+                        self.parent.save_last_state()
+                        self.parent._update_repo_info()
+
+                    items.pop(row)
+                    tv.delete_rows([row])
+
+            ds = PoolDS(self)
+            tv.data_source = ds
+            tv.delegate = ds
+            sheet.add_subview(tv)
+
+            # Bottom Bar
+            bar = ui.View(frame=(0, 540, 500, 60))
+            bar.flex = "WT"
+            bar.background_color = "#222222"
+
+            btn_clear = ui.Button(title="Clear Pool")
+            btn_clear.frame = (10, 10, 100, 40)
+            btn_clear.background_color = "#ff3b30"
+            btn_clear.tint_color = "white"
+            btn_clear.corner_radius = 6
+            def clear_action(sender):
+                pool.clear()
+                self.save_last_state()
+                self._update_repo_info()
+                sheet.close()
+                if console: console.hud_alert("Pool cleared")
+            btn_clear.action = clear_action
+            bar.add_subview(btn_clear)
+
+            sheet.add_subview(bar)
+
+        sheet.present("sheet")
 
     def run_merge(self, sender) -> None:
         """
@@ -2916,123 +3083,203 @@ class MergerUI(object):
         if plan_only and code_only:
             code_only = False
 
-        summaries = []
-        total = len(selected)
-        for i, name in enumerate(selected, start=1):
-            root = self.hub / name
-            if not root.is_dir():
-                continue
-            # Mini-Progress + UI-Yield (hilft spürbar bei Pythonista)
-            if console:
-                try:
-                    console.hud_alert(f"Scanning {i}/{total}: {name}", duration=0.6)
-                except Exception:
-                    pass
-            try:
-                import ui as _ui
-                # yield to main loop without slowing down much
-                _ui.delay(lambda: None, 0.0)
-            except Exception:
-                pass
+        # Helper to get include_paths from pool
+        def get_pool_include_paths(repo_name):
+            entry = self.saved_prescan_selections.get(repo_name)
+            if not entry:
+                return None # Default behavior (global filters apply)
+            if isinstance(entry, dict):
+                # Structured: compressed is list (partial) or None (ALL)
+                compressed = entry.get("compressed")
+                # Treat empty list as "no override" (same as None/ALL)
+                # to avoid accidental "scan nothing" state.
+                return compressed if (compressed and len(compressed) > 0) else None
+            # Legacy fallback
+            return entry if entry else None
 
-            # Resolve include_paths for this specific repo
-            # Check pool - use compressed field for backend efficiency
-            # Note: None can mean either "explicit ALL" or "not in pool" - we distinguish by checking key existence
-            pool_entry = self.saved_prescan_selections.get(name)
-
-            use_include_paths = None
-            if pool_entry:
-                if isinstance(pool_entry, dict):
-                    # Structured format - use compressed for backend
-                    compressed = pool_entry.get("compressed")
-                    if compressed is None:
-                        # Explicit ALL -> include_paths = None (meaning all)
-                        use_include_paths = None
-                    else:
-                        # List of compressed paths
-                        use_include_paths = compressed
-                else:
-                    # Legacy format (shouldn't happen after migration)
-                    use_include_paths = pool_entry if pool_entry else None
-            else:
-                # Not in pool -> Default behavior (All, filtered by ext/path_filter)
-                use_include_paths = None
-
-            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
-            summaries.append(summary)
-
-        if not summaries:
-            if console:
-                console.alert("repoLens", "No valid repos found.", "OK", hide_cancel_button=True)
-            return
+        # Check for restrictive pool entries to decide on execution strategy
+        has_restrictive = False
+        for name in selected:
+            paths = get_pool_include_paths(name)
+            if paths is not None and isinstance(paths, list) and len(paths) > 0:
+                has_restrictive = True
+                break
 
         merges_dir = get_merges_dir(self.hub)
+        all_out_paths = []
 
-        # Delta Logic Injection (Port from CLI to UI)
-        # If delta_reports is enabled, try to find metadata to inject.
-        delta_meta = None
-        if self.extras_config.delta_reports and summaries and len(summaries) == 1:
-            repo_name = summaries[0]["name"]
-            try:
-                mod = _load_repolens_extractor_module()
-                if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
-                    diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
-                    if diff_path:
-                        delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
-                        # Optionally notify user via HUD that delta was found?
-                        # if console: console.hud_alert("Delta found")
-            except Exception as e:
-                print(f"[repoLens] Warning: Could not extract delta metadata: {e}", file=sys.stderr)
+        # Execution Strategy
+        # If restrictive pool entries exist, we must split execution per repo to ensure
+        # correct include_paths are respected and not mixed with global filters.
+        # This matches WebUI "force pro-repo" logic.
 
-        artifacts = write_reports_v2(
-            merges_dir,
-            self.hub,
-            summaries,
-            detail,
-            mode,
-            max_bytes,
-            plan_only,
-            code_only,
-            split_size,
-            debug=False,
-            path_filter=path_contains,
-            ext_filter=extensions or None,
-            extras=self.extras_config,
-            delta_meta=delta_meta,
-        )
+        execution_list = []
+        if has_restrictive:
+            # Force sequential processing per repo
+            for name in selected:
+                execution_list.append([name])
+            if console:
+                console.hud_alert("Pool active: Splitting jobs per repo")
+        else:
+            # Standard batch processing (all selected together)
+            execution_list.append(selected)
 
-        out_paths = artifacts.get_all_paths()
-        if not out_paths:
+        total_batches = len(execution_list)
+
+        for b_idx, batch_repos in enumerate(execution_list, start=1):
+            summaries = []
+
+            # Scan phase for this batch
+            for i, name in enumerate(batch_repos, start=1):
+                root = self.hub / name
+                if not root.is_dir():
+                    continue
+
+                # Feedback
+                if console:
+                    try:
+                        console.hud_alert(f"Scanning {name} ({i}/{len(batch_repos)})", duration=0.6)
+                    except Exception:
+                        pass
+                try:
+                    import ui as _ui
+                    _ui.delay(lambda: None, 0.0)
+                except Exception:
+                    pass
+
+                # Resolve paths
+                use_include_paths = get_pool_include_paths(name)
+
+                # If we are in a restrictive split-job scenario, and this repo has NO pool entry,
+                # it uses global defaults (None). If it HAS an entry, it uses that.
+                # scan_repo handles include_paths=None as "scan all".
+
+                summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
+                summaries.append(summary)
+
+            if not summaries:
+                continue
+
+            # Delta Logic Injection (Batch-aware)
+            delta_meta = None
+            if self.extras_config.delta_reports and len(summaries) == 1:
+                repo_name = summaries[0]["name"]
+                try:
+                    mod = _load_repolens_extractor_module()
+                    if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
+                        diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
+                        if diff_path:
+                            delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+                except Exception as e:
+                    print(f"[repoLens] Warning: Could not extract delta metadata: {e}", file=sys.stderr)
+
+            # Generate Report for this batch
+            # If splitting jobs, we likely want "pro-repo" mode for the output to be named correctly,
+            # or if it was "gesamt" but forced split, we get one file per repo anyway.
+            # We preserve the user's requested mode unless we forced a split, in which case effectively it behaves like pro-repo
+            # but write_reports_v2 needs to know how to name it.
+            # If has_restrictive is True, we are iterating 1-by-1. calling write_reports_v2 with 1 summary.
+            # Mode "gesamt" with 1 summary produces 1 file. Mode "pro-repo" with 1 summary produces 1 file.
+            # So passing the user's `mode` is fine.
+
+            # However, if we forced split, we should probably ensure `path_filter` passed to write_reports
+            # doesn't confuse the header if we are using specific include_paths.
+            # But `write_reports_v2` uses `path_filter` just for metadata display usually.
+            # We pass it through.
+
+            artifacts = write_reports_v2(
+                merges_dir,
+                self.hub,
+                summaries,
+                detail,
+                mode,
+                max_bytes,
+                plan_only,
+                code_only,
+                split_size,
+                debug=False,
+                path_filter=path_contains,
+                ext_filter=extensions or None,
+                extras=self.extras_config,
+                delta_meta=delta_meta,
+            )
+
+            all_out_paths.extend(artifacts.get_all_paths())
+
+            # Force close intermediate files
+            force_close_files(artifacts.get_all_paths())
+
+        if not all_out_paths:
             if console:
                 console.alert("repoLens", "No report generated.", "OK", hide_cancel_button=True)
             else:
                 print("No report generated.")
             return
 
-        # Force close any tabs that might have opened
-        force_close_files(out_paths)
+        # Generate Bundle Index if multiple artifacts (Post-Step)
+        if len(all_out_paths) > 1:
+            try:
+                now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+                bundle_path = merges_dir / f"bundle-merge_{now_ts}.md"
 
-        primary = _pick_primary_artifact(out_paths)
-        human_md = _pick_human_md(out_paths)
-        if primary and human_md and primary != human_md:
-            msg = f"Merge generated: {primary.name} (human: {human_md.name})"
-            status = "success"
-        elif primary:
+                # Identify restrictive repos for metadata
+                restrictive_repos = []
+                for name in selected:
+                    paths = get_pool_include_paths(name)
+                    if paths is not None and isinstance(paths, list) and len(paths) > 0:
+                        restrictive_repos.append(name)
+
+                # Dynamic split_mode based on actual execution logic
+                is_split_mode = has_restrictive
+
+                lines = [
+                    "---",
+                    "pool_status:",
+                    f"  restrictive_repos: {json.dumps(restrictive_repos)}",
+                    f"  split_mode: {str(is_split_mode).lower()}",
+                    "---",
+                    "# Bundle Merge Report",
+                    f"- Generated: {now_ts}",
+                    f"- Parts: {len(all_out_paths)}",
+                    "",
+                    "## Index",
+                ]
+
+                for p in all_out_paths:
+                    lines.append(f"- [{p.name}]({p.name})")
+
+                bundle_path.write_text("\n".join(lines), encoding="utf-8")
+                # Prepend to be the primary result
+                all_out_paths.insert(0, bundle_path)
+            except Exception as e:
+                print(f"Failed to create bundle index: {e}", file=sys.stderr)
+
+        # Summary Feedback
+        count = len(all_out_paths)
+        primary = _pick_primary_artifact(all_out_paths)
+
+        # Enforce bundle as primary if present
+        for p in all_out_paths:
+            if "bundle-merge" in p.name:
+                primary = p
+                break
+
+        if count == 1 and primary:
             msg = f"Merge generated: {primary.name}"
-            status = "success"
+        elif primary and count > 1:
+            msg = f"Merge generated: {primary.name} (+{count-1} parts)"
         else:
-            msg = "Merge failed: no artifacts returned"
-            status = "error"
+            msg = f"Generated {count} artifacts"
 
         if console:
             try:
-                console.hud_alert(msg, status, 1.2 if status == "success" else 1.5)
+                console.hud_alert(msg, "success", 1.5)
             except Exception as e:
                 sys.stderr.write(f"Warning: Failed to show HUD alert (falling back to alert): {e}\n")
                 console.alert("repoLens", msg, "OK", hide_cancel_button=True)
         else:
             print(f"repoLens: {msg}")
-            for p in out_paths:
+            for p in all_out_paths:
                 print(f"  - {p.name}")
 
 
