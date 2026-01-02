@@ -546,7 +546,8 @@ class MergerUI(object):
 
         # Saved Prescan Selections (Pool)
         # repo_name -> {"raw": None|list[str], "compressed": None|list[str]}
-        # - raw: None (ALL) or list of all selected file paths (for UI truth)
+        # POOL CONTRACT:
+        # - raw: None (ALL) or list of all selected FILE paths (UI truth, MUST be files only)
         # - compressed: None (ALL) or list of compressed paths (dirs/files for backend)
         self.saved_prescan_selections: Dict[str, Dict[str, Optional[List[str]]]] = {}
 
@@ -2368,8 +2369,10 @@ class MergerUI(object):
         # Merge → Explicit action from main view (never triggered from prescan)
         class PrescanSheet(ui.View):
             """
-            Custom View subclass that reliably resets the prescan guard on close.
-            ui.View's will_close() is called on all close paths: Apply, Cancel, Swipe-Down, errors.
+            Custom View subclass.
+            Note: We avoid relying solely on will_close() for critical state reset due to
+            potential delegate limitations/bugs in some Pythonista versions.
+            State is reset explicitly in action handlers.
             """
             def __init__(self, parent):
                 super().__init__()
@@ -2379,10 +2382,14 @@ class MergerUI(object):
                 self.frame = (0, 0, 600, 800)
 
             def will_close(self):
-                """Reset guard flag when prescan sheet closes."""
-                self._parent._prescan_active = False
+                # Fallback safety net
+                if self._parent._prescan_active:
+                     self._parent._prescan_active = False
 
         sheet = PrescanSheet(self)
+
+        def reset_guard():
+            self._prescan_active = False
 
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
@@ -2563,6 +2570,7 @@ class MergerUI(object):
                 self.save_last_state()
                 if console:
                     console.hud_alert(f"Removed selection pool for {root_name}", "success", 1.5)
+                reset_guard()
                 sheet.close()
                 return
             
@@ -2609,42 +2617,115 @@ class MergerUI(object):
                     # ALL selected - ALL overrides everything
                     self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
                 else:
-                    # Partial selection - union both raw and compressed
+                    # Partial selection - union raw, then RE-COMPRESS
+                    merged_raw = None
+
                     if existing and isinstance(existing, dict):
                         existing_raw = existing.get("raw")
-                        existing_compressed = existing.get("compressed")
-                        
-                        if existing_raw is None and existing_compressed is None:
+                        if existing_raw is None:
                             # Existing was ALL. Union(ALL, Partial) = ALL
                             self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                            self.save_last_state()
+                            if console: console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
+                            reset_guard()
+                            sheet.close()
+                            return
                         else:
-                            # Union of existing and new for both fields
-                            # DEFENSIVE: Filter existing_raw to ensure files-only contract
-                            # (protects against legacy/corrupted data where raw might contain dirs)
-                            file_paths_set = {normalize_path(item["path"]) for item in flat_items if item["type"] == "file"}
-                            filtered_existing_raw = [p for p in (existing_raw or []) if p in file_paths_set]
-                            
-                            merged_raw = set(filtered_existing_raw)
-                            merged_raw.update(raw_paths)
-                            
-                            merged_compressed = set(existing_compressed or [])
-                            merged_compressed.update(compressed_paths)
-                            
-                            self.saved_prescan_selections[root_name] = {
-                                "raw": sorted(list(merged_raw)) if merged_raw else None,
-                                "compressed": sorted(list(merged_compressed)) if merged_compressed else None
-                            }
+                            # Union of existing and new raw paths
+                            merged_raw = set(existing_raw)
+                            if raw_paths:
+                                merged_raw.update(raw_paths)
                     else:
-                        # No existing or legacy format - just save current
+                        # No existing -> just new raw
+                        merged_raw = set(raw_paths) if raw_paths else None
+
+                    # If we have a merged raw set, re-compress using the tree (Iterative DFS)
+                    if merged_raw and len(merged_raw) > 0:
+                        new_compressed = []
+
+                        # Build a map for O(1) lookup, ensure normalization
+                        raw_set = set(normalize_path(p) for p in merged_raw)
+
+                        # Phase 1: Determine selection status of all nodes (Post-order simulation)
+                        # We need to know if a dir is fully selected. Since flat_items is flat,
+                        # we can't easily do post-order without recursion.
+                        # BUT: flat_items was built via DFS. We can iterate backwards?
+                        # No, simpler: Build a tree-like structure or map from the flat items?
+                        # Actually, root_node is available and it IS a tree.
+
+                        # Iterative Post-Order to mark 'fully_selected'
+                        # We decorate the nodes temporarily or use a map ID->Status
+
+                        node_status = {} # path -> bool (fully selected)
+
+                        # Iterative Post-Order Traversal using 2 stacks
+                        stack1 = [root_node]
+                        stack2 = []
+                        while stack1:
+                            node = stack1.pop()
+                            stack2.append(node)
+                            if node.get("children"):
+                                for c in node["children"]:
+                                    stack1.append(c)
+
+                        # Process stack2 (children before parents)
+                        while stack2:
+                            node = stack2.pop()
+                            path = normalize_path(node["path"])
+
+                            if node["type"] == "file":
+                                node_status[path] = path in raw_set
+                            else: # dir
+                                children = node.get("children", [])
+                                if not children:
+                                    node_status[path] = False # Empty dir not selected
+                                else:
+                                    # All children must be fully selected
+                                    all_selected = True
+                                    for c in children:
+                                        c_path = normalize_path(c["path"])
+                                        if not node_status.get(c_path, False):
+                                            all_selected = False
+                                            break
+                                    node_status[path] = all_selected
+
+                        # Phase 2: Collect compressed paths (Pre-order)
+                        # If a node is fully selected, add it and skip children. Else descend.
+                        stack = [root_node]
+                        while stack:
+                            node = stack.pop()
+                            path = normalize_path(node["path"])
+
+                            if node_status.get(path, False):
+                                # Fully selected (Dir or File)
+                                new_compressed.append(path)
+                                # Do NOT push children
+                            else:
+                                # Not fully selected. If dir, push children to check them.
+                                # Push in reverse order to maintain order when popping
+                                if node.get("children"):
+                                    for i in range(len(node["children"]) - 1, -1, -1):
+                                        stack.append(node["children"][i])
+                                elif node["type"] == "file":
+                                    # File not selected? Then don't include.
+                                    # (Should be covered by node_status check above, but logic:
+                                    # if file is false, we do nothing)
+                                    pass
+
                         self.saved_prescan_selections[root_name] = {
-                            "raw": raw_paths if raw_paths else None,
-                            "compressed": compressed_paths if compressed_paths else None
+                            "raw": sorted(list(raw_set)),
+                            "compressed": [normalize_path(p) for p in new_compressed]
                         }
+                    else:
+                        # Empty result -> remove
+                        if root_name in self.saved_prescan_selections:
+                            del self.saved_prescan_selections[root_name]
                 
                 self.save_last_state()
                 if console:
                     console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
             
+            reset_guard()
             sheet.close()
             # No auto-merge!
         
@@ -2665,7 +2746,7 @@ class MergerUI(object):
         btn_cancel.background_color = "#444444"
         btn_cancel.tint_color = "white"
         btn_cancel.corner_radius = 6
-        btn_cancel.action = lambda s: sheet.close()
+        btn_cancel.action = lambda s: (reset_guard(), sheet.close())
         sheet.add_subview(btn_cancel)
         
         # Replace button (right side)

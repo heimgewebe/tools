@@ -219,11 +219,12 @@ function loadSavedPrescanSelections() {
         const raw = JSON.parse(localStorage.getItem(PRESCAN_SAVED_KEY) || "{}");
         const m = new Map();
         for (const [repo, obj] of Object.entries(raw)) {
-            // raw can be null (ALL) or array
+            // Invariant Check: raw must be rehydrated to Set or null
             let rawSet = null;
-            if (obj.raw !== null) {
+            if (obj.raw !== null) { // null = ALL
                 const rawList = Array.isArray(obj.raw) ? obj.raw : [];
-                rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
+                // Filter out non-strings to prevent corruption
+                rawSet = new Set(rawList.filter(x => typeof x === 'string').map(normalizePath).filter(p => p !== null));
             }
 
             // compressed can be null (ALL) or array
@@ -382,15 +383,21 @@ async function fetchRepos(hub) {
             if (savedPrescanSelections.has(repo)) {
                 const sel = savedPrescanSelections.get(repo);
                 let title = "";
+                let label = "POOL";
+                let colorClass = "bg-blue-900 text-blue-200";
+
                 if (sel.compressed === null) {
-                    title = "ALL included (Full Repo)";
+                    title = "POOL: ALL included (Full Repo)";
+                    label = "POOL: ALL";
+                    colorClass = "bg-green-900 text-green-200";
                 } else {
                     const compressedCount = sel.compressed.length;
                     const rawCount = sel.raw ? sel.raw.size : 0;
                     title = `${rawCount} selected items (compressed to ${compressedCount} path rules)`;
+                    label = `POOL: ${compressedCount} paths`;
                 }
 
-                badgeHtml = `<span class="ml-auto text-[10px] bg-blue-900 text-blue-200 px-1 rounded" title="${title}">Selection</span>`;
+                badgeHtml = `<span class="ml-auto text-[10px] ${colorClass} px-1 rounded font-mono" title="${title}">${label}</span>`;
             }
 
             div.innerHTML = `
@@ -958,13 +965,56 @@ async function startJob(e) {
         // "gesamt" (Combined) implies a single batch job.
         const mode = document.getElementById('mode').value;
 
-        if (mode === 'pro-repo') {
+        // Helper to get include_paths from Pool if available
+        const getIncludePaths = (repoName) => {
+            if (savedPrescanSelections.has(repoName)) {
+                const sel = savedPrescanSelections.get(repoName);
+                // null means ALL, array means partial
+                return sel.compressed;
+            }
+            // Not in pool -> Global filters apply (path_filter/extensions in commonPayload)
+            // returning null here means "use global default" which is null in payload (ALL)
+            return null;
+        };
+
+        // Helper to check if pool has restrictive selection (Partial)
+        const hasRestrictivePoolSelection = (repo) => {
+            if (!savedPrescanSelections.has(repo)) return false;
+            const sel = savedPrescanSelections.get(repo);
+            // null = ALL -> not restrictive
+            if (sel === null || sel.compressed === null) return false;
+            return Array.isArray(sel.compressed) && sel.compressed.length > 0;
+        };
+
+        // Determine if we should force pro-repo due to restrictive pool selections
+        // If any selected repo has a specific pool selection that is PARTIAL, we MUST use per-repo payloads
+        // to ensure the correct paths are applied to the correct repo.
+        // A pool entry with "ALL" (null) is not restrictive and allows batch processing.
+        const hasRestrictiveSelection = selectedRepos.some(hasRestrictivePoolSelection);
+
+        if (mode === 'pro-repo' || hasRestrictiveSelection) {
+            if (hasRestrictiveSelection && mode !== 'pro-repo') {
+                console.log("Restrictive pool selection active: forcing pro-repo mode for safety.");
+            }
             // Split into individual jobs
             selectedRepos.forEach(repo => {
-                jobsToStart.push({ ...commonPayload, repos: [repo] });
+                const paths = getIncludePaths(repo);
+                const payload = {
+                    ...commonPayload,
+                    repos: [repo]
+                };
+                // Only set include_paths if it is a partial selection (array)
+                // If it is null (ALL or global default), we omit it to keep payload clean
+                // and rely on backend default (which is ALL).
+                if (Array.isArray(paths)) {
+                    payload.include_paths = paths;
+                }
+
+                jobsToStart.push(payload);
             });
         } else {
-            // Batch job
+            // Batch job (Standard, no restrictive pool overrides)
+            // Even if "ALL" is in the pool, it maps to standard batch behavior.
             jobsToStart.push({ ...commonPayload, repos: selectedRepos });
         }
 
@@ -1592,13 +1642,17 @@ function prescanRecommended() {
     renderPrescanTree();
 }
 
-async function applyPrescanSelectionReplace() {
-    await applyPrescanSelectionInternal(false);
+async function storePrescanSelectionReplace() {
+    await storePrescanSelectionInternal(false);
 }
 
-async function applyPrescanSelectionAppend() {
-    await applyPrescanSelectionInternal(true);
+async function storePrescanSelectionAppend() {
+    await storePrescanSelectionInternal(true);
 }
+
+// Deprecated aliases kept for compatibility if referenced in HTML
+async function applyPrescanSelectionReplace() { await storePrescanSelectionReplace(); }
+async function applyPrescanSelectionAppend() { await storePrescanSelectionAppend(); }
 
 async function removePrescanSelection() {
     const repo = prescanCurrentTree.root;
@@ -1614,9 +1668,11 @@ async function removePrescanSelection() {
     showNotification(`Removed selection pool for ${repo}`, 'info');
 }
 
-async function applyPrescanSelectionInternal(append) {
-    // Semantics: empty selection means "remove manual override" (back to standard behavior)
-    // prescanSelection === null means "ALL" (explicitly select entire repo)
+async function storePrescanSelectionInternal(append) {
+    // Semantics: "Store Selection" in Pool.
+    // - empty selection means "remove manual override" (back to standard behavior)
+    // - prescanSelection === null means "ALL" (explicitly select entire repo)
+    // This function MUST NOT trigger any merge or job execution.
 
     const repo = prescanCurrentTree.root;
     const prev = savedPrescanSelections.get(repo) || null;
@@ -1737,5 +1793,5 @@ async function applyPrescanSelectionInternal(append) {
 // Deprecated function name kept for backward compatibility
 async function applyPrescanSelection() {
     // Default to replace mode for backward compatibility
-    await applyPrescanSelectionReplace();
+    await storePrescanSelectionReplace();
 }
