@@ -958,13 +958,37 @@ async function startJob(e) {
         // "gesamt" (Combined) implies a single batch job.
         const mode = document.getElementById('mode').value;
 
-        if (mode === 'pro-repo') {
+        // Helper to get include_paths from Pool if available
+        const getIncludePaths = (repoName) => {
+            if (savedPrescanSelections.has(repoName)) {
+                const sel = savedPrescanSelections.get(repoName);
+                // null means ALL, array means partial
+                return sel.compressed;
+            }
+            // Not in pool -> Global filters apply (path_filter/extensions in commonPayload)
+            // returning null here means "use global default" which is null in payload (ALL)
+            return null;
+        };
+
+        // Determine if we should force pro-repo due to pool selections
+        // If any selected repo has a specific pool selection, we should use per-repo payloads
+        // to ensure the correct paths are applied to the correct repo.
+        const hasPoolSelection = selectedRepos.some(r => savedPrescanSelections.has(r));
+
+        if (mode === 'pro-repo' || hasPoolSelection) {
+            if (hasPoolSelection && mode !== 'pro-repo') {
+                console.log("Pool selection active: forcing pro-repo mode for safety.");
+            }
             // Split into individual jobs
             selectedRepos.forEach(repo => {
-                jobsToStart.push({ ...commonPayload, repos: [repo] });
+                jobsToStart.push({
+                    ...commonPayload,
+                    repos: [repo],
+                    include_paths: getIncludePaths(repo)
+                });
             });
         } else {
-            // Batch job
+            // Batch job (Standard, no pool overrides)
             jobsToStart.push({ ...commonPayload, repos: selectedRepos });
         }
 
@@ -1592,13 +1616,17 @@ function prescanRecommended() {
     renderPrescanTree();
 }
 
-async function applyPrescanSelectionReplace() {
-    await applyPrescanSelectionInternal(false);
+async function storePrescanSelectionReplace() {
+    await storePrescanSelectionInternal(false);
 }
 
-async function applyPrescanSelectionAppend() {
-    await applyPrescanSelectionInternal(true);
+async function storePrescanSelectionAppend() {
+    await storePrescanSelectionInternal(true);
 }
+
+// Deprecated aliases kept for compatibility if referenced in HTML
+async function applyPrescanSelectionReplace() { await storePrescanSelectionReplace(); }
+async function applyPrescanSelectionAppend() { await storePrescanSelectionAppend(); }
 
 async function removePrescanSelection() {
     const repo = prescanCurrentTree.root;
@@ -1614,9 +1642,11 @@ async function removePrescanSelection() {
     showNotification(`Removed selection pool for ${repo}`, 'info');
 }
 
-async function applyPrescanSelectionInternal(append) {
-    // Semantics: empty selection means "remove manual override" (back to standard behavior)
-    // prescanSelection === null means "ALL" (explicitly select entire repo)
+async function storePrescanSelectionInternal(append) {
+    // Semantics: "Store Selection" in Pool.
+    // - empty selection means "remove manual override" (back to standard behavior)
+    // - prescanSelection === null means "ALL" (explicitly select entire repo)
+    // This function MUST NOT trigger any merge or job execution.
 
     const repo = prescanCurrentTree.root;
     const prev = savedPrescanSelections.get(repo) || null;
@@ -1737,5 +1767,5 @@ async function applyPrescanSelectionInternal(append) {
 // Deprecated function name kept for backward compatibility
 async function applyPrescanSelection() {
     // Default to replace mode for backward compatibility
-    await applyPrescanSelectionReplace();
+    await storePrescanSelectionReplace();
 }

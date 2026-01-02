@@ -2368,8 +2368,10 @@ class MergerUI(object):
         # Merge → Explicit action from main view (never triggered from prescan)
         class PrescanSheet(ui.View):
             """
-            Custom View subclass that reliably resets the prescan guard on close.
-            ui.View's will_close() is called on all close paths: Apply, Cancel, Swipe-Down, errors.
+            Custom View subclass.
+            Note: We avoid relying solely on will_close() for critical state reset due to
+            potential delegate limitations/bugs in some Pythonista versions.
+            State is reset explicitly in action handlers.
             """
             def __init__(self, parent):
                 super().__init__()
@@ -2379,10 +2381,14 @@ class MergerUI(object):
                 self.frame = (0, 0, 600, 800)
 
             def will_close(self):
-                """Reset guard flag when prescan sheet closes."""
-                self._parent._prescan_active = False
+                # Fallback safety net
+                if self._parent._prescan_active:
+                     self._parent._prescan_active = False
 
         sheet = PrescanSheet(self)
+
+        def reset_guard():
+            self._prescan_active = False
 
         # Track selection mode explicitly for better state management
         # This helps prevent crashes when transitioning between ALL/PARTIAL/NONE states
@@ -2563,6 +2569,7 @@ class MergerUI(object):
                 self.save_last_state()
                 if console:
                     console.hud_alert(f"Removed selection pool for {root_name}", "success", 1.5)
+                reset_guard()
                 sheet.close()
                 return
             
@@ -2645,6 +2652,7 @@ class MergerUI(object):
                 if console:
                     console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
             
+            reset_guard()
             sheet.close()
             # No auto-merge!
         
@@ -2665,7 +2673,7 @@ class MergerUI(object):
         btn_cancel.background_color = "#444444"
         btn_cancel.tint_color = "white"
         btn_cancel.corner_radius = 6
-        btn_cancel.action = lambda s: sheet.close()
+        btn_cancel.action = lambda s: (reset_guard(), sheet.close())
         sheet.add_subview(btn_cancel)
         
         # Replace button (right side)
