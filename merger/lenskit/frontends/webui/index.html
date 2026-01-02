@@ -15,7 +15,6 @@
             <nav class="flex space-x-2">
                  <button onclick="switchTab('job')" id="tab-job" class="px-3 py-1 rounded bg-blue-600 text-white font-bold text-sm">Merge</button>
                  <button onclick="switchTab('atlas')" id="tab-atlas" class="px-3 py-1 rounded bg-gray-700 text-gray-300 hover:text-white text-sm">Atlas</button>
-                 <button onclick="togglePoolPanel()" class="px-3 py-1 rounded bg-gray-700 text-gray-300 hover:text-white text-sm border border-gray-600" title="Show Selection Pool">Pool</button>
             </nav>
             <div class="flex items-center bg-gray-800 rounded p-1 border border-gray-700">
                 <span class="text-xs text-gray-500 px-2 uppercase font-bold">Token</span>
@@ -40,11 +39,6 @@
                 <div id="setsList" class="flex flex-wrap gap-2 min-h-[20px]">
                     <!-- Sets populated by JS -->
                 </div>
-            </div>
-
-            <!-- Selection Pool (New) -->
-            <div id="selectionPool" class="mb-4 hidden border-b border-gray-700 pb-2">
-                <!-- Populated by JS -->
             </div>
 
             <div class="mb-2 text-right">
@@ -109,10 +103,17 @@
                 </div>
 
                 <div>
-                     <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Filter</label>
+                     <div class="flex justify-between items-center mb-1">
+                        <label class="block text-xs font-bold uppercase text-gray-500">Filter</label>
+                        <button type="button" onclick="togglePoolPanel()" class="text-[10px] bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded text-gray-300 border border-gray-600" title="Toggle Selection Pool">Pool</button>
+                     </div>
                      <div class="grid grid-cols-2 gap-4">
                          <input type="text" id="pathFilter" placeholder="Path (e.g. src/)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
                          <input type="text" id="extFilter" placeholder="Ext (e.g. .py,.md)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                     </div>
+                     <!-- Selection Pool Panel -->
+                     <div id="selectionPool" class="mt-2 hidden border border-gray-700 rounded p-2 bg-gray-800 shadow-inner">
+                        <!-- Populated by JS -->
                      </div>
                 </div>
 

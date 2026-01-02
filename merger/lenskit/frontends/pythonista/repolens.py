@@ -2768,8 +2768,9 @@ class MergerUI(object):
         sheet.add_subview(btn_cancel)
         
         # Replace button (right side)
-        btn_replace = ui.Button(title="Replace")
-        btn_replace.frame = (sheet.width - 230, bar_y, 110, 40)
+        # "Store to Pool (Replace)" - abbreviated for mobile UI if needed, but clarity is prioritized
+        btn_replace = ui.Button(title="Store (Replace)")
+        btn_replace.frame = (sheet.width - 250, bar_y, 120, 40)
         btn_replace.flex = "LT" # Left margin flex, Top margin flex
         btn_replace.background_color = "#007aff"
         btn_replace.tint_color = "white"
@@ -2778,8 +2779,9 @@ class MergerUI(object):
         sheet.add_subview(btn_replace)
         
         # Append button (right side)
-        btn_append = ui.Button(title="Append")
-        btn_append.frame = (sheet.width - 110, bar_y, 100, 40)
+        # "Store to Pool (Append)"
+        btn_append = ui.Button(title="Store (Append)")
+        btn_append.frame = (sheet.width - 120, bar_y, 110, 40)
         btn_append.flex = "LT" # Left margin flex, Top margin flex
         btn_append.background_color = "#34c759"
         btn_append.tint_color = "white"
@@ -2855,19 +2857,35 @@ class MergerUI(object):
             tv.background_color = "#111111"
             tv.separator_color = "#333333"
 
+            # Helper to format info
+            def format_pool_info(data):
+                if not data or not isinstance(data, dict):
+                    return "Invalid state"
+
+                # Check for ALL state (both None)
+                raw = data.get("raw")
+                compressed = data.get("compressed")
+
+                if raw is None and compressed is None:
+                    return "ALL"
+
+                # Partial state
+                raw_count = len(raw) if raw else 0
+                compressed_count = len(compressed) if compressed else 0
+                return f"Partial: {raw_count} files / {compressed_count} rules"
+
             # Convert pool to list
             items = []
             for repo, data in pool.items():
-                info = "ALL"
-                if data and isinstance(data, dict):
-                    if data.get("raw") is not None:
-                        count = len(data["raw"])
-                        info = f"{count} files"
+                info = format_pool_info(data)
                 items.append({"repo": repo, "info": info})
 
             items.sort(key=lambda x: x["repo"])
 
             class PoolDS(object):
+                def __init__(self, parent_ui):
+                    self.parent = parent_ui
+
                 def tableview_number_of_rows(self, tv, section):
                     return len(items)
 
@@ -2888,27 +2906,17 @@ class MergerUI(object):
                     repo = items[row]["repo"]
                     if repo in pool:
                         del pool[repo]
-                        # Persist immediately
-                        # self is MergerUI instance
-                        # But here we are in inner class. Need access to self.
-                        # We can attach save callback or pass self.
-                        pass # handled below in wrapper
+                        # Persist immediately using parent reference
+                        self.parent.save_last_state()
+                        self.parent._update_repo_info()
+
                     items.pop(row)
                     tv.delete_rows([row])
 
-            ds = PoolDS()
+            ds = PoolDS(self)
             tv.data_source = ds
             tv.delegate = ds
             sheet.add_subview(tv)
-
-            # We need to save state on delete.
-            # Let's monkey-patch the delete method to call save.
-            original_delete = ds.tableview_delete
-            def delete_wrapper(tv, section, row):
-                original_delete(tv, section, row)
-                self.save_last_state()
-                self._update_repo_info()
-            ds.tableview_delete = delete_wrapper
 
             # Bottom Bar
             bar = ui.View(frame=(0, 540, 500, 60))
