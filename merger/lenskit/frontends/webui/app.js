@@ -219,11 +219,12 @@ function loadSavedPrescanSelections() {
         const raw = JSON.parse(localStorage.getItem(PRESCAN_SAVED_KEY) || "{}");
         const m = new Map();
         for (const [repo, obj] of Object.entries(raw)) {
-            // raw can be null (ALL) or array
+            // Invariant Check: raw must be rehydrated to Set or null
             let rawSet = null;
-            if (obj.raw !== null) {
+            if (obj.raw !== null) { // null = ALL
                 const rawList = Array.isArray(obj.raw) ? obj.raw : [];
-                rawSet = new Set(rawList.map(normalizePath).filter(p => p !== null));
+                // Filter out non-strings to prevent corruption
+                rawSet = new Set(rawList.filter(x => typeof x === 'string').map(normalizePath).filter(p => p !== null));
             }
 
             // compressed can be null (ALL) or array

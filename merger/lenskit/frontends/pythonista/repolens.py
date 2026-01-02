@@ -2616,37 +2616,67 @@ class MergerUI(object):
                     # ALL selected - ALL overrides everything
                     self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
                 else:
-                    # Partial selection - union both raw and compressed
+                    # Partial selection - union raw, then RE-COMPRESS
+                    merged_raw = None
+
                     if existing and isinstance(existing, dict):
                         existing_raw = existing.get("raw")
-                        existing_compressed = existing.get("compressed")
-                        
-                        if existing_raw is None and existing_compressed is None:
+                        if existing_raw is None:
                             # Existing was ALL. Union(ALL, Partial) = ALL
                             self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
+                            self.save_last_state()
+                            if console: console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
+                            reset_guard()
+                            sheet.close()
+                            return
                         else:
-                            # Union of existing and new for both fields
-                            # DEFENSIVE: Filter existing_raw to ensure files-only contract
-                            # (protects against legacy/corrupted data where raw might contain dirs)
-                            file_paths_set = {normalize_path(item["path"]) for item in flat_items if item["type"] == "file"}
-                            filtered_existing_raw = [p for p in (existing_raw or []) if p in file_paths_set]
-                            
-                            merged_raw = set(filtered_existing_raw)
-                            merged_raw.update(raw_paths)
-                            
-                            merged_compressed = set(existing_compressed or [])
-                            merged_compressed.update(compressed_paths)
-                            
-                            self.saved_prescan_selections[root_name] = {
-                                "raw": sorted(list(merged_raw)) if merged_raw else None,
-                                "compressed": sorted(list(merged_compressed)) if merged_compressed else None
-                            }
+                            # Union of existing and new raw paths
+                            merged_raw = set(existing_raw)
+                            if raw_paths:
+                                merged_raw.update(raw_paths)
                     else:
-                        # No existing or legacy format - just save current
+                        # No existing -> just new raw
+                        merged_raw = set(raw_paths) if raw_paths else None
+
+                    # If we have a merged raw set, re-compress using the tree
+                    if merged_raw and len(merged_raw) > 0:
+                        new_compressed = []
+                        # We need to simulate 'selected' state for the tree traversal by checking merged_raw
+                        # Re-use tree traversal logic but with explicit check against merged_raw
+                        # Note: flat_items contains all nodes.
+
+                        # Build a map for O(1) lookup
+                        raw_set = set(merged_raw)
+
+                        def is_node_fully_selected(n):
+                            if n["type"] == "file":
+                                return n["path"] in raw_set
+                            if n.get("children"):
+                                return all(is_node_fully_selected(c) for c in n["children"])
+                            return False # Empty dir
+
+                        def collect_recompress(n):
+                            if n["type"] == "file":
+                                if n["path"] in raw_set:
+                                    new_compressed.append(n["path"])
+                            elif n["type"] == "dir":
+                                if is_node_fully_selected(n):
+                                    new_compressed.append(n["path"])
+                                else:
+                                    if n.get("children"):
+                                        for c in n["children"]:
+                                            collect_recompress(c)
+
+                        collect_recompress(root_node)
+
                         self.saved_prescan_selections[root_name] = {
-                            "raw": raw_paths if raw_paths else None,
-                            "compressed": compressed_paths if compressed_paths else None
+                            "raw": sorted(list(merged_raw)),
+                            "compressed": new_compressed
                         }
+                    else:
+                        # Empty result -> remove
+                        if root_name in self.saved_prescan_selections:
+                            del self.saved_prescan_selections[root_name]
                 
                 self.save_last_state()
                 if console:
