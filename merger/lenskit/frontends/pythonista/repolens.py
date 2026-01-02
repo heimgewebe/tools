@@ -3229,11 +3229,14 @@ class MergerUI(object):
                     if paths is not None and isinstance(paths, list) and len(paths) > 0:
                         restrictive_repos.append(name)
 
+                # Dynamic split_mode based on actual execution logic
+                is_split_mode = has_restrictive
+
                 lines = [
                     "---",
                     "pool_status:",
-                    f"  restrictive_repos: {json.dumps(restrictive_repos)}",
-                    "  split_mode: true",
+                    f"  restrictive_repos: [{', '.join(restrictive_repos)}]",
+                    f"  split_mode: {str(is_split_mode).lower()}",
                     "---",
                     "# Bundle Merge Report",
                     f"- Generated: {now_ts}",
