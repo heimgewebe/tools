@@ -3222,7 +3222,19 @@ class MergerUI(object):
                 now_ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
                 bundle_path = merges_dir / f"bundle-merge_{now_ts}.md"
 
+                # Identify restrictive repos for metadata
+                restrictive_repos = []
+                for name in selected:
+                    paths = get_pool_include_paths(name)
+                    if paths is not None and isinstance(paths, list) and len(paths) > 0:
+                        restrictive_repos.append(name)
+
                 lines = [
+                    "---",
+                    "pool_status:",
+                    f"  restrictive_repos: {json.dumps(restrictive_repos)}",
+                    "  split_mode: true",
+                    "---",
                     "# Bundle Merge Report",
                     f"- Generated: {now_ts}",
                     f"- Parts: {len(all_out_paths)}",
@@ -3243,8 +3255,16 @@ class MergerUI(object):
         count = len(all_out_paths)
         primary = _pick_primary_artifact(all_out_paths)
 
+        # Enforce bundle as primary if present
+        for p in all_out_paths:
+            if "bundle-merge" in p.name:
+                primary = p
+                break
+
         if count == 1 and primary:
             msg = f"Merge generated: {primary.name}"
+        elif primary and count > 1:
+            msg = f"Merge generated: {primary.name} (+{count-1} parts)"
         else:
             msg = f"Generated {count} artifacts"
 
