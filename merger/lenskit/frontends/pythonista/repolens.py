@@ -159,13 +159,24 @@ def normalize_path(p: str) -> str:
 def normalize_repo_id(s: str) -> str:
     """
     Normalize repository identifiers for robust matching.
-    Strips leading './' and trailing '/'.
+    Handles common drift forms:
+      - leading './'
+      - trailing '/'
+      - backslashes
+      - accidental path inputs (hub/foo -> foo)
+      - case drift (pragmatic on iOS)
     """
-    s = s.strip()
-    if s.startswith("./"):
+    s = str(s).strip().replace("\\", "/")
+    # Drop leading "./" repeatedly
+    while s.startswith("./"):
         s = s[2:]
-    if s.endswith("/"):
-        s = s[:-1]
+    # Drop trailing slashes
+    s = s.rstrip("/")
+    # If a path slipped in, keep last segment
+    if "/" in s:
+        s = s.split("/")[-1]
+    # Pragmatic: collapse case drift
+    s = s.lower()
     return s
 
 
@@ -3052,20 +3063,19 @@ class MergerUI(object):
         tv = self.tv
         rows = tv.selected_rows or []
 
-        selected_repos = []
+        selected_repos: List[str] = []
         selection_source = "default(all)"
 
-        # Pool Normalization Map
-        # repo_map: normalized_name -> actual_repo_name
-        repo_map = {normalize_repo_id(r): r for r in self.repos}
+        # Build normalized maps once (avoid N^2 drift pain)
+        repo_norm_map = {normalize_repo_id(r): r for r in self.repos}
+        pool_raw = getattr(self, "saved_prescan_selections", None) or {}
+        pool_norm = {}
+        if isinstance(pool_raw, dict):
+            for k, v in pool_raw.items():
+                pool_norm[normalize_repo_id(k)] = v
 
-        pool_active_repos = []
-        # Check pool for valid repos matching current hub
-        if self.saved_prescan_selections:
-            for p_key in self.saved_prescan_selections.keys():
-                norm_key = normalize_repo_id(p_key)
-                if norm_key in repo_map:
-                    pool_active_repos.append(repo_map[norm_key])
+        # Pool repos that actually exist in current hub
+        pool_active_repos = [repo_norm_map[nk] for nk in pool_norm.keys() if nk in repo_norm_map]
 
         if rows:
             # Explicit UI selection
@@ -3118,27 +3128,18 @@ class MergerUI(object):
         if plan_only and code_only:
             code_only = False
 
-        # Helper to get include_paths from pool with NORMALIZATION
+        # Helper to get include_paths from pool with normalized O(1) lookup
         def get_pool_include_paths(repo_name):
-            norm_name = normalize_repo_id(repo_name)
-
-            # Find matching entry in pool (keys might be unnormalized)
-            matched_entry = None
-            for p_key, entry in self.saved_prescan_selections.items():
-                if normalize_repo_id(p_key) == norm_name:
-                    matched_entry = entry
-                    break
-
-            if not matched_entry:
+            entry = pool_norm.get(normalize_repo_id(repo_name))
+            if not entry:
                 return None # Default behavior (global filters apply)
-
-            if isinstance(matched_entry, dict):
+            if isinstance(entry, dict):
                 # Structured: compressed is list (partial) or None (ALL)
-                compressed = matched_entry.get("compressed")
+                compressed = entry.get("compressed")
                 # Treat empty list as "no override" (same as None/ALL)
                 return compressed if (compressed and len(compressed) > 0) else None
             # Legacy fallback
-            return matched_entry if matched_entry else None
+            return entry if entry else None
 
         # Calculate Stats for UX
         total_paths = 0
@@ -3150,9 +3151,13 @@ class MergerUI(object):
                 repos_with_filters += 1
 
         # HUD / Log Feedback
+        pool_keys_total = len(pool_norm) if isinstance(pool_norm, dict) else 0
+        pool_keys_matched = len(pool_active_repos)
         msg = f"Selection: {selection_source.upper()} ({len(selected_repos)} repos)"
-        if selection_source == "pool" or repos_with_filters > 0:
-             msg += f" / {total_paths} paths"
+        if selection_source == "pool":
+            msg += f" / pool matched {pool_keys_matched}/{pool_keys_total}"
+        if repos_with_filters > 0:
+            msg += f" / {total_paths} paths"
 
         if console:
             console.hud_alert(msg, "info", 1.5)
