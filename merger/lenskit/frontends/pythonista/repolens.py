@@ -1604,14 +1604,15 @@ class MergerUI(object):
             # interpret intent as "merge the pool" (not "scan everything").
             pool = getattr(self, "saved_prescan_selections", None) or {}
             if isinstance(pool, dict) and len(pool) > 0:
-                pool_repos = [r for r in pool.keys() if r in self.repos]
+                # Keep UI order (self.repos) to reduce surprise
+                pool_repos = [r for r in self.repos if r in pool]
                 if pool_repos:
                     try:
                         if console:
                             console.hud_alert(f"Pool active: {len(pool_repos)} repos", duration=0.8)
                     except Exception:
                         pass
-                    return sorted(pool_repos)
+                    return pool_repos
 
             # Default fallback: no explicit selection, no pool -> treat as ALL
             return list(self.repos)
