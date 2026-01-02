@@ -3042,123 +3042,154 @@ class MergerUI(object):
         if plan_only and code_only:
             code_only = False
 
-        summaries = []
-        total = len(selected)
-        for i, name in enumerate(selected, start=1):
-            root = self.hub / name
-            if not root.is_dir():
-                continue
-            # Mini-Progress + UI-Yield (hilft spürbar bei Pythonista)
-            if console:
-                try:
-                    console.hud_alert(f"Scanning {i}/{total}: {name}", duration=0.6)
-                except Exception:
-                    pass
-            try:
-                import ui as _ui
-                # yield to main loop without slowing down much
-                _ui.delay(lambda: None, 0.0)
-            except Exception:
-                pass
+        # Helper to get include_paths from pool
+        def get_pool_include_paths(repo_name):
+            entry = self.saved_prescan_selections.get(repo_name)
+            if not entry:
+                return None # Default behavior (global filters apply)
+            if isinstance(entry, dict):
+                # Structured: compressed is list (partial) or None (ALL)
+                return entry.get("compressed") # Returns list or None
+            # Legacy fallback
+            return entry if entry else None
 
-            # Resolve include_paths for this specific repo
-            # Check pool - use compressed field for backend efficiency
-            # Note: None can mean either "explicit ALL" or "not in pool" - we distinguish by checking key existence
-            pool_entry = self.saved_prescan_selections.get(name)
-
-            use_include_paths = None
-            if pool_entry:
-                if isinstance(pool_entry, dict):
-                    # Structured format - use compressed for backend
-                    compressed = pool_entry.get("compressed")
-                    if compressed is None:
-                        # Explicit ALL -> include_paths = None (meaning all)
-                        use_include_paths = None
-                    else:
-                        # List of compressed paths
-                        use_include_paths = compressed
-                else:
-                    # Legacy format (shouldn't happen after migration)
-                    use_include_paths = pool_entry if pool_entry else None
-            else:
-                # Not in pool -> Default behavior (All, filtered by ext/path_filter)
-                use_include_paths = None
-
-            summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
-            summaries.append(summary)
-
-        if not summaries:
-            if console:
-                console.alert("repoLens", "No valid repos found.", "OK", hide_cancel_button=True)
-            return
+        # Check for restrictive pool entries to decide on execution strategy
+        has_restrictive = False
+        for name in selected:
+            paths = get_pool_include_paths(name)
+            if paths is not None and isinstance(paths, list):
+                has_restrictive = True
+                break
 
         merges_dir = get_merges_dir(self.hub)
+        all_out_paths = []
 
-        # Delta Logic Injection (Port from CLI to UI)
-        # If delta_reports is enabled, try to find metadata to inject.
-        delta_meta = None
-        if self.extras_config.delta_reports and summaries and len(summaries) == 1:
-            repo_name = summaries[0]["name"]
-            try:
-                mod = _load_repolens_extractor_module()
-                if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
-                    diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
-                    if diff_path:
-                        delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
-                        # Optionally notify user via HUD that delta was found?
-                        # if console: console.hud_alert("Delta found")
-            except Exception as e:
-                print(f"[repoLens] Warning: Could not extract delta metadata: {e}", file=sys.stderr)
+        # Execution Strategy
+        # If restrictive pool entries exist, we must split execution per repo to ensure
+        # correct include_paths are respected and not mixed with global filters.
+        # This matches WebUI "force pro-repo" logic.
 
-        artifacts = write_reports_v2(
-            merges_dir,
-            self.hub,
-            summaries,
-            detail,
-            mode,
-            max_bytes,
-            plan_only,
-            code_only,
-            split_size,
-            debug=False,
-            path_filter=path_contains,
-            ext_filter=extensions or None,
-            extras=self.extras_config,
-            delta_meta=delta_meta,
-        )
+        execution_list = []
+        if has_restrictive:
+            # Force sequential processing per repo
+            for name in selected:
+                execution_list.append([name])
+            if console:
+                console.hud_alert("Pool active: Splitting jobs per repo")
+        else:
+            # Standard batch processing (all selected together)
+            execution_list.append(selected)
 
-        out_paths = artifacts.get_all_paths()
-        if not out_paths:
+        total_batches = len(execution_list)
+
+        for b_idx, batch_repos in enumerate(execution_list, start=1):
+            summaries = []
+
+            # Scan phase for this batch
+            for i, name in enumerate(batch_repos, start=1):
+                root = self.hub / name
+                if not root.is_dir():
+                    continue
+
+                # Feedback
+                if console:
+                    try:
+                        console.hud_alert(f"Scanning {name} ({i}/{len(batch_repos)})", duration=0.6)
+                    except Exception:
+                        pass
+                try:
+                    import ui as _ui
+                    _ui.delay(lambda: None, 0.0)
+                except Exception:
+                    pass
+
+                # Resolve paths
+                use_include_paths = get_pool_include_paths(name)
+
+                # If we are in a restrictive split-job scenario, and this repo has NO pool entry,
+                # it uses global defaults (None). If it HAS an entry, it uses that.
+                # scan_repo handles include_paths=None as "scan all".
+
+                summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
+                summaries.append(summary)
+
+            if not summaries:
+                continue
+
+            # Delta Logic Injection (Batch-aware)
+            delta_meta = None
+            if self.extras_config.delta_reports and len(summaries) == 1:
+                repo_name = summaries[0]["name"]
+                try:
+                    mod = _load_repolens_extractor_module()
+                    if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
+                        diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
+                        if diff_path:
+                            delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
+                except Exception as e:
+                    print(f"[repoLens] Warning: Could not extract delta metadata: {e}", file=sys.stderr)
+
+            # Generate Report for this batch
+            # If splitting jobs, we likely want "pro-repo" mode for the output to be named correctly,
+            # or if it was "gesamt" but forced split, we get one file per repo anyway.
+            # We preserve the user's requested mode unless we forced a split, in which case effectively it behaves like pro-repo
+            # but write_reports_v2 needs to know how to name it.
+            # If has_restrictive is True, we are iterating 1-by-1. calling write_reports_v2 with 1 summary.
+            # Mode "gesamt" with 1 summary produces 1 file. Mode "pro-repo" with 1 summary produces 1 file.
+            # So passing the user's `mode` is fine.
+
+            # However, if we forced split, we should probably ensure `path_filter` passed to write_reports
+            # doesn't confuse the header if we are using specific include_paths.
+            # But `write_reports_v2` uses `path_filter` just for metadata display usually.
+            # We pass it through.
+
+            artifacts = write_reports_v2(
+                merges_dir,
+                self.hub,
+                summaries,
+                detail,
+                mode,
+                max_bytes,
+                plan_only,
+                code_only,
+                split_size,
+                debug=False,
+                path_filter=path_contains,
+                ext_filter=extensions or None,
+                extras=self.extras_config,
+                delta_meta=delta_meta,
+            )
+
+            all_out_paths.extend(artifacts.get_all_paths())
+
+            # Force close intermediate files
+            force_close_files(artifacts.get_all_paths())
+
+        if not all_out_paths:
             if console:
                 console.alert("repoLens", "No report generated.", "OK", hide_cancel_button=True)
             else:
                 print("No report generated.")
             return
 
-        # Force close any tabs that might have opened
-        force_close_files(out_paths)
+        # Summary Feedback
+        count = len(all_out_paths)
+        primary = _pick_primary_artifact(all_out_paths)
 
-        primary = _pick_primary_artifact(out_paths)
-        human_md = _pick_human_md(out_paths)
-        if primary and human_md and primary != human_md:
-            msg = f"Merge generated: {primary.name} (human: {human_md.name})"
-            status = "success"
-        elif primary:
+        if count == 1:
             msg = f"Merge generated: {primary.name}"
-            status = "success"
         else:
-            msg = "Merge failed: no artifacts returned"
-            status = "error"
+            msg = f"Generated {count} artifacts"
 
         if console:
             try:
-                console.hud_alert(msg, status, 1.2 if status == "success" else 1.5)
+                console.hud_alert(msg, "success", 1.5)
             except Exception as e:
                 sys.stderr.write(f"Warning: Failed to show HUD alert (falling back to alert): {e}\n")
                 console.alert("repoLens", msg, "OK", hide_cancel_button=True)
         else:
             print(f"repoLens: {msg}")
-            for p in out_paths:
+            for p in all_out_paths:
                 print(f"  - {p.name}")
 
 
