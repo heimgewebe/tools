@@ -3049,7 +3049,10 @@ class MergerUI(object):
                 return None # Default behavior (global filters apply)
             if isinstance(entry, dict):
                 # Structured: compressed is list (partial) or None (ALL)
-                return entry.get("compressed") # Returns list or None
+                compressed = entry.get("compressed")
+                # Treat empty list as "no override" (same as None/ALL)
+                # to avoid accidental "scan nothing" state.
+                return compressed if (compressed and len(compressed) > 0) else None
             # Legacy fallback
             return entry if entry else None
 
@@ -3057,7 +3060,7 @@ class MergerUI(object):
         has_restrictive = False
         for name in selected:
             paths = get_pool_include_paths(name)
-            if paths is not None and isinstance(paths, list):
+            if paths is not None and isinstance(paths, list) and len(paths) > 0:
                 has_restrictive = True
                 break
 
@@ -3176,7 +3179,7 @@ class MergerUI(object):
         count = len(all_out_paths)
         primary = _pick_primary_artifact(all_out_paths)
 
-        if count == 1:
+        if count == 1 and primary:
             msg = f"Merge generated: {primary.name}"
         else:
             msg = f"Generated {count} artifacts"
