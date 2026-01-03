@@ -21,6 +21,10 @@ class FileResponse(Response):
         data = pathlib.Path(path).read_bytes()
         super().__init__(data, status_code=status_code, media_type="application/octet-stream")
 
+class HTMLResponse(Response):
+    def __init__(self, content="", status_code=200):
+        super().__init__(content.encode() if isinstance(content, str) else content, status_code=status_code, media_type="text/html")
+
 class StreamingResponse(Response):
     def __init__(self, content_iterable, status_code=200, media_type="text/plain"):
         import asyncio

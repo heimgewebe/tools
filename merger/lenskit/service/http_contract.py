@@ -37,6 +37,12 @@ class FileResponder(Protocol):
     def __call__(self, path: str, status_code: int = 200) -> Any: ...
 
 
+class HTMLResponder(Protocol):
+    """Callable that returns an HTML response."""
+
+    def __call__(self, content: str, status_code: int = 200) -> Any: ...
+
+
 class DependencyFactory(Protocol):
     """Represents FastAPI dependency declaration helpers (Depends/Query/Body)."""
 
@@ -57,5 +63,6 @@ class HTTPBindings:
     CORSMiddleware: type
     StreamingResponse: StreamingResponder
     FileResponse: FileResponder
+    HTMLResponse: HTMLResponder
     run_in_threadpool: Callable[..., Awaitable[Any]]
 
