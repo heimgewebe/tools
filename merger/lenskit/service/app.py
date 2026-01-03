@@ -17,6 +17,7 @@ from datetime import datetime
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
 from .jobstore import JobStore
 from .runner import JobRunner
+from .logging_provider import LogProvider, FileLogProvider
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name
 from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token
 from ..adapters.atlas import AtlasScanner, render_atlas_md
@@ -110,7 +111,7 @@ async def add_cache_control_header(request: Request, call_next):
         # "no-store" is the strongest directive.
         # "must-revalidate" is implied by no-store in modern browsers, but harmless.
         # We simplify to no-store but keep Pragma/Expires for legacy/proxy robustness.
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
 
@@ -122,6 +123,7 @@ class ServiceState:
     merges_dir: Path = None
     job_store: JobStore = None
     runner: JobRunner = None
+    log_provider: LogProvider = None
 
 state = ServiceState()
 
@@ -130,6 +132,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
+    state.log_provider = FileLogProvider(state.job_store)
 
     # Configure Security
     sec = get_security_config()
@@ -493,7 +496,8 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
                 pass
 
             # Read logs from file (async safe)
-            logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
+            # Use abstracted provider to allow deterministic mocking in tests
+            logs = await run_in_threadpool(state.log_provider.read_log_lines, job_id)
 
             if len(logs) > last_idx:
                 for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
@@ -507,7 +511,7 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
 
             if current_job.status in ["succeeded", "failed", "canceled"]:
                 # Ensure we sent everything
-                logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
+                logs = await run_in_threadpool(state.log_provider.read_log_lines, job_id)
                 if len(logs) > last_idx:
                     for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
                         yield f"id: {i}\ndata: {line}\n\n"

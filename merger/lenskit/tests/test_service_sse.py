@@ -23,20 +23,26 @@ def test_sse_contract(service_client, monkeypatch):
 
     # Mock store retrieval.
     # We use monkeypatch to avoid global side effects.
-    # Must mock 'get_job' and 'read_log_lines'.
+    # Must mock 'get_job' and inject MockLogProvider.
 
     def fake_get_job(jid):
         if jid == job_id:
             return job
         return None
 
-    def fake_read_log_lines(jid):
-        if jid == job_id:
-            return job.logs
-        return []
-
     monkeypatch.setattr(ctx.store, "get_job", fake_get_job)
-    monkeypatch.setattr(ctx.store, "read_log_lines", fake_read_log_lines)
+
+    # Inject MockLogProvider
+    from merger.lenskit.service.logging_provider import MockLogProvider
+    mock_provider = MockLogProvider({job_id: job.logs})
+    # We need to set this on the state object used by the app
+    from merger.lenskit.service.app import state
+    # We preserve the old provider to restore it later (though test isolation usually handles this via process/reload,
+    # but here we are in same process).
+    # Better: Rely on ctx fixture if it exposed state, but it exposes store/runner.
+    # We can access state directly as imported.
+    old_provider = state.log_provider
+    state.log_provider = mock_provider
 
     url = f"/api/jobs/{job_id}/logs"
 
@@ -91,6 +97,9 @@ def test_sse_contract(service_client, monkeypatch):
         assert "id: 2" not in decoded
         assert "id: 3" in decoded
 
+    # Restore provider
+    state.log_provider = old_provider
+
 def test_sse_edge_cases(service_client, monkeypatch):
     """
     Validates explicit edge-case handling for SSE.
@@ -114,13 +123,19 @@ def test_sse_edge_cases(service_client, monkeypatch):
             return job
         return None
 
-    def fake_read_log_lines(jid):
+    def fake_get_job(jid):
         if jid == job_id:
-            return job.logs
-        return []
+            return job
+        return None
 
     monkeypatch.setattr(ctx.store, "get_job", fake_get_job)
-    monkeypatch.setattr(ctx.store, "read_log_lines", fake_read_log_lines)
+
+    # Inject MockLogProvider
+    from merger.lenskit.service.logging_provider import MockLogProvider
+    mock_provider = MockLogProvider({job_id: job.logs})
+    from merger.lenskit.service.app import state
+    old_provider = state.log_provider
+    state.log_provider = mock_provider
 
     url = f"/api/jobs/{job_id}/logs"
 
@@ -167,3 +182,6 @@ def test_sse_edge_cases(service_client, monkeypatch):
         # Should not resend line 3
         assert not any("data: line" in l for l in decoded)
         assert "event: end" in decoded
+
+    # Restore provider
+    state.log_provider = old_provider
