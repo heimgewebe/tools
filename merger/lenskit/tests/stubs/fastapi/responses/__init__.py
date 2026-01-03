@@ -23,7 +23,8 @@ class FileResponse(Response):
 
 class HTMLResponse(Response):
     def __init__(self, content="", status_code=200):
-        super().__init__(content.encode() if isinstance(content, str) else content, status_code=status_code, media_type="text/html")
+        encoded_content = content.encode() if isinstance(content, str) else content
+        super().__init__(encoded_content, status_code=status_code, media_type="text/html")
 
 class StreamingResponse(Response):
     def __init__(self, content_iterable, status_code=200, media_type="text/plain"):
