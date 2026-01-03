@@ -55,6 +55,25 @@ def _is_loopback_host(host: str) -> bool:
     except Exception:
         return False
 
+# Cache-Control Middleware to support aggressive busting for WebUI
+# This is critical for preventing browsers (Brave/Chrome) from serving stale UI
+@app.middleware("http")
+async def add_cache_control_header(request: Request, call_next):
+    response = await call_next(request)
+
+    # Target specific UI assets and the root index
+    # Note: request.url.path includes the leading slash
+    path = request.url.path
+    if path in ["/", "/index.html", "/app.js", "/style.css"]:
+        # "no-store" is the strongest directive.
+        # "must-revalidate" is implied by no-store in modern browsers, but harmless.
+        # We simplify to no-store but keep Pragma/Expires for legacy/proxy robustness.
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+
+    return response
+
 # Global State
 class ServiceState:
     hub: Path = None

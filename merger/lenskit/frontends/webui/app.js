@@ -1,5 +1,69 @@
 // repoLens UI Logic
 
+// Single Source of Truth from index.html (fallback to dev if missing)
+const RLENS_UI_VERSION = window.__RLENS_UI_VERSION__ || "dev";
+console.info(`[rLens] UI Version: ${RLENS_UI_VERSION}`);
+
+// --- State Migration & Cache Busting ---
+try {
+    const storedVersion = localStorage.getItem('rlens_state_version');
+    if (storedVersion !== RLENS_UI_VERSION) {
+        // RELOAD LOOP GUARD: Check if we just reset this version in this session
+        if (sessionStorage.getItem('rlens_reset_once') === RLENS_UI_VERSION) {
+            console.warn(`[rLens] Reload loop detected for version ${RLENS_UI_VERSION}. Aborting automatic reset/reload.`);
+            // Show a non-blocking UI warning after DOM load
+            window.addEventListener('DOMContentLoaded', () => {
+                const warn = document.createElement('div');
+                warn.className = "fixed bottom-0 left-0 right-0 bg-red-600 text-white text-center p-2 z-50 text-xs font-bold";
+                warn.innerHTML = "Warning: State reset failed or blocked. UI may be unstable. <button onclick='localStorage.clear();location.reload()' class='underline ml-2'>Force Reset</button>";
+                document.body.appendChild(warn);
+            });
+        } else {
+            console.warn(`[rLens] Version mismatch (Stored: ${storedVersion} != Current: ${RLENS_UI_VERSION}). Performing hard reset.`);
+
+            // Set guard flag BEFORE actions
+            sessionStorage.setItem('rlens_reset_once', RLENS_UI_VERSION);
+
+            // 1. Clear LocalStorage
+            localStorage.clear();
+
+            // 2. Clear IndexedDB (Safer: rlens_ prefix only)
+            if (window.indexedDB && window.indexedDB.databases) {
+                window.indexedDB.databases().then(dbs => {
+                    dbs.forEach(db => {
+                        if (db.name && db.name.startsWith('rlens_')) {
+                            console.log(`Deleting DB: ${db.name}`);
+                            window.indexedDB.deleteDatabase(db.name);
+                        }
+                    });
+                });
+            } else if (window.indexedDB) {
+                console.warn("[rLens] indexedDB.databases() not available; skipping IndexedDB cleanup.");
+            }
+
+            // 3. Unregister potentially stale Service Workers
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    for(let registration of registrations) {
+                        console.info("Unregistering Service Worker:", registration);
+                        registration.unregister();
+                    }
+                });
+            }
+
+            // 4. Update Version
+            localStorage.setItem('rlens_state_version', RLENS_UI_VERSION);
+
+            // 5. Force Reload (to ensure clean slate)
+            setTimeout(() => {
+                window.location.reload();
+            }, 300);
+        }
+    }
+} catch (e) {
+    console.error("State migration failed", e);
+}
+
 const API_BASE = '/api';
 
 // Token handling
@@ -312,7 +376,7 @@ async function fetchHealth() {
         const res = await apiFetch(`${API_BASE}/health`);
         const data = await res.json();
         const authStatus = data.auth_enabled ? '🔒 Auth' : '🔓 Open';
-        document.getElementById('status').innerText = `v${data.version} • ${authStatus} • Hub: ${data.hub}`;
+        document.getElementById('status').innerText = `v${data.version} (UI: ${RLENS_UI_VERSION}) • ${authStatus} • Hub: ${data.hub}`;
 
         // Only set values if empty (respect user changes or saved config)
         if (!document.getElementById('hubPath').value) {
