@@ -1904,24 +1904,37 @@ async function fetchVersion() {
     }
 }
 
-function hardRefresh() {
+async function hardRefresh() {
     if (!confirm("Clear all caches and reload?")) return;
 
-    // 1. Clear LocalStorage
-    localStorage.clear();
-
-    // 2. Clear SessionStorage
-    sessionStorage.clear();
-
-    // 3. Clear Caches
-    if ('caches' in window) {
-        caches.keys().then(names => {
-            names.forEach(name => caches.delete(name));
-        });
+    // 1. Unregister Service Workers (Critical for Brave/PWA)
+    if ('serviceWorker' in navigator) {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map(r => r.unregister()));
+            console.log(`[rLens] Unregistered ${registrations.length} service workers.`);
+        } catch (e) {
+            console.warn("[rLens] Service Worker cleanup failed", e);
+        }
     }
 
-    // 4. Reload with timestamp
+    // 2. Clear Cache Storage (Hard await)
+    if ('caches' in window) {
+        try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(name => caches.delete(name)));
+            console.log(`[rLens] Cleared ${keys.length} caches.`);
+        } catch (e) {
+            console.warn("[rLens] Cache clearing failed", e);
+        }
+    }
+
+    // 3. Clear Storage
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // 4. Reload with timestamp to force network fetch of index.html
     const url = new URL(window.location.href);
     url.searchParams.set('t', Date.now());
-    window.location.href = url.toString();
+    window.location.replace(url.toString());
 }

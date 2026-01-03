@@ -1,4 +1,9 @@
-from typing import List, Optional, Dict, Any, Iterable, AsyncIterable, Protocol, Callable
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 import os
 import asyncio
@@ -9,16 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import (
-    JobRequest,
-    Job,
-    Artifact,
-    AtlasRequest,
-    AtlasArtifact,
-    calculate_job_hash,
-    PrescanRequest,
-    PrescanResponse,
-)
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
 from .jobstore import JobStore
 from .runner import JobRunner
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name
@@ -27,8 +23,6 @@ from ..adapters.atlas import AtlasScanner, render_atlas_md
 from ..adapters.metarepo import sync_from_metarepo
 from ..adapters import sources as sources_refresh
 from ..adapters import diagnostics as diagnostics_rebuild
-from .http_fastapi_adapter import app, http
-from .http_contract import RequestLike, StreamContent
 
 try:
     from ..core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
@@ -37,119 +31,57 @@ except ImportError:
 
 # Global Version Info
 SERVER_START_TIME = datetime.utcnow().isoformat()
-try:
-    import subprocess
 
-    _git_ver = subprocess.check_output(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=Path(__file__).parent,
-        stderr=subprocess.DEVNULL,
-    ).decode().strip()
-except Exception:
-    _git_ver = "dev"
+def _get_server_version():
+    # 1. Env Var (Canonical for builds)
+    env_ver = os.getenv("RLENS_VERSION")
+    if env_ver:
+        return env_ver
 
-SERVER_VERSION = os.getenv("RLENS_VERSION", _git_ver)
-# Build ID for cache busting (unique per server start)
-BUILD_ID = f"{SERVER_VERSION}-{int(time.time())}"
+    # 2. Git Hash
+    try:
+        import subprocess
+        # Resolve repo root relative to this file
+        repo_root = Path(__file__).resolve().parent.parent.parent.parent # merger/lenskit/service/app.py -> root
+        if not (repo_root / ".git").exists():
+             # Fallback if not standard layout
+             repo_root = Path(__file__).parent
+
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(repo_root),
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        pass
+
+    return "dev"
+
+SERVER_VERSION = _get_server_version()
+
+# Build ID for cache busting
+# If RLENS_BUILD_ID is set (CI/CD), use it (stable per build).
+# Else fall back to SERVER_VERSION (if git hash).
+# If dev/unknown, append timestamp to force reload on restarts.
+_env_build_id = os.getenv("RLENS_BUILD_ID")
+if _env_build_id:
+    BUILD_ID = _env_build_id
+elif SERVER_VERSION != "dev":
+    BUILD_ID = SERVER_VERSION
+else:
+    BUILD_ID = f"dev-{int(time.time())}"
 
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bindings for the HTTP adapter
-HTTPException = http.HTTPException
-BackgroundTasks = http.BackgroundTasks
-Query = http.Query
-Depends = http.Depends
-Body = http.Body
-Request = http.Request
-FileResponse = http.FileResponse
-StreamingResponse = http.StreamingResponse
-HTMLResponse = http.HTMLResponse
-StaticFiles = http.StaticFiles
-CORSMiddleware = http.CORSMiddleware
-run_in_threadpool = http.run_in_threadpool
-
-# Apply title/version to the existing adapter-provided app instance
-app.title = "rLens"
-app.version = SERVER_VERSION
+app = FastAPI(title="rLens", version=SERVER_VERSION)
 
 # GC Configuration
 GC_MAX_JOBS = int(os.getenv("RLENS_GC_MAX_JOBS", "100"))
 GC_MAX_AGE_HOURS = int(os.getenv("RLENS_GC_MAX_AGE_HOURS", "24"))
 # SSE polling (seconds)
 SSE_POLL_SEC = float(os.getenv("RLENS_SSE_POLL_SEC", "0.25"))
-
-
-class LogStreamProvider(Protocol):
-    def build_stream(
-        self, job_id: str, start_from: int, request: Optional[RequestLike] = None
-    ) -> StreamContent: ...
-
-
-class LiveLogStreamProvider:
-    def __init__(
-        self, 
-        poll_seconds: float, 
-        job_store: Optional[JobStore] = None, 
-        threadpool_runner: Optional[Callable] = None
-    ) -> None:
-        self.poll_seconds = poll_seconds
-        self.job_store = job_store
-        self.run_in_threadpool = threadpool_runner
-
-    async def _event_stream(self, job_id: str, start_from: int, request: RequestLike) -> AsyncIterable[str]:
-        if self.job_store is None:
-            raise RuntimeError("Service not initialized: job_store is None. Call init_service() first.")
-        if self.run_in_threadpool is None:
-            raise RuntimeError("Service not initialized: run_in_threadpool is None. Call init_service() first.")
-        
-        last_sent = start_from
-        while True:
-            logs = await self.run_in_threadpool(self.job_store.read_log_lines, job_id)
-            if len(logs) > last_sent:
-                for i, line in enumerate(logs[last_sent:], start=last_sent + 1):
-                    yield f"id: {i}\ndata: {line}\n\n"
-                last_sent = len(logs)
-
-            job_state = await self.run_in_threadpool(self.job_store.get_job, job_id)
-            finished = job_state and job_state.status in ("succeeded", "failed", "canceled")
-
-            if finished:
-                yield "event: end\ndata: end\n\n"
-                return
-
-            if await request.is_disconnected():
-                return
-
-            await asyncio.sleep(self.poll_seconds)
-
-    def build_stream(
-        self, job_id: str, start_from: int, request: Optional[RequestLike] = None
-    ) -> AsyncIterable[str]:
-        if request is None:
-            raise ValueError("request is required for live log streaming")
-
-        return self._event_stream(job_id, start_from, request)
-
-
-class SnapshotLogStreamProvider:
-    def __init__(self, job_store: Optional[JobStore] = None) -> None:
-        self.job_store = job_store
-
-    def build_stream(
-        self, job_id: str, start_from: int, request: Optional[RequestLike] = None
-    ) -> Iterable[str]:
-        if self.job_store is None:
-            raise RuntimeError("Service not initialized: job_store is None. Call init_service() first.")
-        
-        logs = self.job_store.read_log_lines(job_id)
-        chunks = []
-        if len(logs) > start_from:
-            for i, line in enumerate(logs[start_from:], start=start_from + 1):
-                chunks.append(f"id: {i}\ndata: {line}\n\n")
-        chunks.append("event: end\ndata: end\n\n")
-        return chunks
 
 # Security: Root Jail for File System Browsing
 # Set to system root to allow full access, but preventing traversal above it (which is impossible anyway).
@@ -190,39 +122,14 @@ class ServiceState:
     merges_dir: Path = None
     job_store: JobStore = None
     runner: JobRunner = None
-    log_stream_provider: "LogStreamProvider" = None
 
 state = ServiceState()
 
-def init_service(
-    hub_path: Path,
-    token: Optional[str] = None,
-    host: str = "127.0.0.1",
-    merges_dir: Optional[Path] = None,
-    log_stream_provider: Optional[LogStreamProvider] = None,
-):
+def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1", merges_dir: Optional[Path] = None):
     state.hub = hub_path
     state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
-    
-    # Set up log stream provider with proper dependencies
-    if log_stream_provider is None:
-        # Default: create live provider with dependencies
-        state.log_stream_provider = LiveLogStreamProvider(
-            SSE_POLL_SEC, state.job_store, run_in_threadpool
-        )
-    else:
-        # Inject dependencies into provided provider if needed
-        if isinstance(log_stream_provider, LiveLogStreamProvider):
-            if log_stream_provider.job_store is None:
-                log_stream_provider.job_store = state.job_store
-            if log_stream_provider.run_in_threadpool is None:
-                log_stream_provider.run_in_threadpool = run_in_threadpool
-        elif isinstance(log_stream_provider, SnapshotLogStreamProvider):
-            if log_stream_provider.job_store is None:
-                log_stream_provider.job_store = state.job_store
-        state.log_stream_provider = log_stream_provider
 
     # Configure Security
     sec = get_security_config()
@@ -556,18 +463,14 @@ def cancel_job(job_id: str):
     return {"status": job.status}
 
 @app.get("/api/jobs/{job_id}/logs", dependencies=[Depends(verify_token)])
-async def stream_logs(request: RequestLike, job_id: str, last_id: Optional[int] = Query(None)):
-    """Server-sent events stream for job logs.
-
-    Preserves live streaming semantics for production usage while allowing
-    the stubbed test client to consume a finite snapshot by reading the
-    async generator to completion.
-    """
-
+async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Query(None)):
+    # SSE Stream
     job = state.job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    # Determine start index
+    # Prioritize Last-Event-ID header if present
     start_idx = 0
     if request.headers.get("Last-Event-ID"):
         try:
@@ -579,8 +482,43 @@ async def stream_logs(request: RequestLike, job_id: str, last_id: Optional[int] 
     elif last_id is not None:
         start_idx = last_id
 
-    stream = state.log_stream_provider.build_stream(job_id, start_idx, request)
-    return StreamingResponse(stream, media_type="text/event-stream")
+    async def log_generator():
+        last_idx = start_idx
+        while True:
+            # Stop work if client disconnected (prevents zombie generators)
+            try:
+                if await request.is_disconnected():
+                    break
+            except Exception:
+                pass
+
+            # Read logs from file (async safe)
+            logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
+
+            if len(logs) > last_idx:
+                for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
+                    yield f"id: {i}\ndata: {line}\n\n"
+                last_idx = len(logs)
+
+            # Check status for completion
+            current_job = await run_in_threadpool(state.job_store.get_job, job_id)
+            if not current_job:
+                break
+
+            if current_job.status in ["succeeded", "failed", "canceled"]:
+                # Ensure we sent everything
+                logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
+                if len(logs) > last_idx:
+                    for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
+                        yield f"id: {i}\ndata: {line}\n\n"
+
+                yield "event: end\ndata: end\n\n"
+                break
+
+            # Throttle polling (avoid busy-loop CPU burn)
+            await asyncio.sleep(SSE_POLL_SEC)
+
+    return StreamingResponse(log_generator(), media_type="text/event-stream")
 
 @app.get("/api/artifacts", response_model=List[Artifact], dependencies=[Depends(verify_token)])
 def list_artifacts(repo: Optional[str] = None):
@@ -957,7 +895,13 @@ def serve_index():
     content = get_index_html()
     if not content:
          return HTMLResponse("<h1>rLens UI not found</h1>", status_code=404)
-    return HTMLResponse(content)
+
+    headers = {
+        "Cache-Control": "no-store, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
+    return HTMLResponse(content, headers=headers)
 
 if webui_dir.exists():
     app.mount("/", StaticFiles(directory=str(webui_dir), html=True), name="webui")
