@@ -15,7 +15,7 @@ security_scheme = HTTPBearer(auto_error=False)
 class SecurityConfig:
     # Absolute, normalized roots only. Anything else is rejected at registration.
     allowlist_roots: List[Path] = field(default_factory=list)
-    token: str | None = None
+    token: Optional[str] = None
 
     def set_token(self, token: Optional[str]):
         self.token = token

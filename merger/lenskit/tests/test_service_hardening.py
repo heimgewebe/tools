@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
 import tempfile
-from merger.lenskit.service.app import app, init_service, state
+from merger.lenskit.service.app import app, init_service, state, SnapshotLogStreamProvider
 from merger.lenskit.service.models import JobRequest, Artifact
 from datetime import datetime
 import uuid
@@ -12,7 +12,7 @@ def client_and_hub():
     with tempfile.TemporaryDirectory() as tmp:
         hub = Path(tmp) / "hub"
         hub.mkdir()
-        init_service(hub, token="test-token")
+        init_service(hub, token="test-token", log_stream_provider=SnapshotLogStreamProvider())
 
         # Mock runner to avoid real execution
         original_submit = state.runner.submit_job

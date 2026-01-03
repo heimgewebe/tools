@@ -1,9 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.concurrency import run_in_threadpool
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Iterable, AsyncIterable, Protocol
 from pathlib import Path
 import os
 import asyncio
@@ -23,6 +18,8 @@ from ..adapters.atlas import AtlasScanner, render_atlas_md
 from ..adapters.metarepo import sync_from_metarepo
 from ..adapters import sources as sources_refresh
 from ..adapters import diagnostics as diagnostics_rebuild
+from .http_fastapi_adapter import app, http
+from .http_contract import RequestLike, StreamContent
 
 try:
     from ..core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
@@ -33,13 +30,77 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="rLens", version="1.0.0")
+# Bindings for the HTTP adapter
+HTTPException = http.HTTPException
+BackgroundTasks = http.BackgroundTasks
+Query = http.Query
+Depends = http.Depends
+Body = http.Body
+Request = http.Request
+FileResponse = http.FileResponse
+StreamingResponse = http.StreamingResponse
+StaticFiles = http.StaticFiles
+CORSMiddleware = http.CORSMiddleware
+run_in_threadpool = http.run_in_threadpool
 
 # GC Configuration
 GC_MAX_JOBS = int(os.getenv("RLENS_GC_MAX_JOBS", "100"))
 GC_MAX_AGE_HOURS = int(os.getenv("RLENS_GC_MAX_AGE_HOURS", "24"))
 # SSE polling (seconds)
 SSE_POLL_SEC = float(os.getenv("RLENS_SSE_POLL_SEC", "0.25"))
+
+
+class LogStreamProvider(Protocol):
+    def build_stream(
+        self, job_id: str, start_from: int, request: Optional[RequestLike] = None
+    ) -> StreamContent: ...
+
+
+class LiveLogStreamProvider:
+    def __init__(self, poll_seconds: float) -> None:
+        self.poll_seconds = poll_seconds
+
+    async def _event_stream(self, job_id: str, start_from: int, request: RequestLike) -> AsyncIterable[str]:
+        last_sent = start_from
+        while True:
+            logs = state.job_store.read_log_lines(job_id)
+            if len(logs) > last_sent:
+                for i, line in enumerate(logs[last_sent:], start=last_sent + 1):
+                    yield f"id: {i}\ndata: {line}\n\n"
+                last_sent = len(logs)
+
+            job_state = state.job_store.get_job(job_id)
+            finished = job_state and job_state.status in ("succeeded", "failed", "canceled")
+
+            if finished:
+                yield "event: end\ndata: end\n\n"
+                return
+
+            if await request.is_disconnected():
+                return
+
+            await asyncio.sleep(self.poll_seconds)
+
+    def build_stream(
+        self, job_id: str, start_from: int, request: Optional[RequestLike] = None
+    ) -> AsyncIterable[str]:
+        if request is None:
+            raise ValueError("request is required for live log streaming")
+
+        return self._event_stream(job_id, start_from, request)
+
+
+class SnapshotLogStreamProvider:
+    def build_stream(
+        self, job_id: str, start_from: int, request: Optional[RequestLike] = None
+    ) -> Iterable[str]:
+        logs = state.job_store.read_log_lines(job_id)
+        chunks = []
+        if len(logs) > start_from:
+            for i, line in enumerate(logs[start_from:], start=start_from + 1):
+                chunks.append(f"id: {i}\ndata: {line}\n\n")
+        chunks.append("event: end\ndata: end\n\n")
+        return chunks
 
 # Security: Root Jail for File System Browsing
 # Set to system root to allow full access, but preventing traversal above it (which is impossible anyway).
@@ -61,14 +122,22 @@ class ServiceState:
     merges_dir: Path = None
     job_store: JobStore = None
     runner: JobRunner = None
+    log_stream_provider: "LogStreamProvider" = None
 
 state = ServiceState()
 
-def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1", merges_dir: Optional[Path] = None):
+def init_service(
+    hub_path: Path,
+    token: Optional[str] = None,
+    host: str = "127.0.0.1",
+    merges_dir: Optional[Path] = None,
+    log_stream_provider: Optional[LogStreamProvider] = None,
+):
     state.hub = hub_path
     state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
+    state.log_stream_provider = log_stream_provider or LiveLogStreamProvider(SSE_POLL_SEC)
 
     # Configure Security
     sec = get_security_config()
@@ -393,14 +462,18 @@ def cancel_job(job_id: str):
     return {"status": job.status}
 
 @app.get("/api/jobs/{job_id}/logs", dependencies=[Depends(verify_token)])
-async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Query(None)):
-    # SSE Stream
+async def stream_logs(request: RequestLike, job_id: str, last_id: Optional[int] = Query(None)):
+    """Server-sent events stream for job logs.
+
+    Preserves live streaming semantics for production usage while allowing
+    the stubbed test client to consume a finite snapshot by reading the
+    async generator to completion.
+    """
+
     job = state.job_store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Determine start index
-    # Prioritize Last-Event-ID header if present
     start_idx = 0
     if request.headers.get("Last-Event-ID"):
         try:
@@ -412,43 +485,8 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
     elif last_id is not None:
         start_idx = last_id
 
-    async def log_generator():
-        last_idx = start_idx
-        while True:
-            # Stop work if client disconnected (prevents zombie generators)
-            try:
-                if await request.is_disconnected():
-                    break
-            except Exception:
-                pass
-
-            # Read logs from file (async safe)
-            logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
-
-            if len(logs) > last_idx:
-                for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
-                    yield f"id: {i}\ndata: {line}\n\n"
-                last_idx = len(logs)
-
-            # Check status for completion
-            current_job = await run_in_threadpool(state.job_store.get_job, job_id)
-            if not current_job:
-                break
-
-            if current_job.status in ["succeeded", "failed", "canceled"]:
-                # Ensure we sent everything
-                logs = await run_in_threadpool(state.job_store.read_log_lines, job_id)
-                if len(logs) > last_idx:
-                    for i, line in enumerate(logs[last_idx:], start=last_idx + 1):
-                        yield f"id: {i}\ndata: {line}\n\n"
-
-                yield "event: end\ndata: end\n\n"
-                break
-
-            # Throttle polling (avoid busy-loop CPU burn)
-            await asyncio.sleep(SSE_POLL_SEC)
-
-    return StreamingResponse(log_generator(), media_type="text/event-stream")
+    stream = state.log_stream_provider.build_stream(job_id, start_idx, request)
+    return StreamingResponse(stream, media_type="text/event-stream")
 
 @app.get("/api/artifacts", response_model=List[Artifact], dependencies=[Depends(verify_token)])
 def list_artifacts(repo: Optional[str] = None):
