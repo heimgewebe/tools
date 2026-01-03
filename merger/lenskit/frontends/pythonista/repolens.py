@@ -156,6 +156,30 @@ def normalize_path(p: str) -> str:
     return p
 
 
+def normalize_repo_id(s: str) -> str:
+    """
+    Normalize repository identifiers for robust matching.
+    Handles common drift forms:
+      - leading './'
+      - trailing '/'
+      - backslashes
+      - accidental path inputs (hub/foo -> foo)
+      - case drift (pragmatic on iOS)
+    """
+    s = str(s).strip().replace("\\", "/")
+    # Drop leading "./" repeatedly
+    while s.startswith("./"):
+        s = s[2:]
+    # Drop trailing slashes
+    s = s.rstrip("/")
+    # If a path slipped in, keep last segment
+    if "/" in s:
+        s = s.split("/")[-1]
+    # Pragmatic: collapse case drift
+    s = s.lower()
+    return s
+
+
 def safe_script_path() -> Path:
     """
     Versucht, den Pfad dieses Skripts robust zu bestimmen.
@@ -1341,6 +1365,14 @@ class MergerUI(object):
                 rows.append((0, idx))
 
         if not rows:
+            # Explicitly clear selection if list is empty
+            try:
+                self.tv.selected_rows = []
+                # Defensive: force visual refresh
+                if hasattr(self.tv, "reload_data"):
+                    self.tv.reload_data()
+            except Exception:
+                pass
             return
 
         tv = self.tv
@@ -1484,7 +1516,7 @@ class MergerUI(object):
                     "split_mb": self.split_field.text or "",
                     "plan_only": bool(self.plan_only_switch.value),
                     "code_only": bool(getattr(self, "code_only_switch", False) and self.code_only_switch.value),
-                    "selected_repos": self._get_selected_repos(),
+                    "selected_repos": self._get_selected_repos(explicit_only=True),
                     "extras": {
                         "health": self.extras_config.health,
                         "organism_index": self.extras_config.organism_index,
@@ -1565,9 +1597,9 @@ class MergerUI(object):
         # Update hint text to match restored profile
         self.on_profile_changed(None)
 
-        selected = data.get("selected_repos") or []
-        if selected:
-            # Direkt anwenden – ohne ui.delay, das auf manchen Wegen nicht verfügbar ist
+        selected = data.get("selected_repos")
+        if selected is not None:
+            # Direkt anwenden – auch wenn leer (zum Leeren der Auswahl)
             self._apply_selected_repo_names(selected)
 
         if sender and console:
@@ -1595,27 +1627,11 @@ class MergerUI(object):
         cell.selected_background_view = selected_bg
         return cell
 
-    def _get_selected_repos(self) -> List[str]:
+    def _get_selected_repos(self, explicit_only: bool = False) -> List[str]:
         tv = self.tv
         rows = tv.selected_rows or []
         if not rows:
-            # Pool-first behavior:
-            # If user selected no repos explicitly, but pool contains selections,
-            # interpret intent as "merge the pool" (not "scan everything").
-            pool = getattr(self, "saved_prescan_selections", None) or {}
-            if isinstance(pool, dict) and len(pool) > 0:
-                # Keep UI order (self.repos) to reduce surprise
-                pool_repos = [r for r in self.repos if r in pool]
-                if pool_repos:
-                    try:
-                        if console:
-                            console.hud_alert(f"Pool active: {len(pool_repos)} repos", duration=0.8)
-                    except Exception:
-                        pass
-                    return pool_repos
-
-            # Default fallback: no explicit selection, no pool -> treat as ALL
-            return list(self.repos)
+            return [] if explicit_only else list(self.repos)
         names: List[str] = []
         for section, row in rows:
             if 0 <= row < len(self.repos):
@@ -3051,27 +3067,64 @@ class MergerUI(object):
                 del self._pending_code_only
 
     def _run_merge_inner(self) -> None:
-        selected = self._get_selected_repos()
-        if not selected:
+        # 1. Determine Selection Strategy (Explicit vs Pool vs All)
+        tv = self.tv
+        rows = tv.selected_rows or []
+
+        selected_repos: List[str] = []
+        selection_source = "default(all)"
+
+        # Build normalized maps once (avoid N^2 drift pain)
+        repo_norm_map = {}
+        for r in self.repos:
+            norm = normalize_repo_id(r)
+            if norm in repo_norm_map:
+                # Collision detected
+                msg = f"Repo collision: '{r}' and '{repo_norm_map[norm]}' normalize to same ID '{norm}'."
+                print(f"[repoLens] WARNING: {msg}", file=sys.stderr)
+            else:
+                repo_norm_map[norm] = r
+
+        pool_raw = getattr(self, "saved_prescan_selections", None) or {}
+        pool_norm = {}
+        if isinstance(pool_raw, dict):
+            for k, v in pool_raw.items():
+                n_key = normalize_repo_id(k)
+                if n_key: # Ignore empty keys
+                    if n_key in pool_norm:
+                        print(f"[repoLens] WARNING: Pool key collision for '{n_key}' (overwriting).", file=sys.stderr)
+                    pool_norm[n_key] = v
+
+        # Pool repos that actually exist in current hub
+        pool_active_repos = sorted(list({repo_norm_map[nk] for nk in pool_norm.keys() if nk in repo_norm_map}))
+
+        if rows:
+            # Explicit UI selection
+            selection_source = "explicit"
+            for section, row in rows:
+                if 0 <= row < len(self.repos):
+                    selected_repos.append(self.repos[row])
+        elif pool_active_repos:
+            # Implicit Pool selection
+            selection_source = "pool"
+            selected_repos = pool_active_repos
+        else:
+            # Default All
+            selection_source = "default(all)"
+            selected_repos = list(self.repos)
+
+        # Deduplicate and Sort
+        selected_repos = sorted(list(set(selected_repos)))
+
+        if not selected_repos:
             if console:
-                console.alert("repoLens", "No repos selected.", "OK", hide_cancel_button=True)
+                console.alert("repoLens", "No repos selected or found in pool.", "OK", hide_cancel_button=True)
             return
 
         ext_text = (self.ext_field.text or "").strip()
         extensions = _normalize_ext_list(ext_text)
 
         path_contains = (self.path_field.text or "").strip() or None
-
-        # Resolve include paths from Selection Pool (saved_prescan_selections)
-        # Prioritize pool over temp paths (if we deprecate temp paths).
-        # We need include_paths for EACH repo if mode is "pro-repo" OR "combined"?
-        # 'scan_repo' takes `include_paths`.
-        # `write_reports_v2` logic for combined?
-
-        # `scan_repo` is called per repo in the loop below.
-        # We need to fetch the specific include paths for `name`.
-
-        # Note: self.saved_prescan_selections keys are repo names.
 
         detail_idx = self.seg_detail.selected_index
         detail = ["overview", "summary", "dev", "max"][detail_idx]
@@ -3099,23 +3152,50 @@ class MergerUI(object):
         if plan_only and code_only:
             code_only = False
 
-        # Helper to get include_paths from pool
+        # Helper to get include_paths from pool with normalized O(1) lookup
         def get_pool_include_paths(repo_name):
-            entry = self.saved_prescan_selections.get(repo_name)
+            entry = pool_norm.get(normalize_repo_id(repo_name))
             if not entry:
                 return None # Default behavior (global filters apply)
             if isinstance(entry, dict):
                 # Structured: compressed is list (partial) or None (ALL)
                 compressed = entry.get("compressed")
                 # Treat empty list as "no override" (same as None/ALL)
-                # to avoid accidental "scan nothing" state.
                 return compressed if (compressed and len(compressed) > 0) else None
             # Legacy fallback
             return entry if entry else None
 
+        # Calculate Stats for UX
+        total_paths = 0
+        repos_with_filters = 0
+        for name in selected_repos:
+            paths = get_pool_include_paths(name)
+            if paths:
+                total_paths += len(paths)
+                repos_with_filters += 1
+
+        # HUD / Log Feedback
+        pool_keys_total = len(pool_norm) if isinstance(pool_norm, dict) else 0
+        pool_keys_matched = len(pool_active_repos)
+
+        msg = f"Selection: {selection_source.upper()} ({len(selected_repos)} repos)"
+        if selection_source == "pool":
+            msg += f" / pool matched {pool_keys_matched}/{pool_keys_total}"
+
+        if repos_with_filters > 0:
+            if selection_source == "pool":
+                msg += f" / {total_paths} paths"
+            else:
+                msg += f" / {total_paths} paths from pool"
+
+        if console:
+            console.hud_alert(msg, "info", 1.5)
+        else:
+            print(f"[repoLens] {msg}")
+
         # Check for restrictive pool entries to decide on execution strategy
         has_restrictive = False
-        for name in selected:
+        for name in selected_repos:
             paths = get_pool_include_paths(name)
             if paths is not None and isinstance(paths, list) and len(paths) > 0:
                 has_restrictive = True
@@ -3132,13 +3212,13 @@ class MergerUI(object):
         execution_list = []
         if has_restrictive:
             # Force sequential processing per repo
-            for name in selected:
+            for name in selected_repos:
                 execution_list.append([name])
             if console:
                 console.hud_alert("Pool active: Splitting jobs per repo")
         else:
             # Standard batch processing (all selected together)
-            execution_list.append(selected)
+            execution_list.append(selected_repos)
 
         total_batches = len(execution_list)
 
@@ -3240,7 +3320,7 @@ class MergerUI(object):
 
                 # Identify restrictive repos for metadata
                 restrictive_repos = []
-                for name in selected:
+                for name in selected_repos:
                     paths = get_pool_include_paths(name)
                     if paths is not None and isinstance(paths, list) and len(paths) > 0:
                         restrictive_repos.append(name)
