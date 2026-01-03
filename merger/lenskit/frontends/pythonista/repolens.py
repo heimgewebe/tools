@@ -1368,6 +1368,9 @@ class MergerUI(object):
             # Explicitly clear selection if list is empty
             try:
                 self.tv.selected_rows = []
+                # Defensive: force visual refresh
+                if hasattr(self.tv, "reload_data"):
+                    self.tv.reload_data()
             except Exception:
                 pass
             return
@@ -3088,6 +3091,8 @@ class MergerUI(object):
             for k, v in pool_raw.items():
                 n_key = normalize_repo_id(k)
                 if n_key: # Ignore empty keys
+                    if n_key in pool_norm:
+                        print(f"[repoLens] WARNING: Pool key collision for '{n_key}' (overwriting).", file=sys.stderr)
                     pool_norm[n_key] = v
 
         # Pool repos that actually exist in current hub
