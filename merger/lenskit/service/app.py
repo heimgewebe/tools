@@ -66,8 +66,9 @@ async def add_cache_control_header(request: Request, call_next):
     path = request.url.path
     if path in ["/", "/index.html", "/app.js", "/style.css"]:
         # "no-store" is the strongest directive.
-        # "must-revalidate" forces check against server.
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        # "must-revalidate" is implied by no-store in modern browsers, but harmless.
+        # We simplify to no-store but keep Pragma/Expires for legacy/proxy robustness.
+        response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
 

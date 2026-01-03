@@ -37,6 +37,8 @@ try {
                         }
                     });
                 });
+            } else if (window.indexedDB) {
+                console.warn("[rLens] indexedDB.databases() not available; skipping IndexedDB cleanup.");
             }
 
             // 3. Unregister potentially stale Service Workers
@@ -55,7 +57,7 @@ try {
             // 5. Force Reload (to ensure clean slate)
             setTimeout(() => {
                 window.location.reload();
-            }, 100);
+            }, 300);
         }
     }
 } catch (e) {
