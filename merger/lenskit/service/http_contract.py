@@ -8,7 +8,7 @@ FastAPI) supply concrete implementations to satisfy these protocols.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterable, Awaitable, Callable, Iterable, Mapping, Optional, Protocol, Union
+from typing import Any, AsyncIterable, Awaitable, Callable, Iterable, Mapping, Protocol, Union
 
 
 class RequestLike(Protocol):

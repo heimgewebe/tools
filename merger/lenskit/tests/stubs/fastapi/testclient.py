@@ -1,6 +1,5 @@
 import inspect
 import json
-import re
 from .exceptions import HTTPException
 from .responses import Response
 from .depend import Depends, Query
@@ -108,6 +107,8 @@ class TestClient:
                     kwargs[name] = param.annotation(**body)
                     continue
                 except Exception:
+                    # If the body cannot be coerced into the annotated type, ignore the error
+                    # and fall back to the other parameter-handling branches below.
                     pass
             elif name == "request":
                 kwargs[name] = request

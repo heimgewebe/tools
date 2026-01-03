@@ -6,8 +6,8 @@ modules intentionally stay out of the repository root to avoid shadowing the
 real packages in development or production environments.
 
 The stubs are enabled only during pytest collection via
-`merger/lenskit/tests/conftest.py`, which prepends the `tests/stubs` directory
-to `sys.path` when pytest is running. They are on by default
+`merger/lenskit/tests/conftest.py`, which prepends its sibling `stubs`
+directory (`merger/lenskit/tests/stubs`) to `sys.path` when pytest is running. They are on by default
 (`RLENS_TEST_STUBS=1`); set `RLENS_TEST_STUBS=0` to run the tests against real
 dependencies when they are installed. Outside of pytest the application will
 import the real dependencies, so production semantics (including streaming
