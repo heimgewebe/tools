@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from typing import List, Optional, Dict, Any
@@ -29,11 +29,22 @@ try:
 except ImportError:
     from merger.lenskit.core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
 
+# Global Version Info
+SERVER_START_TIME = datetime.utcnow().isoformat()
+try:
+    import subprocess
+    _git_ver = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=Path(__file__).parent, stderr=subprocess.DEVNULL).decode().strip()
+except Exception:
+    _git_ver = "dev"
+SERVER_VERSION = os.getenv("RLENS_VERSION", _git_ver)
+# Build ID for cache busting (unique per server start)
+BUILD_ID = f"{SERVER_VERSION}-{int(time.time())}"
+
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="rLens", version="1.0.0")
+app = FastAPI(title="rLens", version=SERVER_VERSION)
 
 # GC Configuration
 GC_MAX_JOBS = int(os.getenv("RLENS_GC_MAX_JOBS", "100"))
@@ -290,11 +301,20 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
 
     return result
 
+@app.get("/api/version")
+def api_version():
+    return {
+        "version": SERVER_VERSION,
+        "build_id": BUILD_ID,
+        "started_at": SERVER_START_TIME
+    }
+
 @app.get("/api/health")
 def health():
     return {
         "status": "ok",
         "version": SPEC_VERSION,
+        "server_version": SERVER_VERSION,
         "hub": str(state.hub),
         "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
@@ -816,9 +836,35 @@ Run `POST /api/export/webmaschine` to update these files.
         logger.exception(f"Export failed: {e}")
         raise HTTPException(status_code=500, detail=f"Export failed: {e}")
 
-# Serve static UI
+# Serve static UI with Templating
 # app.py is in lenskit/service. webui is in lenskit/frontends/webui.
 current_dir = Path(__file__).parent
 webui_dir = current_dir.parent / "frontends" / "webui"
+
+# Pre-load and template index.html
+_index_html_content = None
+
+def get_index_html():
+    global _index_html_content
+    # Refresh in debug mode? No, better safe cache-busting.
+    if _index_html_content is None:
+        index_path = webui_dir / "index.html"
+        if index_path.exists():
+            content = index_path.read_text(encoding="utf-8")
+            # Inject Build ID
+            content = content.replace("__RLENS_BUILD__", BUILD_ID)
+            _index_html_content = content
+        else:
+            _index_html_content = ""
+    return _index_html_content
+
+@app.get("/", response_class=HTMLResponse)
+@app.get("/index.html", response_class=HTMLResponse)
+def serve_index():
+    content = get_index_html()
+    if not content:
+         return HTMLResponse("<h1>rLens UI not found</h1>", status_code=404)
+    return HTMLResponse(content)
+
 if webui_dir.exists():
     app.mount("/", StaticFiles(directory=str(webui_dir), html=True), name="webui")
