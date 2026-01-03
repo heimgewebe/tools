@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Iterable, AsyncIterable, Protocol
+from typing import List, Optional, Dict, Any, Iterable, AsyncIterable, Protocol, Callable
 from pathlib import Path
 import os
 import asyncio
@@ -57,19 +57,31 @@ class LogStreamProvider(Protocol):
 
 
 class LiveLogStreamProvider:
-    def __init__(self, poll_seconds: float) -> None:
+    def __init__(
+        self, 
+        poll_seconds: float, 
+        job_store: Optional[JobStore] = None, 
+        threadpool_runner: Optional[Callable] = None
+    ) -> None:
         self.poll_seconds = poll_seconds
+        self.job_store = job_store
+        self.run_in_threadpool = threadpool_runner
 
     async def _event_stream(self, job_id: str, start_from: int, request: RequestLike) -> AsyncIterable[str]:
+        if self.job_store is None:
+            raise RuntimeError("Service not initialized: job_store is None. Call init_service() first.")
+        if self.run_in_threadpool is None:
+            raise RuntimeError("Service not initialized: run_in_threadpool is None. Call init_service() first.")
+        
         last_sent = start_from
         while True:
-            logs = state.job_store.read_log_lines(job_id)
+            logs = await self.run_in_threadpool(self.job_store.read_log_lines, job_id)
             if len(logs) > last_sent:
                 for i, line in enumerate(logs[last_sent:], start=last_sent + 1):
                     yield f"id: {i}\ndata: {line}\n\n"
                 last_sent = len(logs)
 
-            job_state = state.job_store.get_job(job_id)
+            job_state = await self.run_in_threadpool(self.job_store.get_job, job_id)
             finished = job_state and job_state.status in ("succeeded", "failed", "canceled")
 
             if finished:
@@ -91,10 +103,16 @@ class LiveLogStreamProvider:
 
 
 class SnapshotLogStreamProvider:
+    def __init__(self, job_store: Optional[JobStore] = None) -> None:
+        self.job_store = job_store
+
     def build_stream(
         self, job_id: str, start_from: int, request: Optional[RequestLike] = None
     ) -> Iterable[str]:
-        logs = state.job_store.read_log_lines(job_id)
+        if self.job_store is None:
+            raise RuntimeError("Service not initialized: job_store is None. Call init_service() first.")
+        
+        logs = self.job_store.read_log_lines(job_id)
         chunks = []
         if len(logs) > start_from:
             for i, line in enumerate(logs[start_from:], start=start_from + 1):
@@ -137,7 +155,24 @@ def init_service(
     state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
     state.runner = JobRunner(state.job_store)
-    state.log_stream_provider = log_stream_provider or LiveLogStreamProvider(SSE_POLL_SEC)
+    
+    # Set up log stream provider with proper dependencies
+    if log_stream_provider is None:
+        # Default: create live provider with dependencies
+        state.log_stream_provider = LiveLogStreamProvider(
+            SSE_POLL_SEC, state.job_store, run_in_threadpool
+        )
+    else:
+        # Inject dependencies into provided provider if needed
+        if isinstance(log_stream_provider, LiveLogStreamProvider):
+            if log_stream_provider.job_store is None:
+                log_stream_provider.job_store = state.job_store
+            if log_stream_provider.run_in_threadpool is None:
+                log_stream_provider.run_in_threadpool = run_in_threadpool
+        elif isinstance(log_stream_provider, SnapshotLogStreamProvider):
+            if log_stream_provider.job_store is None:
+                log_stream_provider.job_store = state.job_store
+        state.log_stream_provider = log_stream_provider
 
     # Configure Security
     sec = get_security_config()

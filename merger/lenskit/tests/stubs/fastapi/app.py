@@ -1,5 +1,4 @@
 import re
-from .exceptions import HTTPException
 from .middleware import Middleware
 
 class FastAPI:
