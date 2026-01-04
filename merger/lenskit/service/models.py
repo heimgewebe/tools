@@ -170,3 +170,11 @@ class PrescanResponse(BaseModel):
     signature: str
     file_count: int
     total_bytes: int
+
+class FSRoot(BaseModel):
+    id: str
+    path: str
+    token: str
+
+class FSRootsResponse(BaseModel):
+    roots: List[FSRoot]

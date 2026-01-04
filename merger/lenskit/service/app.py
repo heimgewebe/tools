@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, AtlasEffective, calculate_job_hash, PrescanRequest, PrescanResponse
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, AtlasEffective, calculate_job_hash, PrescanRequest, PrescanResponse, FSRoot, FSRootsResponse
 from .jobstore import JobStore
 from .runner import JobRunner
 from .logging_provider import LogProvider, FileLogProvider
@@ -210,7 +210,7 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
 
     return {"abs": str(resolved), "dirs": dirs, "files": files, "entries": entries}
 
-@app.get("/api/fs/roots", dependencies=[Depends(verify_token)])
+@app.get("/api/fs/roots", response_model=FSRootsResponse, dependencies=[Depends(verify_token)])
 def api_fs_roots():
     """
     Return a stable list of allowed roots for the picker & agents.
@@ -221,8 +221,12 @@ def api_fs_roots():
     out = []
     for r in roots:
         p = Path(r["path"]).resolve()
-        out.append({**r, "token": issue_fs_token(p)})
-    return {"roots": out}
+        out.append(FSRoot(
+            id=r["id"],
+            path=r["path"],
+            token=issue_fs_token(p)
+        ))
+    return FSRootsResponse(roots=out)
 
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
 @app.get("/api/fs/list", dependencies=[Depends(verify_token)])
