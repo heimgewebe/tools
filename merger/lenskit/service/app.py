@@ -223,7 +223,7 @@ def api_fs_roots():
         p = Path(r["path"]).resolve()
         out.append(FSRoot(
             id=r["id"],
-            path=r["path"],
+            path=str(p), # Ensure reported path matches token path exactly
             token=issue_fs_token(p)
         ))
     return FSRootsResponse(roots=out)
