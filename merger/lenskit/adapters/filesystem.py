@@ -26,8 +26,10 @@ def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[
     if merges_dir:
         roots.append({"id": "merges", "path": str(merges_dir.resolve())})
     try:
-        sec.validate_path(Path("/"))
-        roots.append({"id": "system", "path": "/"})
+        # System root maps to User Home (e.g. /home/alex)
+        sys_root = Path.home().resolve()
+        sec.validate_path(sys_root)
+        roots.append({"id": "system", "path": str(sys_root)})
     except HTTPException:
         pass
     return roots
@@ -100,7 +102,7 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         root_map: Dict[str, Optional[Path]] = {
             "hub": hub,
             "merges": merges_dir,
-            "system": Path("/"),
+            "system": Path.home(),
         }
         base = root_map.get(root_id)
         if base is None:

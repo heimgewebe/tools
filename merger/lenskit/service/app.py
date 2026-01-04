@@ -148,6 +148,12 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     if merges_dir:
         sec.add_allowlist_root(merges_dir)
 
+    # Allow System Root (Home) for Atlas
+    try:
+        sec.add_allowlist_root(Path.home().resolve())
+    except Exception:
+        pass
+
     # DANGEROUS CAPABILITY:
     # Allows rLens to browse the entire filesystem ("/") via API.
     # Must be explicitly enabled.
@@ -642,6 +648,31 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
             )
             scan_root = trusted.path
 
+            # System Guardrails
+            if root_id == "system":
+                # Enforce safer defaults (Depth/Limit)
+                # Cap max_depth at 6 to prevent runaway scans
+                if request.max_depth > 6:
+                    request.max_depth = 6
+
+                # Cap max_entries to prevent memory/json bloat
+                if request.max_entries > 200000:
+                    request.max_entries = 200000
+
+                # Enforce strict excludes for system root
+                hard_excludes = [
+                    "**/.ssh/**", "**/.gnupg/**", "**/.password-store/**",
+                    "**/Mozilla/**", "**/Chrome/**", "**/Safari/**",
+                    "**/Keychain/**", "**/.aws/**", "**/.kube/**"
+                ]
+
+                if request.exclude_globs is None:
+                    request.exclude_globs = []
+
+                for ex in hard_excludes:
+                     if ex not in request.exclude_globs:
+                         request.exclude_globs.append(ex)
+
     except HTTPException as e:
          raise e
 
@@ -859,7 +890,26 @@ def export_webmaschine():
         with open(target_dir / "repos" / "index.json", "w", encoding="utf-8") as f:
             json.dump(repos, f, indent=2)
 
-        # 3. README
+        # 3. Machine Definition (machine.json)
+        machine_roots = []
+        try:
+            # Check if system is allowed/resolved (maps to Home)
+            sys_root = Path.home().resolve()
+            sec = get_security_config()
+            sec.validate_path(sys_root)
+            machine_roots.append(str(sys_root))
+        except Exception:
+            pass
+
+        machine_def = {
+            "hub": str(hub.resolve()),
+            "roots": machine_roots
+        }
+
+        with open(target_dir / "machine.json", "w", encoding="utf-8") as f:
+            json.dump(machine_def, f, indent=2)
+
+        # 4. README
         readme_content = """# Webmaschine Export
 
 This directory contains the latest atlas and repository index from RepoLens.
