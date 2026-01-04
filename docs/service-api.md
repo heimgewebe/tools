@@ -13,3 +13,24 @@ The server guarantees:
 - **Garbage Last-Event-ID**: If the `Last-Event-ID` header contains non-numeric values, the server responds with **HTTP 400**.
 - **Future ID**: If `Last-Event-ID` > `len(logs)`, the stream returns only `event: end`.
 - **Reconnect after completion**: If the job is already finished and `Last-Event-ID` matches the total log count, the stream returns only `event: end`.
+
+## File System
+
+### `/api/fs/roots`
+Returns a list of allowed root entry points.
+
+**Contract:**
+Each entry in the `roots` list guarantees the following fields:
+- `id`: The logical identifier (e.g., `hub`, `system`).
+- `path`: The absolute path on the server.
+- `token`: An opaque navigation token required for subsequent `/api/fs/list` calls.
+
+Example:
+```json
+{
+  "roots": [
+    { "id": "hub", "path": "/home/user/repos", "token": "..." },
+    { "id": "system", "path": "/home/user", "token": "..." }
+  ]
+}
+```

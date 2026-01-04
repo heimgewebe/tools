@@ -13,7 +13,7 @@ def test_fs_roots_includes_system(service_client):
     # Verify system path is resolved home
     sys_root = next(r for r in roots if r["id"] == "system")
     assert sys_root["path"] == str(Path.home().resolve())
-    # Guaranteed by implementation (issue_fs_token in loop)
+    # Guaranteed by contract (docs/service-api.md)
     assert "token" in sys_root
 
 def test_create_atlas_system_root(service_client):
