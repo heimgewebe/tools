@@ -1,5 +1,4 @@
 
-import pytest
 from pathlib import Path
 
 def test_fs_roots_includes_system(service_client):
@@ -14,7 +13,7 @@ def test_fs_roots_includes_system(service_client):
     # Verify system path is resolved home
     sys_root = next(r for r in roots if r["id"] == "system")
     assert sys_root["path"] == str(Path.home().resolve())
-    # The API contract guarantees token for roots
+    # Guaranteed by implementation (issue_fs_token in loop)
     assert "token" in sys_root
 
 def test_create_atlas_system_root(service_client):

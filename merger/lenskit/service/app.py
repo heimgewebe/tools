@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, AtlasEffective, calculate_job_hash, PrescanRequest, PrescanResponse
 from .jobstore import JobStore
 from .runner import JobRunner
 from .logging_provider import LogProvider, FileLogProvider
@@ -153,7 +153,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     try:
         sec.add_allowlist_root(Path.home().resolve())
     except Exception as e:
-        logger.debug(f"Could not allow system root: {e}", exc_info=True)
+        logger.debug("Could not allow system root: %s", e, exc_info=True)
 
     # DANGEROUS CAPABILITY:
     # Allows rLens to browse the entire filesystem ("/") via API.
@@ -729,11 +729,11 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
         root_scanned=str(scan_root),
         paths={"json": json_filename, "md": md_filename},
         stats={}, # Empty initially
-        effective={
-            "max_depth": effective_max_depth,
-            "max_entries": effective_max_entries,
-            "exclude_globs": effective_excludes
-        }
+        effective=AtlasEffective(
+            max_depth=effective_max_depth,
+            max_entries=effective_max_entries,
+            exclude_globs=effective_excludes
+        )
     )
 
 @app.post("/api/sync/metarepo", dependencies=[Depends(verify_token)])
@@ -908,7 +908,7 @@ def export_webmaschine():
             sec.validate_path(sys_root)
             machine_roots.append(str(sys_root))
         except Exception as e:
-            logger.debug(f"System root not available for export: {e}", exc_info=True)
+            logger.debug("System root not available for export: %s", e, exc_info=True)
 
         machine_def = {
             "hub": str(hub.resolve()),
