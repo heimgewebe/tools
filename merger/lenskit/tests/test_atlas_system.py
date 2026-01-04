@@ -12,9 +12,10 @@ def test_fs_roots_includes_system(service_client):
     assert "hub" in ids
     assert "system" in ids
 
-    # Verify system path is home (or at least exists)
+    # Verify system path is resolved home
     sys_root = next(r for r in roots if r["id"] == "system")
     assert sys_root["path"] == str(Path.home().resolve())
+    # The API contract guarantees token for roots
     assert "token" in sys_root
 
 def test_create_atlas_system_root(service_client):
@@ -50,5 +51,5 @@ def test_export_webmaschine_includes_roots(service_client):
     with open(machine_json) as f:
         data = json.load(f)
         assert "roots" in data
-        assert str(Path.home()) in data["roots"]
+        assert str(Path.home().resolve()) in data["roots"]
         assert data["hub"] == str(service_client.hub_path)

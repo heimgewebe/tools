@@ -623,6 +623,11 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
     if not hub:
         raise HTTPException(status_code=400, detail="Hub not configured")
 
+    # Defaults for effective params
+    effective_max_depth = request.max_depth
+    effective_max_entries = request.max_entries
+    effective_excludes = (request.exclude_globs or []).copy()
+
     # Resolve scan root
     try:
         # Canonical: token-based root selection (no user path expressions)
@@ -659,19 +664,26 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
                 if request.max_entries > 200000:
                     request.max_entries = 200000
 
+                # Enforce safer defaults (Depth/Limit)
+                if effective_max_depth > 6:
+                    effective_max_depth = 6
+
+                if effective_max_entries > 200000:
+                    effective_max_entries = 200000
+
                 # Enforce strict excludes for system root
+                # Includes Linux/Pop!_OS standard paths + generic secrets
                 hard_excludes = [
                     "**/.ssh/**", "**/.gnupg/**", "**/.password-store/**",
-                    "**/Mozilla/**", "**/Chrome/**", "**/Safari/**",
-                    "**/Keychain/**", "**/.aws/**", "**/.kube/**"
+                    "**/.aws/**", "**/.kube/**",
+                    "**/.mozilla/**", "**/.config/google-chrome/**", "**/.config/chromium/**",
+                    "**/.local/share/keyrings/**",
+                    "**/Keychain/**", "**/Safari/**"
                 ]
 
-                if request.exclude_globs is None:
-                    request.exclude_globs = []
-
                 for ex in hard_excludes:
-                     if ex not in request.exclude_globs:
-                         request.exclude_globs.append(ex)
+                    if ex not in effective_excludes:
+                        effective_excludes.append(ex)
 
     except HTTPException as e:
          raise e
@@ -692,9 +704,9 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
         try:
             scanner = AtlasScanner(
                 root=scan_root,
-                max_depth=request.max_depth,
-                max_entries=request.max_entries,
-                exclude_globs=request.exclude_globs
+                max_depth=effective_max_depth,
+                max_entries=effective_max_entries,
+                exclude_globs=effective_excludes
             )
             result = scanner.scan()
 

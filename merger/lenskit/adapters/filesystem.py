@@ -102,7 +102,7 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         root_map: Dict[str, Optional[Path]] = {
             "hub": hub,
             "merges": merges_dir,
-            "system": Path.home(),
+            "system": Path.home().resolve(),
         }
         base = root_map.get(root_id)
         if base is None:
