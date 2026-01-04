@@ -14,7 +14,8 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, PrescanRequest, PrescanResponse
+from .identity import compute_job_key
 from .jobstore import JobStore
 from .runner import JobRunner
 from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name, resolve_any_path
@@ -341,7 +342,7 @@ def create_job(request: JobRequest):
 
     # --- Idempotency & GC ---
     resolved_hub_str = str(req_hub)
-    content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
+    content_hash = compute_job_key(request, resolved_hub_str, SPEC_VERSION)
 
     # Lazy GC
     state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
