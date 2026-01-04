@@ -1,7 +1,6 @@
 
 import pytest
 from pathlib import Path
-from merger.lenskit.service.app import state
 
 def test_fs_roots_includes_system(service_client):
     res = service_client.client.get("/api/fs/roots", headers=service_client.headers)
@@ -24,13 +23,23 @@ def test_create_atlas_system_root(service_client):
 
     payload = {
         "root_id": "system",
-        "max_depth": 20 # Should be capped to 6
+        "max_depth": 20, # Should be capped to 6
+        "max_entries": 300000 # Should be capped to 200000
     }
     res = service_client.client.post("/api/atlas", json=payload, headers=service_client.headers)
     assert res.status_code == 200
     data = res.json()
     assert data["root_scanned"] == str(Path.home().resolve())
     assert data["paths"]["json"]
+
+    # Verify effective params (New check)
+    assert "effective" in data
+    eff = data["effective"]
+    assert eff["max_depth"] == 6
+    assert eff["max_entries"] == 200000
+    # Verify hard excludes are present
+    assert "**/.ssh/**" in eff["exclude_globs"]
+    assert "**/.password-store/**" in eff["exclude_globs"]
 
 def test_export_webmaschine_includes_roots(service_client):
     # First create an atlas to ensure export has something to copy

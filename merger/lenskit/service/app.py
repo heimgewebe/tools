@@ -149,10 +149,11 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
         sec.add_allowlist_root(merges_dir)
 
     # Allow System Root (Home) for Atlas
+    # "System" root maps to user home (e.g. /home/alex), not /
     try:
         sec.add_allowlist_root(Path.home().resolve())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Could not allow system root: {e}", exc_info=True)
 
     # DANGEROUS CAPABILITY:
     # Allows rLens to browse the entire filesystem ("/") via API.
@@ -656,15 +657,6 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
             # System Guardrails
             if root_id == "system":
                 # Enforce safer defaults (Depth/Limit)
-                # Cap max_depth at 6 to prevent runaway scans
-                if request.max_depth > 6:
-                    request.max_depth = 6
-
-                # Cap max_entries to prevent memory/json bloat
-                if request.max_entries > 200000:
-                    request.max_entries = 200000
-
-                # Enforce safer defaults (Depth/Limit)
                 if effective_max_depth > 6:
                     effective_max_depth = 6
 
@@ -736,7 +728,12 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
         hub=str(hub),
         root_scanned=str(scan_root),
         paths={"json": json_filename, "md": md_filename},
-        stats={} # Empty initially
+        stats={}, # Empty initially
+        effective={
+            "max_depth": effective_max_depth,
+            "max_entries": effective_max_entries,
+            "exclude_globs": effective_excludes
+        }
     )
 
 @app.post("/api/sync/metarepo", dependencies=[Depends(verify_token)])
@@ -910,8 +907,8 @@ def export_webmaschine():
             sec = get_security_config()
             sec.validate_path(sys_root)
             machine_roots.append(str(sys_root))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"System root not available for export: {e}", exc_info=True)
 
         machine_def = {
             "hub": str(hub.resolve()),
