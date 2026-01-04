@@ -881,47 +881,62 @@ Run `POST /api/export/webmaschine` to update these files.
 current_dir = Path(__file__).parent
 webui_dir = current_dir.parent / "frontends" / "webui"
 
-# Pre-load and template index.html
-_index_html_content = None
+# Pre-load raw template
+_raw_index_template = None
 
-def get_index_html():
-    global _index_html_content
-    # Refresh in debug mode? No, better safe cache-busting.
-    if _index_html_content is None:
+def get_raw_index_template():
+    global _raw_index_template
+    if _raw_index_template is None:
         index_path = webui_dir / "index.html"
         if index_path.exists():
             content = index_path.read_text(encoding="utf-8")
-            # Template: asset base + build id
-            # Use <base href="..."> so index.html can keep relative asset links.
-            content = content.replace("__RLENS_ASSET_BASE__", "/ui/")
-            # Inject Build ID
+            # Inject Build ID (Static per process)
             content = content.replace("__RLENS_BUILD__", BUILD_ID)
-            _index_html_content = content
+            _raw_index_template = content
         else:
-            _index_html_content = ""
-    return _index_html_content
+            _raw_index_template = ""
+    return _raw_index_template
 
 
 @app.get("/ui", include_in_schema=False)
-def ui_redirect():
-    # Optional UX: avoid confusing blank directory listing / 404 at /ui
-    return RedirectResponse(url="/")
+def ui_redirect(request: Request):
+    # Dynamic redirect to a valid entry point
+    # We redirect to /ui/ which is handled by serve_ui_index
+    # and keeps the user under the /ui path segment (better for proxies)
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    return RedirectResponse(url=f"{root_path}/ui/")
+
+@app.get("/ui/", response_class=HTMLResponse, include_in_schema=False)
+def serve_ui_index(request: Request):
+    return serve_index(request)
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/index.html", response_class=HTMLResponse)
-def serve_index():
-    content = get_index_html()
+def serve_index(request: Request):
+    content = get_raw_index_template()
     if not content:
          return HTMLResponse("<h1>rLens UI not found</h1>", status_code=404)
+
+    # Dynamic Asset Base calculation
+    # e.g. /prefix or ""
+    root_path = request.scope.get("root_path", "").rstrip("/")
+
+    # Asset base should point to where StaticFiles are mounted.
+    # We mount at /ui. So base is {root_path}/ui/
+    asset_base = f"{root_path}/ui/"
+
+    final_content = content.replace("__RLENS_ASSET_BASE__", asset_base)
 
     headers = {
         "Cache-Control": "no-store, max-age=0",
         "Pragma": "no-cache",
         "Expires": "0"
     }
-    return HTMLResponse(content, headers=headers)
+    return HTMLResponse(final_content, headers=headers)
 
 if webui_dir.exists():
-    # Mount assets at /ui to avoid root conflict.
-    # Index is served by serve_index at /.
+    # Mount assets at /ui.
+    # Note: explicit route @app.get("/ui/") defined above takes precedence
+    # for exactly "/ui/", allowing us to serve the templated index there.
+    # StaticFiles handles /ui/style.css, etc.
     app.mount("/ui", StaticFiles(directory=str(webui_dir), html=False), name="webui")

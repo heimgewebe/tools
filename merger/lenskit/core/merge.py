@@ -1949,9 +1949,40 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     include_set = None
     include_prefixes = []
 
-    # Normalize: ["."] or [""] -> None (all)
-    if include_paths is not None and any(p in (".", "") for p in include_paths):
-        include_paths = None
+    # Normalize input: trim and filter empty
+    # Handles:
+    # - "src" -> "src"
+    # - " ./src " -> "src"
+    # - "." / "/" / "" -> None (ALL)
+    # - [] -> [] (None selected)
+    if include_paths is not None:
+        normalized = []
+        is_root_request = False
+
+        for p in include_paths:
+            if p is None: continue
+            s = p.strip()
+
+            # Explicit root indicators
+            if s in (".", "/", ""):
+                is_root_request = True
+                continue
+
+            # Remove leading ./ if present (common from UI/find)
+            if s.startswith("./"):
+                s = s[2:]
+
+            # Check again if it became root (e.g. "./")
+            if not s:
+                is_root_request = True
+                continue
+
+            normalized.append(s)
+
+        if is_root_request:
+            include_paths = None
+        else:
+            include_paths = normalized
 
     if include_paths is not None:
         include_set = set(include_paths)
