@@ -470,7 +470,7 @@ def cancel_job(job_id: str):
         state.job_store.update_job(job)
     return {"status": job.status}
 
-@app.get("/api/jobs/{job_id}/logs", dependencies=[Depends(verify_token)])
+@app.get("/api/jobs/{job_id}/logs", dependencies=[Depends(verify_token)], response_model=None)
 async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Query(None)):
     # SSE Stream
     job = state.job_store.get_job(job_id)
