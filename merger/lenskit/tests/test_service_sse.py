@@ -35,70 +35,68 @@ def test_sse_contract(service_client, monkeypatch):
     # Inject MockLogProvider
     from merger.lenskit.service.logging_provider import MockLogProvider
     mock_provider = MockLogProvider({job_id: job.logs})
-    # We need to set this on the state object used by the app
     from merger.lenskit.service.app import state
-    # We preserve the old provider to restore it later (though test isolation usually handles this via process/reload,
-    # but here we are in same process).
-    # Better: Rely on ctx fixture if it exposed state, but it exposes store/runner.
-    # We can access state directly as imported.
+
     old_provider = state.log_provider
     state.log_provider = mock_provider
 
-    url = f"/api/jobs/{job_id}/logs"
+    try:
+        url = f"/api/jobs/{job_id}/logs"
 
-    # CASE 1: No last-id, start from 0
-    with ctx.client.stream("GET", url, headers=ctx.headers) as response:
-        lines = list(response.iter_lines())
-        decoded = [l for l in lines if l]
+        # CASE 1: No last-id, start from 0
+        with ctx.client.stream("GET", url, headers=ctx.headers) as response:
+            lines = list(response.iter_lines())
+            decoded = [l for l in lines if l]
 
-        # Verify IDs and Data
-        assert "id: 1" in decoded
-        assert "data: line1" in decoded
-        assert "id: 2" in decoded
-        assert "data: line2" in decoded
-        assert "id: 3" in decoded
-        assert "data: line3" in decoded
+            # Verify IDs and Data
+            assert "id: 1" in decoded
+            assert "data: line1" in decoded
+            assert "id: 2" in decoded
+            assert "data: line2" in decoded
+            assert "id: 3" in decoded
+            assert "data: line3" in decoded
 
-        # Verify end event
-        assert "event: end" in decoded
-        assert "data: end" in decoded
+            # Verify end event
+            assert "event: end" in decoded
+            assert "data: end" in decoded
 
-    # CASE 2: Resume with Last-Event-ID header
-    headers_resume = ctx.headers.copy()
-    headers_resume["Last-Event-ID"] = "2"
+        # CASE 2: Resume with Last-Event-ID header
+        headers_resume = ctx.headers.copy()
+        headers_resume["Last-Event-ID"] = "2"
 
-    with ctx.client.stream("GET", url, headers=headers_resume) as response:
-        lines = list(response.iter_lines())
-        decoded = [l for l in lines if l]
+        with ctx.client.stream("GET", url, headers=headers_resume) as response:
+            lines = list(response.iter_lines())
+            decoded = [l for l in lines if l]
 
-        # Should start after ID 2
-        assert "id: 1" not in decoded
-        assert "id: 2" not in decoded
+            # Should start after ID 2
+            assert "id: 1" not in decoded
+            assert "id: 2" not in decoded
 
-        assert "id: 3" in decoded
-        assert "data: line3" in decoded
-        assert "event: end" in decoded
+            assert "id: 3" in decoded
+            assert "data: line3" in decoded
+            assert "event: end" in decoded
 
-    # CASE 3: Resume with query param
-    with ctx.client.stream("GET", f"{url}?last_id=1", headers=ctx.headers) as response:
-        lines = list(response.iter_lines())
-        decoded = [l for l in lines if l]
+        # CASE 3: Resume with query param
+        with ctx.client.stream("GET", f"{url}?last_id=1", headers=ctx.headers) as response:
+            lines = list(response.iter_lines())
+            decoded = [l for l in lines if l]
 
-        assert "id: 2" in decoded
-        assert "id: 3" in decoded
+            assert "id: 2" in decoded
+            assert "id: 3" in decoded
 
-    # CASE 4: Header overrides Query
-    headers_resume["Last-Event-ID"] = "2"
-    with ctx.client.stream("GET", f"{url}?last_id=0", headers=headers_resume) as response:
-        lines = list(response.iter_lines())
-        decoded = [l for l in lines if l]
+        # CASE 4: Header overrides Query
+        headers_resume["Last-Event-ID"] = "2"
+        with ctx.client.stream("GET", f"{url}?last_id=0", headers=headers_resume) as response:
+            lines = list(response.iter_lines())
+            decoded = [l for l in lines if l]
 
-        assert "id: 1" not in decoded
-        assert "id: 2" not in decoded
-        assert "id: 3" in decoded
+            assert "id: 1" not in decoded
+            assert "id: 2" not in decoded
+            assert "id: 3" in decoded
 
-    # Restore provider
-    state.log_provider = old_provider
+    finally:
+        # Restore provider
+        state.log_provider = old_provider
 
 def test_sse_edge_cases(service_client, monkeypatch):
     """
@@ -137,51 +135,53 @@ def test_sse_edge_cases(service_client, monkeypatch):
     old_provider = state.log_provider
     state.log_provider = mock_provider
 
-    url = f"/api/jobs/{job_id}/logs"
+    try:
+        url = f"/api/jobs/{job_id}/logs"
 
-    # EDGE CASE 1: Last-Event-ID = garbage -> HTTP 400
-    bad_headers = ctx.headers.copy()
-    bad_headers["Last-Event-ID"] = "garbage-value"
+        # EDGE CASE 1: Last-Event-ID = garbage -> HTTP 400
+        bad_headers = ctx.headers.copy()
+        bad_headers["Last-Event-ID"] = "garbage-value"
 
-    # Note: Using stream=True but checking status_code before iterating
-    response = ctx.client.get(url, headers=bad_headers)
-    assert response.status_code == 400
-    assert "Invalid Last-Event-ID" in response.text
+        # Note: Using stream=True but checking status_code before iterating
+        response = ctx.client.get(url, headers=bad_headers)
+        assert response.status_code == 400
+        assert "Invalid Last-Event-ID" in response.text
 
-    # EDGE CASE 1.5: Last-Event-ID = negative -> HTTP 400
-    neg_headers = ctx.headers.copy()
-    neg_headers["Last-Event-ID"] = "-1"
+        # EDGE CASE 1.5: Last-Event-ID = negative -> HTTP 400
+        neg_headers = ctx.headers.copy()
+        neg_headers["Last-Event-ID"] = "-1"
 
-    response = ctx.client.get(url, headers=neg_headers)
-    assert response.status_code == 400
-    assert "Invalid Last-Event-ID" in response.text
+        response = ctx.client.get(url, headers=neg_headers)
+        assert response.status_code == 400
+        assert "Invalid Last-Event-ID" in response.text
 
-    # EDGE CASE 2: Last-Event-ID > len(logs) -> event: end (no logs)
-    headers_future = ctx.headers.copy()
-    headers_future["Last-Event-ID"] = "100"
+        # EDGE CASE 2: Last-Event-ID > len(logs) -> event: end (no logs)
+        headers_future = ctx.headers.copy()
+        headers_future["Last-Event-ID"] = "100"
 
-    with ctx.client.stream("GET", url, headers=headers_future) as response:
-        lines = list(response.iter_lines())
-        decoded = [l for l in lines if l]
+        with ctx.client.stream("GET", url, headers=headers_future) as response:
+            lines = list(response.iter_lines())
+            decoded = [l for l in lines if l]
 
-        # No log data should be emitted
-        assert not any("data: line" in l for l in decoded)
-        # Should finish gracefully
-        assert "event: end" in decoded
+            # No log data should be emitted
+            assert not any("data: line" in l for l in decoded)
+            # Should finish gracefully
+            assert "event: end" in decoded
 
-    # EDGE CASE 3: Reconnect after end -> event: end (no logs)
-    # If we have 3 logs, requesting ID 3 means "I have 3, give me next".
-    # Since there is no next and job is done, it should send end.
-    headers_done = ctx.headers.copy()
-    headers_done["Last-Event-ID"] = "3"
+        # EDGE CASE 3: Reconnect after end -> event: end (no logs)
+        # If we have 3 logs, requesting ID 3 means "I have 3, give me next".
+        # Since there is no next and job is done, it should send end.
+        headers_done = ctx.headers.copy()
+        headers_done["Last-Event-ID"] = "3"
 
-    with ctx.client.stream("GET", url, headers=headers_done) as response:
-        lines = list(response.iter_lines())
-        decoded = [l for l in lines if l]
+        with ctx.client.stream("GET", url, headers=headers_done) as response:
+            lines = list(response.iter_lines())
+            decoded = [l for l in lines if l]
 
-        # Should not resend line 3
-        assert not any("data: line" in l for l in decoded)
-        assert "event: end" in decoded
+            # Should not resend line 3
+            assert not any("data: line" in l for l in decoded)
+            assert "event: end" in decoded
 
-    # Restore provider
-    state.log_provider = old_provider
+    finally:
+        # Restore provider
+        state.log_provider = old_provider

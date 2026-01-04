@@ -42,15 +42,20 @@ def _get_server_version():
     # 2. Git Hash
     try:
         import subprocess
-        # Resolve repo root relative to this file
-        repo_root = Path(__file__).resolve().parent.parent.parent.parent # merger/lenskit/service/app.py -> root
-        if not (repo_root / ".git").exists():
-             # Fallback if not standard layout
-             repo_root = Path(__file__).parent
+        # Robustly find git root
+        cwd_candidate = Path(__file__).parent
+        try:
+            repo_root = subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=str(cwd_candidate),
+                stderr=subprocess.DEVNULL
+            ).decode().strip()
+        except Exception:
+            repo_root = str(cwd_candidate)
 
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(repo_root),
+            cwd=repo_root,
             stderr=subprocess.DEVNULL
         ).decode().strip()
     except Exception:
@@ -886,6 +891,9 @@ def get_index_html():
         index_path = webui_dir / "index.html"
         if index_path.exists():
             content = index_path.read_text(encoding="utf-8")
+            # Rewrite paths to /ui/
+            content = content.replace('href="style.css', 'href="/ui/style.css')
+            content = content.replace('src="app.js', 'src="/ui/app.js')
             # Inject Build ID
             content = content.replace("__RLENS_BUILD__", BUILD_ID)
             _index_html_content = content
@@ -908,4 +916,6 @@ def serve_index():
     return HTMLResponse(content, headers=headers)
 
 if webui_dir.exists():
-    app.mount("/", StaticFiles(directory=str(webui_dir), html=True), name="webui")
+    # Mount assets at /ui to avoid root conflict.
+    # Index is served by serve_index at /.
+    app.mount("/ui", StaticFiles(directory=str(webui_dir), html=False), name="webui")
