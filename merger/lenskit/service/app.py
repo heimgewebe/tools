@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from typing import List, Optional, Dict, Any
@@ -891,15 +891,21 @@ def get_index_html():
         index_path = webui_dir / "index.html"
         if index_path.exists():
             content = index_path.read_text(encoding="utf-8")
-            # Rewrite paths to /ui/
-            content = content.replace('href="style.css', 'href="/ui/style.css')
-            content = content.replace('src="app.js', 'src="/ui/app.js')
+            # Template: asset base + build id
+            # Use <base href="..."> so index.html can keep relative asset links.
+            content = content.replace("__RLENS_ASSET_BASE__", "/ui/")
             # Inject Build ID
             content = content.replace("__RLENS_BUILD__", BUILD_ID)
             _index_html_content = content
         else:
             _index_html_content = ""
     return _index_html_content
+
+
+@app.get("/ui", include_in_schema=False)
+def ui_redirect():
+    # Optional UX: avoid confusing blank directory listing / 404 at /ui
+    return RedirectResponse(url="/")
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/index.html", response_class=HTMLResponse)
