@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import datetime
 
-from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, calculate_job_hash, PrescanRequest, PrescanResponse
+from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, AtlasEffective, calculate_job_hash, PrescanRequest, PrescanResponse, FSRoot, FSRootsResponse
 from .jobstore import JobStore
 from .runner import JobRunner
 from .logging_provider import LogProvider, FileLogProvider
@@ -148,6 +148,13 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     if merges_dir:
         sec.add_allowlist_root(merges_dir)
 
+    # Allow System Root (Home) for Atlas
+    # "System" root maps to user home (e.g. /home/alex), not /
+    try:
+        sec.add_allowlist_root(Path.home().resolve())
+    except Exception as e:
+        logger.debug("Could not allow system root: %s", e, exc_info=True)
+
     # DANGEROUS CAPABILITY:
     # Allows rLens to browse the entire filesystem ("/") via API.
     # Must be explicitly enabled.
@@ -203,7 +210,7 @@ def _list_dir(candidate: Path) -> Dict[str, Any]:
 
     return {"abs": str(resolved), "dirs": dirs, "files": files, "entries": entries}
 
-@app.get("/api/fs/roots", dependencies=[Depends(verify_token)])
+@app.get("/api/fs/roots", response_model=FSRootsResponse, dependencies=[Depends(verify_token)])
 def api_fs_roots():
     """
     Return a stable list of allowed roots for the picker & agents.
@@ -214,8 +221,12 @@ def api_fs_roots():
     out = []
     for r in roots:
         p = Path(r["path"]).resolve()
-        out.append({**r, "token": issue_fs_token(p)})
-    return {"roots": out}
+        out.append(FSRoot(
+            id=r["id"],
+            path=str(p), # Ensure reported path matches token path exactly
+            token=issue_fs_token(p)
+        ))
+    return FSRootsResponse(roots=out)
 
 @app.get("/api/fs", dependencies=[Depends(verify_token)])
 @app.get("/api/fs/list", dependencies=[Depends(verify_token)])
@@ -617,6 +628,11 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
     if not hub:
         raise HTTPException(status_code=400, detail="Hub not configured")
 
+    # Defaults for effective params
+    effective_max_depth = request.max_depth
+    effective_max_entries = request.max_entries
+    effective_excludes = (request.exclude_globs or []).copy()
+
     # Resolve scan root
     try:
         # Canonical: token-based root selection (no user path expressions)
@@ -642,6 +658,29 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
             )
             scan_root = trusted.path
 
+            # System Guardrails
+            if root_id == "system":
+                # Enforce safer defaults (Depth/Limit)
+                if effective_max_depth > 6:
+                    effective_max_depth = 6
+
+                if effective_max_entries > 200000:
+                    effective_max_entries = 200000
+
+                # Enforce strict excludes for system root
+                # Includes Linux/Pop!_OS standard paths + generic secrets
+                hard_excludes = [
+                    "**/.ssh/**", "**/.gnupg/**", "**/.password-store/**",
+                    "**/.aws/**", "**/.kube/**",
+                    "**/.mozilla/**", "**/.config/google-chrome/**", "**/.config/chromium/**",
+                    "**/.local/share/keyrings/**",
+                    "**/Keychain/**", "**/Safari/**"
+                ]
+
+                for ex in hard_excludes:
+                    if ex not in effective_excludes:
+                        effective_excludes.append(ex)
+
     except HTTPException as e:
          raise e
 
@@ -661,9 +700,9 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
         try:
             scanner = AtlasScanner(
                 root=scan_root,
-                max_depth=request.max_depth,
-                max_entries=request.max_entries,
-                exclude_globs=request.exclude_globs
+                max_depth=effective_max_depth,
+                max_entries=effective_max_entries,
+                exclude_globs=effective_excludes
             )
             result = scanner.scan()
 
@@ -693,7 +732,12 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
         hub=str(hub),
         root_scanned=str(scan_root),
         paths={"json": json_filename, "md": md_filename},
-        stats={} # Empty initially
+        stats={}, # Empty initially
+        effective=AtlasEffective(
+            max_depth=effective_max_depth,
+            max_entries=effective_max_entries,
+            exclude_globs=effective_excludes
+        )
     )
 
 @app.post("/api/sync/metarepo", dependencies=[Depends(verify_token)])
@@ -859,7 +903,26 @@ def export_webmaschine():
         with open(target_dir / "repos" / "index.json", "w", encoding="utf-8") as f:
             json.dump(repos, f, indent=2)
 
-        # 3. README
+        # 3. Machine Definition (machine.json)
+        machine_roots = []
+        try:
+            # Check if system is allowed/resolved (maps to Home)
+            sys_root = Path.home().resolve()
+            sec = get_security_config()
+            sec.validate_path(sys_root)
+            machine_roots.append(str(sys_root))
+        except Exception as e:
+            logger.debug("System root not available for export: %s", e, exc_info=True)
+
+        machine_def = {
+            "hub": str(hub.resolve()),
+            "roots": machine_roots
+        }
+
+        with open(target_dir / "machine.json", "w", encoding="utf-8") as f:
+            json.dump(machine_def, f, indent=2)
+
+        # 4. README
         readme_content = """# Webmaschine Export
 
 This directory contains the latest atlas and repository index from RepoLens.

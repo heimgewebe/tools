@@ -23,6 +23,10 @@ def service_client():
 
     token = "test-token-123"
 
+    # Ensure FS token secret is available for tests
+    import os
+    os.environ["RLENS_TOKEN"] = token
+
     # Initialize service with explicit token and merges_dir
     init_service(hub_path, token=token, merges_dir=merges_dir)
 

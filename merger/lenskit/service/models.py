@@ -78,6 +78,11 @@ class JobRequest(BaseModel):
     json_sidecar: bool = True  # Default true for service
     force_new: bool = False
 
+class AtlasEffective(BaseModel):
+    max_depth: int
+    max_entries: int
+    exclude_globs: List[str]
+
 class AtlasRequest(BaseModel):
     # Canonical: token from FS picker (opaque, HMAC-signed by server).
     # This avoids user-controlled path expressions and satisfies CodeQL.
@@ -100,6 +105,7 @@ class AtlasArtifact(BaseModel):
     root_scanned: str
     paths: Dict[str, str] # {"json": "...", "md": "..."}
     stats: Dict[str, Any] # Summary stats
+    effective: Optional[AtlasEffective] = None # Effective parameters (max_depth, etc)
 
 class Artifact(BaseModel):
     id: str
@@ -164,3 +170,11 @@ class PrescanResponse(BaseModel):
     signature: str
     file_count: int
     total_bytes: int
+
+class FSRoot(BaseModel):
+    id: str
+    path: str
+    token: str
+
+class FSRootsResponse(BaseModel):
+    roots: List[FSRoot]
