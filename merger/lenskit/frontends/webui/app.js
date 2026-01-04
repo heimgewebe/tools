@@ -1163,6 +1163,8 @@ function streamLogs(jobId) {
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
+    fetchVersion(); // Added: Fetch server version on startup
+
     // Global ESC handler for modals
     document.addEventListener('keydown', (e) => {
         if (e.key === "Escape") {
@@ -1876,4 +1878,63 @@ async function storePrescanSelectionInternal(append) {
 async function applyPrescanSelection() {
     // Default to replace mode for backward compatibility
     await storePrescanSelectionReplace();
+}
+
+// --- Version & Diagnostics ---
+
+async function fetchVersion() {
+    try {
+        const res = await apiFetch('/api/version');
+        if (res.ok) {
+            const data = await res.json();
+            const verEl = document.getElementById('verLabel');
+            const originEl = document.getElementById('originLabel');
+
+            // Format: S: <ver> | B: <build_ts>
+            // Build ID format: ver-timestamp. We split and take last part.
+            const buildTs = data.build_id ? data.build_id.split('-').pop() : '?';
+
+            if (verEl) verEl.textContent = `S: ${data.version} | B: ${buildTs}`;
+            if (originEl) originEl.textContent = `Origin: ${window.location.host}`; // user requested origin
+
+            console.info(`[rLens] Server Version: ${data.version}, Build: ${data.build_id}`);
+        }
+    } catch (e) {
+        console.error("Version check failed", e);
+    }
+}
+
+async function hardRefresh() {
+    if (!confirm("Clear all caches and reload?")) return;
+
+    // 1. Unregister Service Workers (Critical for Brave/PWA)
+    if ('serviceWorker' in navigator) {
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map(r => r.unregister()));
+            console.log(`[rLens] Unregistered ${registrations.length} service workers.`);
+        } catch (e) {
+            console.warn("[rLens] Service Worker cleanup failed", e);
+        }
+    }
+
+    // 2. Clear Cache Storage (Hard await)
+    if ('caches' in window) {
+        try {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(name => caches.delete(name)));
+            console.log(`[rLens] Cleared ${keys.length} caches.`);
+        } catch (e) {
+            console.warn("[rLens] Cache clearing failed", e);
+        }
+    }
+
+    // 3. Clear Storage
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // 4. Reload with timestamp to force network fetch of index.html
+    const url = new URL(window.location.href);
+    url.searchParams.set('t', Date.now());
+    window.location.replace(url.toString());
 }
