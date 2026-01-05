@@ -668,6 +668,13 @@ async function runPoolMerge(e) {
     // Ensure deterministic order
     const selectedRepos = Array.from(savedPrescanSelections.keys()).sort();
 
+    // Key Integrity Check (Dirty Repo Keys)
+    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
+    if (dirtyKeys.length > 0) {
+        alert(`Pool selection contains invalid repo keys: ${dirtyKeys.join(", ")}. Please re-prescan or clear the pool.`);
+        return;
+    }
+
     if (commonPayload.mode === 'pro-repo') {
         // Explicit Split Mode: Submit separate jobs per repo
         selectedRepos.forEach(repo => {

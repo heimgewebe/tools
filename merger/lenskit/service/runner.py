@@ -170,9 +170,10 @@ class JobRunner:
                 if req.include_paths_by_repo is not None:
                     if src.name in req.include_paths_by_repo:
                         current_include_paths = req.include_paths_by_repo[src.name]
-                    elif current_include_paths is None:
-                        # Key missing and no global fallback -> Warn about implicit full scan
-                        log(f"WARN include_paths_by_repo has no entry for repo '{src.name}' (available keys: {list(req.include_paths_by_repo.keys())}). Defaulting to FULL SCAN.")
+                    else:
+                        # Key missing
+                        fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
+                        log(f"WARN include_paths_by_repo has no entry for repo '{src.name}' (available keys: {list(req.include_paths_by_repo.keys())}). Fallback: {fallback_status}.")
 
                         # Diagnostic: check if normalization would have helped
                         norm_key = src.name.lower().strip("./").strip("/")
