@@ -665,14 +665,37 @@ async function runPoolMerge(e) {
     };
 
     const jobsToStart = [];
-    savedPrescanSelections.forEach((val, repo) => {
-        // Explicit payload for each repo in the pool
+    const selectedRepos = Array.from(savedPrescanSelections.keys());
+
+    if (commonPayload.mode === 'pro-repo') {
+        // Explicit Split Mode: Submit separate jobs per repo
+        selectedRepos.forEach(repo => {
+            const val = savedPrescanSelections.get(repo);
+            const payload = {
+                ...commonPayload,
+                repos: [repo],
+                include_paths: val.compressed // Can be null (ALL) or array
+            };
+            jobsToStart.push(payload);
+        });
+    } else {
+        // Combined Mode (Default): Submit one job with mapping
+        const pathMap = {};
+        selectedRepos.forEach(repo => {
+            const val = savedPrescanSelections.get(repo);
+            // pool entry: { raw: Set|null, compressed: Array|null }
+            // If compressed is array -> partial. If null -> ALL.
+            pathMap[repo] = val.compressed;
+        });
+
+        // Combined job
         jobsToStart.push({
             ...commonPayload,
-            repos: [repo],
-            include_paths: val.compressed // Can be null (ALL) or array
+            repos: selectedRepos,
+            include_paths_by_repo: pathMap,
+            include_paths: null // Ensure global list is null to avoid ambiguity
         });
-    });
+    }
 
     // Submit jobs
     try {
