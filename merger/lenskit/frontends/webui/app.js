@@ -702,7 +702,8 @@ async function runPoolMerge(e) {
         jobsToStart.push({
             ...commonPayload,
             repos: selectedRepos,
-            include_paths_by_repo: pathMap
+            include_paths_by_repo: pathMap,
+            strict_include_paths_by_repo: true // WebUI always wants strict validation for combined pool jobs
         });
     }
 
