@@ -171,15 +171,18 @@ class JobRunner:
                     if src.name in req.include_paths_by_repo:
                         current_include_paths = req.include_paths_by_repo[src.name]
                     else:
-                        # Key missing
-                        fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
-                        log(f"WARN include_paths_by_repo has no entry for repo '{src.name}' (available keys: {list(req.include_paths_by_repo.keys())}). Fallback: {fallback_status}.")
+                        # Critical: Missing key implies configuration drift.
+                        # We must NOT fall back to global/full scan, as that risks exposing unintended data.
 
-                        # Diagnostic: check if normalization would have helped
+                        # Diagnostic: check if normalization would have helped (before failing)
                         norm_key = src.name.lower().strip("./").strip("/")
                         available_norm = [k.lower().strip("./").strip("/") for k in req.include_paths_by_repo.keys()]
                         if norm_key in available_norm:
                             log(f"INFO key would match after normalization (diagnostic only)")
+
+                        err_msg = f"Strict Mode Violation: include_paths_by_repo is active but missing key for repo '{src.name}'. Available: {list(req.include_paths_by_repo.keys())}"
+                        log(f"ERROR {err_msg}")
+                        raise ValueError(err_msg)
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
