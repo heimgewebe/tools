@@ -165,13 +165,14 @@ class JobRunner:
                 validate_source_dir(src)
 
                 # Determine include_paths for this specific repo
-                # Priority: include_paths_by_repo > include_paths (global)
+                # Priority: include_paths_by_repo (if key exists) > include_paths (global)
                 current_include_paths = include_paths
                 if req.include_paths_by_repo is not None:
-                    current_include_paths = req.include_paths_by_repo.get(src.name)
-
-                    if src.name not in req.include_paths_by_repo and not include_paths:
-                        log(f"WARN include_paths_by_repo has no entry for repo '{src.name}' (available keys: {list(req.include_paths_by_repo.keys())})")
+                    if src.name in req.include_paths_by_repo:
+                        current_include_paths = req.include_paths_by_repo[src.name]
+                    elif current_include_paths is None:
+                        # Key missing and no global fallback -> Warn about implicit full scan
+                        log(f"WARN include_paths_by_repo has no entry for repo '{src.name}' (available keys: {list(req.include_paths_by_repo.keys())}). Defaulting to FULL SCAN.")
 
                         # Diagnostic: check if normalization would have helped
                         norm_key = src.name.lower().strip("./").strip("/")
