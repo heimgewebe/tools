@@ -72,6 +72,7 @@ class JobRequest(BaseModel):
     extensions: Optional[List[str]] = None
     path_filter: Optional[str] = None
     include_paths: Optional[List[str]] = None # Relative paths to include (whitelist)
+    include_paths_by_repo: Optional[Dict[str, Optional[List[str]]]] = None
     # Default: Minimal (Agent-fokussiert). Nur Sidecars.
     # Aligning with repolens.py logic to prevent drift.
     extras: Optional[str] = "json_sidecar,augment_sidecar"

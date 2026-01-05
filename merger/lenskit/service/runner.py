@@ -164,9 +164,15 @@ class JobRunner:
                 # Defense in depth: validate each src before scanning
                 validate_source_dir(src)
 
+                # Determine include_paths for this specific repo
+                # Priority: include_paths_by_repo > include_paths (global)
+                current_include_paths = include_paths
+                if req.include_paths_by_repo is not None:
+                    current_include_paths = req.include_paths_by_repo.get(src.name)
+
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
-                summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=include_paths)
+                summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=current_include_paths)
                 summaries.append(summary)
 
             # 4. Write Reports

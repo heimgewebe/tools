@@ -665,7 +665,8 @@ async function runPoolMerge(e) {
     };
 
     const jobsToStart = [];
-    const selectedRepos = Array.from(savedPrescanSelections.keys());
+    // Ensure deterministic order
+    const selectedRepos = Array.from(savedPrescanSelections.keys()).sort();
 
     if (commonPayload.mode === 'pro-repo') {
         // Explicit Split Mode: Submit separate jobs per repo
@@ -689,11 +690,12 @@ async function runPoolMerge(e) {
         });
 
         // Combined job
+        // Note: We deliberately omit `include_paths` here.
+        // The backend prioritizes `include_paths_by_repo` if present.
         jobsToStart.push({
             ...commonPayload,
             repos: selectedRepos,
-            include_paths_by_repo: pathMap,
-            include_paths: null // Ensure global list is null to avoid ambiguity
+            include_paths_by_repo: pathMap
         });
     }
 
