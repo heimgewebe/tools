@@ -170,6 +170,15 @@ class JobRunner:
                 if req.include_paths_by_repo is not None:
                     current_include_paths = req.include_paths_by_repo.get(src.name)
 
+                    if src.name not in req.include_paths_by_repo and not include_paths:
+                        log(f"WARN include_paths_by_repo has no entry for repo '{src.name}' (available keys: {list(req.include_paths_by_repo.keys())})")
+
+                        # Diagnostic: check if normalization would have helped
+                        norm_key = src.name.lower().strip("./").strip("/")
+                        available_norm = [k.lower().strip("./").strip("/") for k in req.include_paths_by_repo.keys()]
+                        if norm_key in available_norm:
+                            log(f"INFO key would match after normalization (diagnostic only)")
+
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
                 summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=current_include_paths)

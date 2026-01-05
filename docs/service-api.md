@@ -34,3 +34,11 @@ Example:
   ]
 }
 ```
+
+## Job Submission & Dispatch
+
+### `include_paths_by_repo` Semantics
+When submitting a job with `include_paths_by_repo`, the keys in the dictionary MUST exactly match the repository folder name as it exists on the Hub disk.
+- The backend performs **no automatic normalization** (no lowercasing, no path stripping).
+- If a key mismatches, the runner logs a warning and falls back to scanning the entire repository (default behavior for missing keys).
+- This ensures predictability and prevents ambiguous matches in complex directory structures.
