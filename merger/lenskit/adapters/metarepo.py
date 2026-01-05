@@ -17,7 +17,10 @@ from typing import Dict, List, Optional, Any
 import yaml
 
 # Use centralized strict path resolver
-from lenskit.core.path_security import resolve_secure_path
+try:
+    from merger.lenskit.core.path_security import resolve_secure_path
+except ImportError:
+    from lenskit.core.path_security import resolve_secure_path
 
 SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
 MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
