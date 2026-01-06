@@ -56,6 +56,30 @@ def _find_repos(hub: Path) -> List[str]:
         repos.append(child.name)
     return repos
 
+def _diagnostic_norm_repo_key(s: str) -> str:
+    """
+    Robust normalization for diagnostic logging only.
+    Removes leading './', trailing '/', converts backslashes, lowercases.
+    """
+    s = s.strip().lower().replace("\\", "/")
+    # Remove leading './'
+    while s.startswith("./"):
+        s = s[2:]
+    # Remove leading '/' just in case (e.g. .//repo -> /repo) - wait, .// -> / after replace ./
+    # Logic: s.startswith("./") handles "./repo" -> "repo".
+    # But ".//repo" -> "/repo" after one pass? No.
+    # .//repo -> startswith ./ ? YES. s[2:] -> /repo.
+    # /repo does NOT start with ./.
+    # So we should also strip leading slashes if we want pure key normalization?
+    # The requirement was "robust". Let's strip leading slashes too.
+    s = s.lstrip("/")
+
+    # Finally, if s is just ".", return empty.
+    if s == ".":
+        return ""
+
+    return s.rstrip("/")
+
 def _parse_extras_csv(extras_csv: str) -> ExtrasConfig:
     config = ExtrasConfig()
     items = [x.strip().lower() for x in (extras_csv or "").split(",") if x.strip()]
@@ -176,8 +200,8 @@ class JobRunner:
                             # Strict Mode: Hard Fail
 
                             # Diagnostic: check if normalization would have helped (before failing)
-                            norm_key = src.name.lower().strip("./").strip("/")
-                            available_norm = [k.lower().strip("./").strip("/") for k in req.include_paths_by_repo.keys()]
+                            norm_key = _diagnostic_norm_repo_key(src.name)
+                            available_norm = [_diagnostic_norm_repo_key(k) for k in req.include_paths_by_repo.keys()]
                             if norm_key in available_norm:
                                 log(f"INFO key would match after normalization (diagnostic only)")
 
@@ -185,9 +209,13 @@ class JobRunner:
                             log(f"ERROR {err_msg}")
                             raise ValueError(err_msg)
                         else:
-                            # Soft Mode: Warn and Fallback (Backward Compatibility)
-                            fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
-                            log(f"WARN include_paths_by_repo has no entry for repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)")
+                            # Soft Mode: Warn only if it's a mismatch (repo explicitly requested but missing from map)
+                            # We assume if the user explicitly requested a list of repos, they likely intended to map them all if using the map feature.
+                            is_explicit_repo = req.repos and src.name in req.repos
+
+                            if is_explicit_repo:
+                                fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
+                                log(f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)")
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
