@@ -195,6 +195,7 @@ class JobRunner:
                     if src.name in req.include_paths_by_repo:
                         current_include_paths = req.include_paths_by_repo[src.name]
                     else:
+                        # Key missing
                         # Check strict mode flag
                         if req.strict_include_paths_by_repo:
                             # Strict Mode: Hard Fail
@@ -209,11 +210,11 @@ class JobRunner:
                             log(f"ERROR {err_msg}")
                             raise ValueError(err_msg)
                         else:
-                            # Soft Mode: Warn only if it's a mismatch (repo explicitly requested but missing from map)
-                            # We assume if the user explicitly requested a list of repos, they likely intended to map them all if using the map feature.
+                            # Soft Mode: Warn and Fallback to global include_paths (Backward Compatibility)
+                            # Only warn if fallback results in FULL SCAN (None) or if explicit request mismatches
                             is_explicit_repo = req.repos and src.name in req.repos
 
-                            if is_explicit_repo:
+                            if is_explicit_repo or current_include_paths is None:
                                 fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
                                 log(f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)")
 
