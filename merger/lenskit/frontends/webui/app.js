@@ -1269,7 +1269,7 @@ async function startAtlasJob(e) {
     btn.innerText = "Scanning...";
 
     const rootInput = document.getElementById('atlasRoot');
-    const rootPath = rootInput.value;
+    const rootPath = rootInput.value.trim();
     const rootToken = rootInput.dataset.token; // Use token if available from picker
 
     // Save Atlas Config (path only for display restoration)
@@ -1281,18 +1281,32 @@ async function startAtlasJob(e) {
     };
     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(config));
 
+    // Determine Root Strategy
+    let payloadToken = rootToken || null;
+    let payloadId = null;
+
+    // Check for explicit ID keywords
+    const lower = rootPath.toLowerCase();
+    if (['hub', 'merges', 'system', 'home'].includes(lower)) {
+        payloadId = lower === 'home' ? 'system' : lower;
+        payloadToken = null; // Explicit ID overrides token
+    }
+
     const payload = {
-        // Prefer token for canonical CodeQL-safe request
-        root_token: rootToken || null,
-        // Fallback: if no token (manual entry?), try sending root_id if it matches known IDs.
-        // If it's a raw path manually typed, the backend will reject it (Hard Cut).
-        // The user must use the picker or type a valid root_id ("hub").
-        root_id: (['hub', 'merges', 'system'].includes(rootPath)) ? rootPath : null,
+        root_token: payloadToken,
+        root_id: payloadId,
 
         max_depth: parseInt(config.depth),
         max_entries: parseInt(config.limit),
         exclude_globs: config.excludes.split(',').map(s => s.trim())
     };
+
+    if (!payload.root_token && !payload.root_id) {
+         alert("Invalid Root. Please select a folder using the picker button, or type a valid ID ('hub', 'merges', 'system'). Raw paths are not supported.");
+         btn.disabled = false;
+         btn.innerText = "Create Atlas";
+         return;
+    }
 
     try {
         const res = await apiFetch(`${API_BASE}/atlas`, {
@@ -1357,12 +1371,25 @@ async function loadAtlasArtifacts() {
             `;
         }
 
+        // Observability: Show effective limits if available
+        let limitsHtml = '';
+        if (art.effective) {
+            limitsHtml = `
+                <div class="text-[10px] text-gray-500 mt-1">
+                    Limits: Depth=${art.effective.max_depth}, Cap=${art.effective.max_entries}
+                </div>
+            `;
+        }
+
         div.innerHTML = `
             <div class="flex justify-between items-start">
                 <span class="font-bold text-green-400">${art.id}</span>
                 <span class="text-xs text-gray-500">${date}</span>
             </div>
-            <div class="text-xs text-gray-400">Root: ${art.root_scanned}</div>
+            <div class="text-xs text-gray-300 font-mono bg-gray-800 p-1 rounded mt-1 truncate" title="${art.root_scanned}">
+                Root: ${art.root_scanned}
+            </div>
+            ${limitsHtml}
             ${statsHtml}
             <div class="flex flex-wrap gap-2 text-xs mt-3 border-t border-gray-800 pt-2">
                  <button data-dl="${API_BASE}/atlas/${art.id}/download?key=json" data-name="${art.paths.json}" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-green-400">Download JSON</button>
