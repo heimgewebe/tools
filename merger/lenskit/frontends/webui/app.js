@@ -1276,6 +1276,9 @@ async function startAtlasJob(e) {
     const rootToken = rootInput.dataset.token; // Use token if available from picker
 
     // Save Atlas Config (include token for restoration)
+    // NOTE: Persisting the token is a deliberate UX decision for this Localhost tool.
+    // It allows the form to remain valid after a page reload.
+    // In a multi-user environment, persisting capabilities in localStorage would be a risk.
     const config = {
         root: rootPath,
         token: rootToken || null,
