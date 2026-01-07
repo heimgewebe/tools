@@ -70,7 +70,8 @@ const API_BASE = '/api';
 const TOKEN_KEY = 'rlens_token';
 const SETS_KEY = 'rlens_sets';
 const CONFIG_KEY = 'rlens_config';
-const ATLAS_CONFIG_KEY = 'rlens_atlas_config';
+const ATLAS_CONFIG_KEY = 'rlens_atlas_config_v2';
+const ATLAS_CONFIG_LEGACY_KEY = 'rlens_atlas_config';
 const PRESCAN_SAVED_KEY = "lenskit.prescan.savedSelections.v1";
 
 // Global State
@@ -744,8 +745,39 @@ function restoreConfig() {
             }
         }
 
-        // Restore Atlas Config
-        const atlasConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY));
+        // Restore Atlas Config (Versioned & Migrated)
+        let atlasConfig = null;
+        try {
+            const rawV2 = localStorage.getItem(ATLAS_CONFIG_KEY);
+            if (rawV2) {
+                atlasConfig = JSON.parse(rawV2);
+                // Version Check (Soft Reset if future version or invalid)
+                if (atlasConfig.version !== 2) {
+                    console.warn("[Atlas] Unknown config version. Resetting.");
+                    atlasConfig = null;
+                }
+            } else {
+                // Migration V1 -> V2
+                const rawV1 = localStorage.getItem(ATLAS_CONFIG_LEGACY_KEY);
+                if (rawV1) {
+                    console.info("[Atlas] Migrating config v1 -> v2");
+                    const v1 = JSON.parse(rawV1);
+                    atlasConfig = {
+                        version: 2,
+                        root: v1.root,
+                        token: v1.token,
+                        depth: v1.depth,
+                        limit: v1.limit,
+                        excludes: v1.excludes
+                    };
+                    // Save immediately
+                    localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(atlasConfig));
+                }
+            }
+        } catch (e) {
+            console.error("Atlas config load error", e);
+        }
+
         if (atlasConfig) {
              const rootEl = document.getElementById('atlasRoot');
              if (atlasConfig.root) rootEl.value = atlasConfig.root;
@@ -1280,6 +1312,7 @@ async function startAtlasJob(e) {
     // It allows the form to remain valid after a page reload.
     // In a multi-user environment, persisting capabilities in localStorage would be a risk.
     const config = {
+        version: 2,
         root: rootPath,
         token: rootToken || null,
         depth: document.getElementById('atlasDepth').value,
@@ -1321,6 +1354,36 @@ async function startAtlasJob(e) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
         });
+
+        if (res.status === 400) {
+            let errMsg = "Bad Request";
+            try {
+                const errData = await res.json();
+                if (errData.detail) errMsg = errData.detail;
+            } catch(e) { /* ignore JSON parse error */ }
+
+            // Heuristic detection of root/token issues
+            const lowerErr = errMsg.toLowerCase();
+            if (lowerErr.includes("root") || lowerErr.includes("token") || lowerErr.includes("invalid atlas")) {
+                 console.warn("[Atlas] Invalid Root/Token detected. Auto-clearing.");
+
+                 // Auto-Clear Token from Storage
+                 const currentConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY) || '{}');
+                 if (currentConfig.token) {
+                     delete currentConfig.token;
+                     currentConfig.version = 2;
+                     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(currentConfig));
+                 }
+
+                 // UI Update
+                 delete rootInput.dataset.token;
+
+                 alert(`Root-Token ungültig. Bitte Root erneut auswählen.\n\nServer: ${errMsg}`);
+                 return;
+            }
+
+            throw new Error("Atlas scan failed: " + errMsg);
+        }
 
         if (!res.ok) throw new Error("Atlas scan failed: " + res.statusText);
 
