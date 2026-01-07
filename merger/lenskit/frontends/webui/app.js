@@ -722,32 +722,35 @@ function saveConfig() {
 function restoreConfig() {
     try {
         const config = JSON.parse(localStorage.getItem(CONFIG_KEY));
-        if (!config) return;
+        if (config) {
+            if (config.profile) document.getElementById('profile').value = config.profile;
+            if (config.mode) document.getElementById('mode').value = config.mode;
+            if (config.splitSize) document.getElementById('splitSize').value = config.splitSize;
+            if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
+            if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
+            if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
+            if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
+            if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
 
-        if (config.profile) document.getElementById('profile').value = config.profile;
-        if (config.mode) document.getElementById('mode').value = config.mode;
-        if (config.splitSize) document.getElementById('splitSize').value = config.splitSize;
-        if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
-        if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
-        if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
-        if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
-        if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
+            if (config.hubPath) document.getElementById('hubPath').value = config.hubPath;
+            if (config.mergesPath) document.getElementById('mergesPath').value = config.mergesPath;
 
-        if (config.hubPath) document.getElementById('hubPath').value = config.hubPath;
-        if (config.mergesPath) document.getElementById('mergesPath').value = config.mergesPath;
-
-        // Extras need to be handled carefully as they are rendered async or statically
-        if (config.extras) {
-             const boxes = document.querySelectorAll('input[name="extras"]');
-             boxes.forEach(b => {
-                 b.checked = config.extras.includes(b.value);
-             });
+            // Extras need to be handled carefully as they are rendered async or statically
+            if (config.extras) {
+                 const boxes = document.querySelectorAll('input[name="extras"]');
+                 boxes.forEach(b => {
+                     b.checked = config.extras.includes(b.value);
+                 });
+            }
         }
 
         // Restore Atlas Config
         const atlasConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY));
         if (atlasConfig) {
-             if (atlasConfig.root) document.getElementById('atlasRoot').value = atlasConfig.root;
+             const rootEl = document.getElementById('atlasRoot');
+             if (atlasConfig.root) rootEl.value = atlasConfig.root;
+             if (atlasConfig.token) rootEl.setAttribute('data-token', atlasConfig.token);
+
              if (atlasConfig.depth) document.getElementById('atlasDepth').value = atlasConfig.depth;
              if (atlasConfig.limit) document.getElementById('atlasLimit').value = atlasConfig.limit;
              if (atlasConfig.excludes) document.getElementById('atlasExcludes').value = atlasConfig.excludes;
@@ -1272,9 +1275,10 @@ async function startAtlasJob(e) {
     const rootPath = rootInput.value.trim();
     const rootToken = rootInput.dataset.token; // Use token if available from picker
 
-    // Save Atlas Config (path only for display restoration)
+    // Save Atlas Config (include token for restoration)
     const config = {
         root: rootPath,
+        token: rootToken || null,
         depth: document.getElementById('atlasDepth').value,
         limit: document.getElementById('atlasLimit').value,
         excludes: document.getElementById('atlasExcludes').value
