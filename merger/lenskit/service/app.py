@@ -428,6 +428,17 @@ def create_job(request: JobRequest):
     if request.repos:
         request.repos = [validate_repo_name(r) for r in request.repos]
 
+    # Validate strict_include_paths_by_repo (Sync Check for 400)
+    if request.strict_include_paths_by_repo and request.include_paths_by_repo:
+        if not request.repos:
+             # Implicit all repos? If so, we can't easily validate keys without listing dir.
+             # But usually strict mode is used with explicit repos.
+             pass
+        else:
+            missing = [r for r in request.repos if r not in request.include_paths_by_repo]
+            if missing:
+                raise HTTPException(status_code=400, detail=f"Strict Mode Violation: include_paths_by_repo missing keys for: {missing}")
+
     # --- Idempotency & GC ---
     resolved_hub_str = str(req_hub)
     content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
