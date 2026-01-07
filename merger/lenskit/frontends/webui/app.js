@@ -1302,7 +1302,7 @@ async function startAtlasJob(e) {
     };
 
     if (!payload.root_token && !payload.root_id) {
-         alert("Invalid Root. Please select a folder using the picker button, or type a valid ID ('hub', 'merges', 'system'). Raw paths are not supported.");
+         alert("Invalid Root. Raw paths are not supported for security reasons. Please use the picker (folder icon) or type a valid ID ('hub', 'merges', 'system').");
          btn.disabled = false;
          btn.innerText = "Create Atlas";
          return;

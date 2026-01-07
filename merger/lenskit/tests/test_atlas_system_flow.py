@@ -3,7 +3,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from merger.lenskit.service.app import app, init_service, state
-from merger.lenskit.service.models import AtlasRequest, AtlasArtifact
 
 client = TestClient(app)
 
@@ -32,7 +31,9 @@ def mock_state():
 
 def test_atlas_system_root_mapping(mock_state):
     """
-    Verify that root_id="system" maps to Path.home()
+    Verify that root_id="system" maps to Path.home() in the application logic.
+    Note: This tests the mapping logic. The actual path security policy is mocked here
+    to focus on the 'system' keyword handling.
     """
     # We need to bypass the actual AtlasScanner execution since it scans real files
     with patch("merger.lenskit.service.app.AtlasScanner") as MockScanner:
