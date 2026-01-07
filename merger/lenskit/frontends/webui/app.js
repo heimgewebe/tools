@@ -647,7 +647,10 @@ async function runPoolMerge(e) {
         return; // HARD GUARD
     }
 
-    if (savedPrescanSelections.size === 0) return;
+    if (savedPrescanSelections.size === 0) {
+        showNotification("Pool is empty. Add repos via Prescan first.", 'warning');
+        return;
+    }
 
     // Use default config from form for context (profile, mode, etc.)
     const commonPayload = {

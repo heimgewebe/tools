@@ -228,11 +228,17 @@ class JobRunner:
 
                             if is_explicit_repo or current_include_paths is None:
                                 fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
-                                log(f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)")
+                                msg = f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)"
+                                log(msg)
+                                job.warnings.append(msg)
+                                self.job_store.update_job(job)
 
                     # Check for empty list in current_include_paths (which means 'scan nothing' or accident)
                     if current_include_paths is not None and len(current_include_paths) == 0:
-                        log(f"WARN Repo '{src.name}' has empty include paths ([]). This will scan NOTHING (except critical files). If you meant ALL, use null.")
+                        msg = f"WARN Repo '{src.name}' has empty include paths ([]). This will scan NOTHING (except critical files). If you meant ALL, use null."
+                        log(msg)
+                        job.warnings.append(msg)
+                        self.job_store.update_job(job)
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.

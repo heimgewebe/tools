@@ -130,6 +130,7 @@ class Job(BaseModel):
     hub_resolved: Optional[str] = None
     content_hash: Optional[str] = None
     logs: List[str] = []
+    warnings: List[str] = []
     artifact_ids: List[str] = []
     error: Optional[str] = None
 
@@ -143,6 +144,7 @@ class Job(BaseModel):
             request=request,
             content_hash=content_hash,
             logs=[],
+            warnings=[],
             artifact_ids=[]
         )
 
