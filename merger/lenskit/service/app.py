@@ -645,10 +645,14 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
             scan_root = trusted.path
         else:
             # Transitional: root_id only (known ids)
-            root_id = request.root_id or "hub"
+            # STRICT: No silent fallback to "hub". User must be explicit.
+            if not request.root_id:
+                raise HTTPException(status_code=400, detail="Missing Atlas root (provide root_token or root_id)")
+
+            root_id = request.root_id
             if root_id not in ("hub", "merges", "system"):
                 # Strict rejection of raw paths for Atlas to satisfy CodeQL
-                raise HTTPException(status_code=400, detail="Invalid Atlas root_id or missing token")
+                raise HTTPException(status_code=400, detail="Invalid Atlas root_id")
 
             trusted = resolve_fs_path(
                 hub=hub,

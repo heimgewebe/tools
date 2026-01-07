@@ -722,32 +722,35 @@ function saveConfig() {
 function restoreConfig() {
     try {
         const config = JSON.parse(localStorage.getItem(CONFIG_KEY));
-        if (!config) return;
+        if (config) {
+            if (config.profile) document.getElementById('profile').value = config.profile;
+            if (config.mode) document.getElementById('mode').value = config.mode;
+            if (config.splitSize) document.getElementById('splitSize').value = config.splitSize;
+            if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
+            if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
+            if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
+            if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
+            if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
 
-        if (config.profile) document.getElementById('profile').value = config.profile;
-        if (config.mode) document.getElementById('mode').value = config.mode;
-        if (config.splitSize) document.getElementById('splitSize').value = config.splitSize;
-        if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
-        if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
-        if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
-        if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
-        if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
+            if (config.hubPath) document.getElementById('hubPath').value = config.hubPath;
+            if (config.mergesPath) document.getElementById('mergesPath').value = config.mergesPath;
 
-        if (config.hubPath) document.getElementById('hubPath').value = config.hubPath;
-        if (config.mergesPath) document.getElementById('mergesPath').value = config.mergesPath;
-
-        // Extras need to be handled carefully as they are rendered async or statically
-        if (config.extras) {
-             const boxes = document.querySelectorAll('input[name="extras"]');
-             boxes.forEach(b => {
-                 b.checked = config.extras.includes(b.value);
-             });
+            // Extras need to be handled carefully as they are rendered async or statically
+            if (config.extras) {
+                 const boxes = document.querySelectorAll('input[name="extras"]');
+                 boxes.forEach(b => {
+                     b.checked = config.extras.includes(b.value);
+                 });
+            }
         }
 
         // Restore Atlas Config
         const atlasConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY));
         if (atlasConfig) {
-             if (atlasConfig.root) document.getElementById('atlasRoot').value = atlasConfig.root;
+             const rootEl = document.getElementById('atlasRoot');
+             if (atlasConfig.root) rootEl.value = atlasConfig.root;
+             if (atlasConfig.token) rootEl.setAttribute('data-token', atlasConfig.token);
+
              if (atlasConfig.depth) document.getElementById('atlasDepth').value = atlasConfig.depth;
              if (atlasConfig.limit) document.getElementById('atlasLimit').value = atlasConfig.limit;
              if (atlasConfig.excludes) document.getElementById('atlasExcludes').value = atlasConfig.excludes;
@@ -1269,30 +1272,48 @@ async function startAtlasJob(e) {
     btn.innerText = "Scanning...";
 
     const rootInput = document.getElementById('atlasRoot');
-    const rootPath = rootInput.value;
+    const rootPath = rootInput.value.trim();
     const rootToken = rootInput.dataset.token; // Use token if available from picker
 
-    // Save Atlas Config (path only for display restoration)
+    // Save Atlas Config (include token for restoration)
+    // NOTE: Persisting the token is a deliberate UX decision for this Localhost tool.
+    // It allows the form to remain valid after a page reload.
+    // In a multi-user environment, persisting capabilities in localStorage would be a risk.
     const config = {
         root: rootPath,
+        token: rootToken || null,
         depth: document.getElementById('atlasDepth').value,
         limit: document.getElementById('atlasLimit').value,
         excludes: document.getElementById('atlasExcludes').value
     };
     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(config));
 
+    // Determine Root Strategy
+    let payloadToken = rootToken || null;
+    let payloadId = null;
+
+    // Check for explicit ID keywords
+    const lower = rootPath.toLowerCase();
+    if (['hub', 'merges', 'system', 'home'].includes(lower)) {
+        payloadId = lower === 'home' ? 'system' : lower;
+        payloadToken = null; // Explicit ID overrides token
+    }
+
     const payload = {
-        // Prefer token for canonical CodeQL-safe request
-        root_token: rootToken || null,
-        // Fallback: if no token (manual entry?), try sending root_id if it matches known IDs.
-        // If it's a raw path manually typed, the backend will reject it (Hard Cut).
-        // The user must use the picker or type a valid root_id ("hub").
-        root_id: (['hub', 'merges', 'system'].includes(rootPath)) ? rootPath : null,
+        root_token: payloadToken,
+        root_id: payloadId,
 
         max_depth: parseInt(config.depth),
         max_entries: parseInt(config.limit),
         exclude_globs: config.excludes.split(',').map(s => s.trim())
     };
+
+    if (!payload.root_token && !payload.root_id) {
+         alert("Invalid Root. Raw paths are not supported for security reasons. Please use the picker (folder icon) or type a valid ID ('hub', 'merges', 'system').");
+         btn.disabled = false;
+         btn.innerText = "Create Atlas";
+         return;
+    }
 
     try {
         const res = await apiFetch(`${API_BASE}/atlas`, {
@@ -1357,12 +1378,25 @@ async function loadAtlasArtifacts() {
             `;
         }
 
+        // Observability: Show effective limits if available
+        let limitsHtml = '';
+        if (art.effective) {
+            limitsHtml = `
+                <div class="text-[10px] text-gray-500 mt-1">
+                    Limits: Depth=${art.effective.max_depth}, Cap=${art.effective.max_entries}
+                </div>
+            `;
+        }
+
         div.innerHTML = `
             <div class="flex justify-between items-start">
                 <span class="font-bold text-green-400">${art.id}</span>
                 <span class="text-xs text-gray-500">${date}</span>
             </div>
-            <div class="text-xs text-gray-400">Root: ${art.root_scanned}</div>
+            <div class="text-xs text-gray-300 font-mono bg-gray-800 p-1 rounded mt-1 truncate" title="${art.root_scanned}">
+                Root: ${art.root_scanned}
+            </div>
+            ${limitsHtml}
             ${statsHtml}
             <div class="flex flex-wrap gap-2 text-xs mt-3 border-t border-gray-800 pt-2">
                  <button data-dl="${API_BASE}/atlas/${art.id}/download?key=json" data-name="${art.paths.json}" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-green-400">Download JSON</button>
