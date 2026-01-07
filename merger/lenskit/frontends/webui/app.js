@@ -769,8 +769,8 @@ function restoreConfig() {
                         version: 2,
                         root: typeof safeV1.root === 'string' ? safeV1.root : '',
                         token: typeof safeV1.token === 'string' ? safeV1.token : null,
-                        depth: safeV1.depth,
-                        limit: safeV1.limit,
+                        depth: parseInt(safeV1.depth, 10) || null,
+                        limit: parseInt(safeV1.limit, 10) || null,
                         excludes: typeof safeV1.excludes === 'string' ? safeV1.excludes : ''
                     };
                     // Save immediately
@@ -1376,20 +1376,17 @@ async function startAtlasJob(e) {
             if (isRootTokenIssue) {
                  console.warn("[Atlas] Invalid Root/Token detected. Auto-clearing.");
 
-                 // Auto-Clear Token from Storage
-                 try {
-                     const currentConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY) || '{}');
-                     if (currentConfig.token) {
-                         delete currentConfig.token;
-                         currentConfig.version = 2;
-                         localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(currentConfig));
-                     }
-                 } catch (e) { /* ignore storage error */ }
+                 // Auto-Clear Token from Storage (Use local 'config' to avoid re-read)
+                 if (config.token) {
+                     delete config.token;
+                     // Version is already 2 in 'config'
+                     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(config));
+                 }
 
                  // UI Update
                  delete rootInput.dataset.token;
 
-                 alert(`Root-Token ungültig. Bitte Root erneut auswählen.\n\nServer: ${errMsg}`);
+                 alert(`Invalid Root Token. Please re-select the root folder.\n\nServer: ${errMsg}`);
                  return;
             }
 
