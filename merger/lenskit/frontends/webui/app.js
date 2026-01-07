@@ -752,7 +752,7 @@ function restoreConfig() {
             if (rawV2) {
                 atlasConfig = JSON.parse(rawV2);
                 // Version Check (Soft Reset if future version or invalid)
-                if (atlasConfig.version !== 2) {
+                if (typeof atlasConfig.version !== 'number' || atlasConfig.version !== 2) {
                     console.warn("[Atlas] Unknown config version. Resetting.");
                     atlasConfig = null;
                 }
@@ -761,17 +761,22 @@ function restoreConfig() {
                 const rawV1 = localStorage.getItem(ATLAS_CONFIG_LEGACY_KEY);
                 if (rawV1) {
                     console.info("[Atlas] Migrating config v1 -> v2");
-                    const v1 = JSON.parse(rawV1);
+                    let v1;
+                    try { v1 = JSON.parse(rawV1); } catch(e) {}
+                    const safeV1 = (v1 && typeof v1 === 'object') ? v1 : {};
+
                     atlasConfig = {
                         version: 2,
-                        root: v1.root,
-                        token: v1.token,
-                        depth: v1.depth,
-                        limit: v1.limit,
-                        excludes: v1.excludes
+                        root: typeof safeV1.root === 'string' ? safeV1.root : '',
+                        token: typeof safeV1.token === 'string' ? safeV1.token : null,
+                        depth: safeV1.depth,
+                        limit: safeV1.limit,
+                        excludes: typeof safeV1.excludes === 'string' ? safeV1.excludes : ''
                     };
                     // Save immediately
                     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(atlasConfig));
+                    // Cleanup
+                    localStorage.removeItem(ATLAS_CONFIG_LEGACY_KEY);
                 }
             }
         } catch (e) {
@@ -1364,16 +1369,22 @@ async function startAtlasJob(e) {
 
             // Heuristic detection of root/token issues
             const lowerErr = errMsg.toLowerCase();
-            if (lowerErr.includes("root") || lowerErr.includes("token") || lowerErr.includes("invalid atlas")) {
+            const isRootTokenIssue = lowerErr.includes("missing atlas root") ||
+                                     lowerErr.includes("invalid atlas root_id") ||
+                                     lowerErr.includes("invalid atlas token");
+
+            if (isRootTokenIssue) {
                  console.warn("[Atlas] Invalid Root/Token detected. Auto-clearing.");
 
                  // Auto-Clear Token from Storage
-                 const currentConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY) || '{}');
-                 if (currentConfig.token) {
-                     delete currentConfig.token;
-                     currentConfig.version = 2;
-                     localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(currentConfig));
-                 }
+                 try {
+                     const currentConfig = JSON.parse(localStorage.getItem(ATLAS_CONFIG_KEY) || '{}');
+                     if (currentConfig.token) {
+                         delete currentConfig.token;
+                         currentConfig.version = 2;
+                         localStorage.setItem(ATLAS_CONFIG_KEY, JSON.stringify(currentConfig));
+                     }
+                 } catch (e) { /* ignore storage error */ }
 
                  // UI Update
                  delete rootInput.dataset.token;
