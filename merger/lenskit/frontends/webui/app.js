@@ -666,14 +666,47 @@ async function runPoolMerge(e) {
     };
 
     const jobsToStart = [];
-    savedPrescanSelections.forEach((val, repo) => {
-        // Explicit payload for each repo in the pool
+    // Ensure deterministic order
+    const selectedRepos = Array.from(savedPrescanSelections.keys()).sort();
+
+    // Key Integrity Check (Dirty Repo Keys)
+    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
+    if (dirtyKeys.length > 0) {
+        alert(`Pool selection contains invalid repo keys: ${dirtyKeys.join(", ")}. Please re-prescan or clear the pool.`);
+        return;
+    }
+
+    if (commonPayload.mode === 'pro-repo') {
+        // Explicit Split Mode: Submit separate jobs per repo
+        selectedRepos.forEach(repo => {
+            const val = savedPrescanSelections.get(repo);
+            const payload = {
+                ...commonPayload,
+                repos: [repo],
+                include_paths: val.compressed // Can be null (ALL) or array
+            };
+            jobsToStart.push(payload);
+        });
+    } else {
+        // Combined Mode (Default): Submit one job with mapping
+        const pathMap = {};
+        selectedRepos.forEach(repo => {
+            const val = savedPrescanSelections.get(repo);
+            // pool entry: { raw: Set|null, compressed: Array|null }
+            // If compressed is array -> partial. If null -> ALL.
+            pathMap[repo] = val.compressed;
+        });
+
+        // Combined job
+        // Note: We deliberately omit `include_paths` here.
+        // The backend prioritizes `include_paths_by_repo` if present.
         jobsToStart.push({
             ...commonPayload,
-            repos: [repo],
-            include_paths: val.compressed // Can be null (ALL) or array
+            repos: selectedRepos,
+            include_paths_by_repo: pathMap,
+            strict_include_paths_by_repo: true // WebUI always wants strict validation for combined pool jobs
         });
-    });
+    }
 
     // Submit jobs
     try {

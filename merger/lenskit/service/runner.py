@@ -68,6 +68,30 @@ def _find_repos(hub: Path) -> List[str]:
         repos.append(child.name)
     return repos
 
+def _diagnostic_norm_repo_key(s: str) -> str:
+    """
+    Robust normalization for diagnostic logging only.
+    Removes leading './', trailing '/', converts backslashes, lowercases.
+    """
+    s = s.strip().lower().replace("\\", "/")
+    # Remove leading './'
+    while s.startswith("./"):
+        s = s[2:]
+    # Remove leading '/' just in case (e.g. .//repo -> /repo) - wait, .// -> / after replace ./
+    # Logic: s.startswith("./") handles "./repo" -> "repo".
+    # But ".//repo" -> "/repo" after one pass? No.
+    # .//repo -> startswith ./ ? YES. s[2:] -> /repo.
+    # /repo does NOT start with ./.
+    # So we should also strip leading slashes if we want pure key normalization?
+    # The requirement was "robust". Let's strip leading slashes too.
+    s = s.lstrip("/")
+
+    # Finally, if s is just ".", return empty.
+    if s == ".":
+        return ""
+
+    return s.rstrip("/")
+
 def _parse_extras_csv(extras_csv: str) -> ExtrasConfig:
     config = ExtrasConfig()
     items = [x.strip().lower() for x in (extras_csv or "").split(",") if x.strip()]
@@ -176,9 +200,43 @@ class JobRunner:
                 # Defense in depth: validate each src before scanning
                 validate_source_dir(src)
 
+                # Determine include_paths for this specific repo
+                # Priority: include_paths_by_repo (if key exists) > include_paths (global)
+                current_include_paths = include_paths
+                if req.include_paths_by_repo is not None:
+                    if src.name in req.include_paths_by_repo:
+                        current_include_paths = req.include_paths_by_repo[src.name]
+                    else:
+                        # Key missing
+                        # Check strict mode flag
+                        if req.strict_include_paths_by_repo:
+                            # Strict Mode: Hard Fail
+
+                            # Diagnostic: check if normalization would have helped (before failing)
+                            norm_key = _diagnostic_norm_repo_key(src.name)
+                            available_norm = [_diagnostic_norm_repo_key(k) for k in req.include_paths_by_repo.keys()]
+                            if norm_key in available_norm:
+                                log(f"INFO key would match after normalization (diagnostic only)")
+
+                            err_msg = f"Strict Mode Violation: include_paths_by_repo is active but missing key for repo '{src.name}'. Available: {list(req.include_paths_by_repo.keys())}"
+                            log(f"ERROR {err_msg}")
+                            raise ValueError(err_msg)
+                        else:
+                            # Soft Mode: Warn and Fallback to global include_paths (Backward Compatibility)
+                            # Only warn if fallback results in FULL SCAN (None) or if explicit request mismatches
+                            is_explicit_repo = req.repos and src.name in req.repos
+
+                            if is_explicit_repo or current_include_paths is None:
+                                fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
+                                log(f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)")
+
+                    # Check for empty list in current_include_paths (which means 'scan nothing' or accident)
+                    if current_include_paths is not None and len(current_include_paths) == 0:
+                        log(f"WARN Repo '{src.name}' has empty include paths ([]). This will scan NOTHING (except critical files). If you meant ALL, use null.")
+
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
-                summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=include_paths)
+                summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=current_include_paths)
                 summaries.append(summary)
 
             # 4. Write Reports

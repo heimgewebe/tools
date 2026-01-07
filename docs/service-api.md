@@ -34,3 +34,12 @@ Example:
   ]
 }
 ```
+
+## Job Submission & Dispatch
+
+### `include_paths_by_repo` Semantics
+When submitting a job with `include_paths_by_repo`, the keys in the dictionary MUST exactly match the repository folder name as it exists on the Hub disk.
+- The backend performs **no automatic normalization** (no lowercasing, no path stripping).
+- **Strict Mode**: If `strict_include_paths_by_repo: true` is sent, missing keys trigger a `400 Bad Request` (Job Failed) instead of a fallback. This is the default for WebUI "Combined" jobs.
+- **Soft Mode (Default)**: If strict mode is false, a missing key logs a warning and falls back to the global `include_paths` (or full scan if none).
+- This ensures predictability and prevents ambiguous matches in complex directory structures.
