@@ -124,6 +124,7 @@ class iPadFSScanner:
             "path": path_str,
             "summary": {
                 "dirs": 0,
+                "dirs_skipped": 0,
                 "files": 0,
                 "bytes": 0,
                 "status": "pending"
@@ -185,7 +186,7 @@ class iPadFSScanner:
                 "type": "dir",
                 "status": "out_of_scope",
                 "reason": "Global entry limit reached"
-            }, {"dirs": 0, "files": 0, "bytes": 0, "status": "incomplete"}
+            }, {"dirs": 0, "dirs_skipped": 1, "files": 0, "bytes": 0, "status": "incomplete"}
 
         self.entry_count += 1
 
@@ -197,13 +198,22 @@ class iPadFSScanner:
             "mtime": self._safe_mtime(current_path)
         }
 
-        summary = {"dirs": 1, "files": 0, "bytes": 0, "status": "ok"}
+        # Initial summary for THIS node.
+        # We start with dirs=1 (counting self) but move it to skipped if we abort.
+        # However, to meet "stats non-overcount", we will define:
+        # dirs = fully scanned directories
+        # dirs_skipped = partially scanned or skipped directories
+        # So we start with dirs=1, dirs_skipped=0, and swap if we fail.
+        summary = {"dirs": 1, "dirs_skipped": 0, "files": 0, "bytes": 0, "status": "ok"}
 
         # Depth limit check
         if depth >= self.max_depth:
             node["status"] = "out_of_scope"
             node["reason"] = "Max depth reached"
             summary["status"] = "incomplete"
+            # Swap count to skipped
+            summary["dirs"] = 0
+            summary["dirs_skipped"] = 1
             return node, summary
 
         children_nodes = []
@@ -230,6 +240,7 @@ class iPadFSScanner:
                         dir_node, dir_summary = self._scan_recursive(pathlib.Path(entry.path), depth + 1)
                         children_nodes.append(dir_node)
                         summary["dirs"] += dir_summary["dirs"]
+                        summary["dirs_skipped"] += dir_summary.get("dirs_skipped", 0)
                         summary["files"] += dir_summary["files"]
                         summary["bytes"] += dir_summary["bytes"]
 
@@ -246,6 +257,8 @@ class iPadFSScanner:
                 "message": "Access denied by OS"
             })
             summary["status"] = "incomplete"
+            summary["dirs"] = 0
+            summary["dirs_skipped"] = 1
 
         except OSError as e:
             node["status"] = "error"
@@ -256,6 +269,8 @@ class iPadFSScanner:
                 "message": str(e)
             })
             summary["status"] = "error"
+            summary["dirs"] = 0
+            summary["dirs_skipped"] = 1
 
         # Finalize Directory Node
         node["children"] = children_nodes

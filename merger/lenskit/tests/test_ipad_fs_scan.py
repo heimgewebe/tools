@@ -120,7 +120,8 @@ class TestiPadFSScanner(unittest.TestCase):
         scanner = iPadFSScanner(
             roots=roots,
             output_dir=self.output_dir,
-            max_depth=1
+            max_depth=1,
+            excludes=["excluded", "node_modules"]
         )
         result = scanner.scan()
         root = result["roots"][0]
@@ -134,6 +135,15 @@ class TestiPadFSScanner(unittest.TestCase):
         self.assertNotIn("children", sub_node)
         # Verify that the partial scan bubbled up "incomplete" status to the root summary
         self.assertEqual(root["summary"]["status"], "incomplete")
+
+        # Verify counting logic:
+        # root (depth 0, ok) -> dirs=1, skipped=0
+        #   sub (depth 1, limit hit) -> dirs=0, skipped=1
+        #   excluded (skipped by filter, not counted)
+        #   node_modules (skipped by filter, not counted)
+        # Total: dirs=1, skipped=1
+        self.assertEqual(root["summary"]["dirs"], 1)
+        self.assertEqual(root["summary"]["dirs_skipped"], 1)
 
     def test_non_existent_root(self):
         roots = [{
