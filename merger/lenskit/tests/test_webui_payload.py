@@ -57,6 +57,9 @@ def test_pool_payload_combined(page_with_static: Page):
         "repoB": {"raw": ["fileB.txt"], "compressed": ["fileB.txt"]}
     }
 
+    # Enable Test Hook
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+
     page_with_static.goto("http://localhost:8000/")
 
     # Inject state
@@ -128,6 +131,9 @@ def test_pool_payload_combined(page_with_static: Page):
 
 
 def test_pool_payload_pro_repo(page_with_static: Page):
+    # Enable Test Hook
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+
     pool_state = {
         "repoA": {"raw": None, "compressed": None},
         "repoB": {"raw": ["fileB.txt"], "compressed": ["fileB.txt"]}

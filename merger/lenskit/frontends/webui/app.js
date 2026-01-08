@@ -90,8 +90,8 @@ let prescanSelection = new Set();
 let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
 let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set|null, compressed: Array|null }
 
-// Conditional Test Hook (only on localhost/dev)
-if (typeof window !== "undefined" && window.location && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+// Conditional Test Hook (explicit flag instead of heuristic)
+if (window.__RLENS_TEST__) {
     window.__rlens_pool_ready = true;
 }
 
