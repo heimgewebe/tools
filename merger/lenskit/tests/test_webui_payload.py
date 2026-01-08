@@ -60,14 +60,19 @@ def test_pool_payload_combined(page_with_static: Page):
     # Reload to pick up state
     page_with_static.reload()
 
-    # Check if pool loaded
-    size = page_with_static.evaluate("() => savedPrescanSelections.size")
-    print(f"DEBUG: Pool Size: {size}")
+    # Wait for pool to be initialized to avoid race condition
+    # Note: savedPrescanSelections is declared with let/const, so it's not on window.
+    # We access it directly in scope.
+    page_with_static.wait_for_function("() => typeof savedPrescanSelections !== 'undefined' && savedPrescanSelections.size === 2")
 
     payloads = []
     def handle_jobs(route: Route):
         if route.request.method == "POST":
-            payloads.append(route.request.post_data_json)
+            # Robustly get JSON payload
+            data = route.request.post_data_json
+            if data is None:
+                data = json.loads(route.request.post_data)
+            payloads.append(data)
             route.fulfill(json={"id": "job-123", "status": "queued"})
         else:
             route.continue_()
@@ -78,14 +83,26 @@ def test_pool_payload_combined(page_with_static: Page):
 
     # Force Show Panel via JS to avoid UI flakiness
     page_with_static.evaluate("""
-        document.getElementById('selectionPool').classList.remove('hidden');
-        renderSelectionPool();
+        const el = document.getElementById('selectionPool');
+        if(el) {
+            el.classList.remove('hidden');
+            renderSelectionPool();
+        }
     """)
 
     # Click Run
     page_with_static.click("#selectionPool button:has-text('Run Merge from Pool')")
 
-    page_with_static.wait_for_timeout(500)
+    # Explicitly wait for the request to be captured instead of sleep
+    def wait_for_payload():
+        start = time.time()
+        while time.time() - start < 5:
+            if len(payloads) > 0:
+                return
+            page_with_static.wait_for_timeout(50)
+        raise TimeoutError("Payload not captured")
+
+    wait_for_payload()
 
     assert len(payloads) == 1
     p = payloads[0]
@@ -94,7 +111,10 @@ def test_pool_payload_combined(page_with_static: Page):
     ipbr = p["include_paths_by_repo"]
     assert ipbr["repoA"] is None
     assert ipbr["repoB"] == ["fileB.txt"]
+
+    # Check strict flag (ensured by app.js logic)
     assert p.get("strict_include_paths_by_repo") is True
+
     assert "include_paths" not in p or p["include_paths"] is None
 
 
@@ -111,23 +131,45 @@ def test_pool_payload_pro_repo(page_with_static: Page):
     """)
     page_with_static.reload()
 
-    size = page_with_static.evaluate("() => savedPrescanSelections.size")
-    print(f"DEBUG: Pool Size: {size}")
+    # Wait for pool to be initialized
+    page_with_static.wait_for_function("() => typeof savedPrescanSelections !== 'undefined' && savedPrescanSelections.size === 2")
 
     payloads = []
-    page_with_static.route("**/api/jobs", lambda r: (payloads.append(r.request.post_data_json), r.fulfill(json={"id": "job-"+str(len(payloads)), "status": "queued"}))[1])
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            data = route.request.post_data_json
+            if data is None:
+                data = json.loads(route.request.post_data)
+            payloads.append(data)
+            route.fulfill(json={"id": "job-"+str(len(payloads)), "status": "queued"})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
 
     page_with_static.select_option("#mode", "pro-repo")
 
     # Force Show Panel via JS
     page_with_static.evaluate("""
-        document.getElementById('selectionPool').classList.remove('hidden');
-        renderSelectionPool();
+        const el = document.getElementById('selectionPool');
+        if(el) {
+            el.classList.remove('hidden');
+            renderSelectionPool();
+        }
     """)
 
     page_with_static.click("#selectionPool button:has-text('Run Merge from Pool')")
 
-    page_with_static.wait_for_timeout(500)
+    # Wait for 2 payloads
+    def wait_for_payloads():
+        start = time.time()
+        while time.time() - start < 5:
+            if len(payloads) == 2:
+                return
+            page_with_static.wait_for_timeout(50)
+        raise TimeoutError(f"Payloads count {len(payloads)} != 2")
+
+    wait_for_payloads()
 
     assert len(payloads) == 2
     repos_seen = set()
