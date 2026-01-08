@@ -203,6 +203,7 @@ class iPadFSScanner:
         if depth >= self.max_depth:
             node["status"] = "out_of_scope"
             node["reason"] = "Max depth reached"
+            summary["status"] = "incomplete"
             return node, summary
 
         children_nodes = []
@@ -233,11 +234,9 @@ class iPadFSScanner:
                         summary["bytes"] += dir_summary["bytes"]
 
                         # Propagate warnings/errors to parent summary
+                        # If a child is incomplete or has warnings/errors, the parent is also incomplete
                         if dir_summary["status"] != "ok":
-                            if summary["status"] == "ok":
-                                summary["status"] = "has_warnings"
-                            # If it's already "error", we keep it as "error" (or "has_warnings" if we prefer that as the agg state)
-                            # For now, let's say: if any child is incomplete/error, we are "incomplete" or "has_warnings"
+                            summary["status"] = "incomplete"
 
         except PermissionError:
             node["status"] = "permission_denied"
@@ -246,7 +245,7 @@ class iPadFSScanner:
                 "kind": "permission_denied",
                 "message": "Access denied by OS"
             })
-            summary["status"] = "error"
+            summary["status"] = "incomplete"
 
         except OSError as e:
             node["status"] = "error"

@@ -113,6 +113,8 @@ class TestiPadFSScanner(unittest.TestCase):
 
         self.assertEqual(tree["status"], "out_of_scope")
         self.assertEqual(tree["reason"], "Max depth reached")
+        # The summary status should be 'incomplete' because we hit the limit immediately
+        self.assertEqual(root["summary"]["status"], "incomplete")
 
         # Test max depth 1 (should see children of root, but not grandchildren)
         scanner = iPadFSScanner(
@@ -130,6 +132,8 @@ class TestiPadFSScanner(unittest.TestCase):
 
         self.assertEqual(sub_node["status"], "out_of_scope")
         self.assertNotIn("children", sub_node)
+        # Verify that the partial scan bubbled up "incomplete" status to the root summary
+        self.assertEqual(root["summary"]["status"], "incomplete")
 
     def test_non_existent_root(self):
         roots = [{
