@@ -22,6 +22,7 @@ def temp_hub():
         (hub / "repoB").mkdir()
         yield hub
 
+
 def test_runner_combined_include_paths(mock_job_store, temp_hub):
     """
     Test that JobRunner correctly passes include_paths from include_paths_by_repo
