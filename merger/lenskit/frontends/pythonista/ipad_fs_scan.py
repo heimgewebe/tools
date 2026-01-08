@@ -12,7 +12,6 @@ Goal: Provide AI systems with a reliable map of the iPad's accessible file syste
 import os
 import sys
 import json
-import time
 import datetime
 import fnmatch
 import platform
@@ -26,7 +25,6 @@ logger = logging.getLogger("ipad_fs_scan")
 # Try importing Pythonista-specific modules
 try:
     import dialogs
-    import ui
     import console
     HAS_UI = True
 except ImportError:
@@ -357,6 +355,7 @@ def run_ui():
         if os.path.exists(doc_path):
             default_roots = [doc_path]
     except Exception:
+        # Fallback to default path if detection fails (e.g. non-standard env)
         pass
 
     roots_str = "\n".join(default_roots)

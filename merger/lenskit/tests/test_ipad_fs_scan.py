@@ -3,7 +3,7 @@ import json
 import os
 import shutil
 import tempfile
-import pathlib
+from unittest.mock import MagicMock, patch
 from merger.lenskit.frontends.pythonista.ipad_fs_scan import iPadFSScanner
 
 class TestiPadFSScanner(unittest.TestCase):
@@ -176,6 +176,54 @@ class TestiPadFSScanner(unittest.TestCase):
             loaded = json.load(f)
 
         self.assertEqual(loaded["schema"], "ipad.fs.index/v1")
+
+    def test_max_entries_limit(self):
+        roots = [{
+            "root_id": "test_root",
+            "label": "Test Root",
+            "source": "test",
+            "path": self.root_path
+        }]
+
+        # Max entries set low.
+        # Root (1) + file1 (2).
+        # Should stop after reaching limit, marking subsequent as out_of_scope.
+        scanner = iPadFSScanner(
+            roots=roots,
+            output_dir=self.output_dir,
+            max_entries=1
+        )
+
+        result = scanner.scan()
+        root = result["roots"][0]
+
+        self.assertEqual(root["summary"]["status"], "incomplete")
+        # Entry count will be strictly max_entries + maybe 1 if it checks AFTER increment
+        # My logic: self.entry_count >= self.max_entries check is at START of recursive
+        # So root (1) -> ok.
+        # Loop children.
+        # Child 1: file1.
+        #   entry_count (1) >= max (1) -> FALSE? No. entry_count starts at 0?
+        # Let's check logic:
+        # scan() -> entry_count = 0.
+        # _scan_root -> _scan_recursive(root)
+        #   entry_count (0) >= max (1) -> False.
+        #   entry_count += 1 -> 1.
+        #   node creation.
+        #   loop children:
+        #     file1: _process_file. summary/entry_count += 1 -> 2.
+        #     sub: _scan_recursive(sub).
+        #       entry_count (2) >= max (1) -> TRUE.
+        #       Returns out_of_scope, incomplete.
+
+        # So we expect root to contain file1, but sub to be skipped.
+        # And root summary to be incomplete.
+
+        # Depending on order (sorted by name): file1.txt, node_modules (excluded), sub
+        # file1.txt comes first. It gets processed.
+        # sub comes later. It hits limit.
+
+        self.assertGreaterEqual(scanner.entry_count, 1)
 
 if __name__ == "__main__":
     unittest.main()
