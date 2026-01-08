@@ -13,10 +13,10 @@ Das Hauptwerkzeug, um Repositories für LLMs aufzubereiten.
 
 ```bash
 # Overview
-python3 merger/repoLens/repolens.py . --level overview
+python3 merger/lenskit/frontends/pythonista/repolens.py . --level overview
 
 # Full Merge mit Split (20MB)
-python3 merger/repoLens/repolens.py . --level max --split-size 20MB
+python3 merger/lenskit/frontends/pythonista/repolens.py . --level max --split-size 20MB --meta-density standard
 ```
 
 Siehe [merger/repoLens/README.md](merger/repoLens/README.md) für Details.
