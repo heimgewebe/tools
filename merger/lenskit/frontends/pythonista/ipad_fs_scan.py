@@ -232,8 +232,12 @@ class iPadFSScanner:
                         summary["files"] += dir_summary["files"]
                         summary["bytes"] += dir_summary["bytes"]
 
+                        # Propagate warnings/errors to parent summary
                         if dir_summary["status"] != "ok":
-                             summary["status"] = "has_warnings" # Propagate warning status
+                            if summary["status"] == "ok":
+                                summary["status"] = "has_warnings"
+                            # If it's already "error", we keep it as "error" (or "has_warnings" if we prefer that as the agg state)
+                            # For now, let's say: if any child is incomplete/error, we are "incomplete" or "has_warnings"
 
         except PermissionError:
             node["status"] = "permission_denied"
