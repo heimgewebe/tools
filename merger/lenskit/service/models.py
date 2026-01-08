@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uuid
 import hashlib
 import json
@@ -129,9 +129,9 @@ class Job(BaseModel):
     request: JobRequest
     hub_resolved: Optional[str] = None
     content_hash: Optional[str] = None
-    logs: List[str] = []
-    warnings: List[str] = []
-    artifact_ids: List[str] = []
+    logs: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    artifact_ids: List[str] = Field(default_factory=list)
     error: Optional[str] = None
 
     @classmethod
