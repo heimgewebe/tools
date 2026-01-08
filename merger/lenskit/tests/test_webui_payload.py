@@ -60,15 +60,16 @@ def test_pool_payload_combined(page_with_static: Page):
     # Reload to pick up state
     page_with_static.reload()
 
-    # Wait for pool to be initialized to avoid race condition
-    # Note: savedPrescanSelections is declared with let/const, so it's not on window.
-    # We access it directly in scope.
-    page_with_static.wait_for_function("() => typeof savedPrescanSelections !== 'undefined' && savedPrescanSelections.size === 2")
+    # Wait for pool to be initialized using explicit signal
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
 
     payloads = []
     def handle_jobs(route: Route):
         if route.request.method == "POST":
-            # Robustly get JSON payload
+            # Robustly get JSON payload.
+            # Note: In Playwright Python 1.55+, post_data_json is a PROPERTY.
+            # Calling it as a method will raise TypeError.
+            # We access it as property and fallback to parsing post_data string if needed.
             data = route.request.post_data_json
             if data is None:
                 data = json.loads(route.request.post_data)
@@ -132,7 +133,7 @@ def test_pool_payload_pro_repo(page_with_static: Page):
     page_with_static.reload()
 
     # Wait for pool to be initialized
-    page_with_static.wait_for_function("() => typeof savedPrescanSelections !== 'undefined' && savedPrescanSelections.size === 2")
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
 
     payloads = []
     def handle_jobs(route: Route):

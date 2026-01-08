@@ -89,6 +89,7 @@ let prescanCurrentTree = null;
 let prescanSelection = new Set();
 let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
 let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set|null, compressed: Array|null }
+window.__rlens_pool_ready = true; // Signal for tests/automation
 
 // DOCS: savedPrescanSelections acts as the "Selection Pool".
 // It is strictly separated from the active "Merge Targets" (which are built in startJob).
