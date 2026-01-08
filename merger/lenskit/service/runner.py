@@ -187,6 +187,7 @@ class JobRunner:
 
             summaries = []
             total_sources = len(sources)
+            warnings_dirty = False
             for i, src in enumerate(sources, 1):
                 # Refresh job status from store to detect external cancel
                 current_job = self.job_store.get_job(job_id)
@@ -228,16 +229,25 @@ class JobRunner:
 
                             if is_explicit_repo or current_include_paths is None:
                                 fallback_status = "FULL SCAN" if current_include_paths is None else f"global paths ({len(current_include_paths)} items)"
-                                log(f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)")
+                                msg = f"WARN include_paths_by_repo has no entry for requested repo '{src.name}'. Fallback: {fallback_status}. (Enable strict_include_paths_by_repo for hard fail)"
+                                log(msg)
+                                job.warnings.append(msg)
+                                warnings_dirty = True
 
                     # Check for empty list in current_include_paths (which means 'scan nothing' or accident)
                     if current_include_paths is not None and len(current_include_paths) == 0:
-                        log(f"WARN Repo '{src.name}' has empty include paths ([]). This will scan NOTHING (except critical files). If you meant ALL, use null.")
+                        msg = f"WARN Repo '{src.name}' has empty include paths ([]). This will scan NOTHING (except critical files). If you meant ALL, use null."
+                        log(msg)
+                        job.warnings.append(msg)
+                        warnings_dirty = True
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
                 summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=current_include_paths)
                 summaries.append(summary)
+
+            if warnings_dirty:
+                self.job_store.update_job(job)
 
             # 4. Write Reports
             log("Generating reports...")

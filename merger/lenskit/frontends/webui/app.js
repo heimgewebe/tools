@@ -90,6 +90,11 @@ let prescanSelection = new Set();
 let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (root expanded by default)
 let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set|null, compressed: Array|null }
 
+// Conditional Test Hook (explicit flag instead of heuristic)
+if (window.__RLENS_TEST__) {
+    window.__rlens_pool_ready = true;
+}
+
 // DOCS: savedPrescanSelections acts as the "Selection Pool".
 // It is strictly separated from the active "Merge Targets" (which are built in startJob).
 // Prescan operations only modify this pool, never the Merge Targets directly.
@@ -647,7 +652,10 @@ async function runPoolMerge(e) {
         return; // HARD GUARD
     }
 
-    if (savedPrescanSelections.size === 0) return;
+    if (savedPrescanSelections.size === 0) {
+        showNotification("Pool is empty. Add repos via Prescan first.", 'warning');
+        return;
+    }
 
     // Use default config from form for context (profile, mode, etc.)
     const commonPayload = {
