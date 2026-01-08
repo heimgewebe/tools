@@ -35,51 +35,13 @@ DEFAULT_SPLIT_SIZE = "25MB"
 DEFAULT_MAX_FILE_BYTES = 0
 # Default: Minimal (Agent-fokussiert). Nur Sidecars.
 DEFAULT_EXTRAS = "json_sidecar,augment_sidecar"
+DEFAULT_META_DENSITY = "auto"
 
 # Whitelist of known extras keys to prevent accidental resets of unknown flags
 KNOWN_EXTRAS_KEYS = [
     "health", "organism_index", "fleet_panorama",
     "delta_reports", "augment_sidecar", "heatmap", "json_sidecar"
 ]
-
-PRESETS = {
-    "Minimal (Agent)": {
-        "desc": "Minimaler Rauschpegel. Nur Content + Sidecars.",
-        "plan_only": False,
-        "code_only": False,
-        "extras": ["json_sidecar", "augment_sidecar"]
-    },
-    "Diagnose (Reich)": {
-        "desc": "Health + Organism + Panorama + Sidecars + Heatmap.",
-        "plan_only": False,
-        "code_only": False,
-        "extras": ["health", "organism_index", "fleet_panorama", "json_sidecar", "augment_sidecar", "heatmap"]
-    },
-    "Review": {
-        "desc": "Content + Delta + Health + Organism + JSON.",
-        "plan_only": False,
-        "code_only": False,
-        "extras": ["health", "organism_index", "json_sidecar", "delta_reports", "augment_sidecar"]
-    },
-    "Schnell-Index (Plan-Only)": {
-        "desc": "Nur Meta + Plan. Kein Content. Keine Struktur.",
-        "plan_only": True,
-        "code_only": False,
-        "extras": ["health", "organism_index", "json_sidecar"]
-    },
-    "Archiv (Full)": {
-        "desc": "Voller Content + Health + JSON. (No Delta)",
-        "plan_only": False,
-        "code_only": False,
-        "extras": ["health", "json_sidecar"]
-    },
-    "Forensik (Max)": {
-        "desc": "Alles inkl. Heatmap & Full Content.",
-        "plan_only": False,
-        "code_only": False,
-        "extras": ["health", "organism_index", "json_sidecar", "delta_reports", "augment_sidecar", "heatmap", "fleet_panorama"]
-    }
-}
 
 try:
     import appex  # type: ignore
@@ -869,6 +831,26 @@ class MergerUI(object):
 
         cy += 36
 
+        # --- Meta Density ---
+        meta_label = ui.Label()
+        meta_label.text = "Meta:"
+        meta_label.text_color = "white"
+        meta_label.background_color = "#111111"
+        meta_label.frame = (10, cy, 60, 22)
+        bottom_container.add_subview(meta_label)
+
+        seg_meta = ui.SegmentedControl()
+        seg_meta.segments = ["auto", "min", "standard", "full"]
+        seg_meta.selected_index = 0 # Default auto
+        seg_meta.frame = (70, cy - 2, cw - 80, 28)
+        seg_meta.flex = "W"
+        seg_meta.tint_color = "#007aff"
+        seg_meta.background_color = "#dddddd"
+        bottom_container.add_subview(seg_meta)
+        self.seg_meta = seg_meta
+
+        cy += 36
+
         max_label = ui.Label()
         max_label.text = "Max Bytes/File:"
         max_label.text_color = "white"
@@ -1038,13 +1020,12 @@ class MergerUI(object):
         # Titles & Actions
         # Presets, Extras, Load, Delta, Prescan, PR-Schau
 
-        # 6 Buttons to fit Prescan
-        count = 6
+        # 5 Buttons (Presets removed)
+        count = 5
         w_avail = w - (2 * margin)
         btn_w = (w_avail - (count - 1) * gap) / count
 
         btns = [
-            ("Presets", self.show_presets_sheet, "#007aff"),       # Blue (High level)
             ("Extras", self.show_extras_sheet, "#333333"),
             ("Load", self.restore_last_state, "#333333"),
             ("Delta", self.run_delta_from_last_import, "#444444"), # Delta slightly different
@@ -1514,6 +1495,7 @@ class MergerUI(object):
                     "path_filter": self.path_field.text or "",
                     "max_bytes": self.max_field.text or "",
                     "split_mb": self.split_field.text or "",
+                    "meta_density_index": self.seg_meta.selected_index,
                     "plan_only": bool(self.plan_only_switch.value),
                     "code_only": bool(getattr(self, "code_only_switch", False) and self.code_only_switch.value),
                     "selected_repos": self._get_selected_repos(explicit_only=True),
@@ -1566,6 +1548,11 @@ class MergerUI(object):
         self.path_field.text = data.get("path_filter", "")
         self.max_field.text = data.get("max_bytes", "")
         self.split_field.text = data.get("split_mb", "")
+
+        meta_idx = data.get("meta_density_index", 0)
+        if 0 <= meta_idx < len(self.seg_meta.segments):
+            self.seg_meta.selected_index = meta_idx
+
         self.plan_only_switch.value = bool(data.get("plan_only", False))
         if getattr(self, "code_only_switch", None) is not None:
             self.code_only_switch.value = bool(data.get("code_only", False))
@@ -2823,49 +2810,6 @@ class MergerUI(object):
 
         sheet.present("sheet")
 
-    def show_presets_sheet(self, sender):
-        """Shows a sheet to select a preset configuration."""
-        if not dialogs:
-            if console:
-                # Use positional args only to be safe across Pythonista versions
-                console.alert("Error", "Module 'dialogs' not available", "OK")
-            return
-
-        items = list(PRESETS.keys())
-        # Use Pythonista's dialogs module directly
-        result = dialogs.list_dialog("Wähle Preset", items)
-        if result:
-            self.apply_preset(result)
-
-    def apply_preset(self, preset_name: str):
-        cfg = PRESETS.get(preset_name)
-        if not cfg:
-            return
-
-        # 1. Apply Mode flags
-        self.plan_only_switch.value = cfg["plan_only"]
-        if getattr(self, "code_only_switch", None):
-            self.code_only_switch.value = cfg["code_only"]
-
-        # 2. Apply Extras
-        target_extras = set(cfg["extras"])
-
-        # Use centralized whitelist
-        for k in KNOWN_EXTRAS_KEYS:
-            if hasattr(self.extras_config, k):
-                should_be_on = k in target_extras
-                setattr(self.extras_config, k, should_be_on)
-
-        # 3. Feedback
-        desc = cfg.get("desc", "")
-        if console:
-            console.hud_alert(f"Preset '{preset_name}' applied", "success")
-
-        # Show what will happen
-        msg = f"Aktiviert:\n\n{desc}\n\nPlan Only: {cfg['plan_only']}\nExtras: {', '.join(cfg['extras'])}"
-        if ui:
-            # Use minimal args for compatibility
-            ui.alert("Preset Applied", msg, "OK")
 
     def show_pool_viewer(self, sender):
         """Shows the current Selection Pool content."""
@@ -3132,6 +3076,9 @@ class MergerUI(object):
         mode_idx = self.seg_mode.selected_index
         mode = ["gesamt", "pro-repo"][mode_idx]
 
+        meta_idx = self.seg_meta.selected_index
+        meta_density = self.seg_meta.segments[meta_idx]
+
         max_bytes = self._parse_max_bytes()
         split_size = self._parse_split_size()
 
@@ -3298,6 +3245,7 @@ class MergerUI(object):
                 ext_filter=extensions or None,
                 extras=self.extras_config,
                 delta_meta=delta_meta,
+                meta_density=meta_density,
             )
 
             all_out_paths.extend(artifacts.get_all_paths())
@@ -3417,6 +3365,7 @@ def main_cli():
     parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
     parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
+    parser.add_argument("--meta-density", choices=["min", "standard", "full", "auto"], default="full", help="Control metadata verbosity")
 
     args = parser.parse_args()
 
@@ -3511,6 +3460,7 @@ def main_cli():
         ext_filter=ext_list,
         extras=extras_config,
         delta_meta=delta_meta,
+        meta_density=args.meta_density,
     )
 
     out_paths = artifacts.get_all_paths()

@@ -77,6 +77,7 @@ class JobRequest(BaseModel):
     # Default: Minimal (Agent-fokussiert). Nur Sidecars.
     # Aligning with repolens.py logic to prevent drift.
     extras: Optional[str] = "json_sidecar,augment_sidecar"
+    meta_density: Literal["min", "standard", "full", "auto"] = "full"
     json_sidecar: bool = True  # Default true for service
     force_new: bool = False
 
