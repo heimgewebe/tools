@@ -28,8 +28,16 @@ def page_with_static(page: Page):
         path = route.request.url.split("/")[-1].split("?")[0]
         file_path = os.path.join(UI_DIR, path)
         if os.path.exists(file_path):
+            content_type = "text/plain"
+            if path.endswith(".js"):
+                content_type = "application/javascript"
+            elif path.endswith(".css"):
+                content_type = "text/css"
+            elif path.endswith(".html"):
+                content_type = "text/html"
+
             with open(file_path, "rb") as f:
-                route.fulfill(body=f.read())
+                route.fulfill(body=f.read(), content_type=content_type)
         else:
             route.continue_()
 

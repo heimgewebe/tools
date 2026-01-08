@@ -2,10 +2,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 from merger.lenskit.service.runner import JobRunner
 from merger.lenskit.service.jobstore import JobStore
-from merger.lenskit.service.models import JobRequest, Job, Artifact
+from merger.lenskit.service.models import JobRequest, Job
 from pathlib import Path
 import tempfile
-import uuid
 
 @pytest.fixture
 def mock_job_store():
