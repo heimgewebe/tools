@@ -24,7 +24,9 @@ def now_utc() -> datetime.datetime:
 def freeze_time(dt: Optional[datetime.datetime]) -> None:
     """
     Freeze the time to a specific datetime for the current context.
-    Pass None to unfreeze.
+    Pass None to unfreeze (resets to system time, does not restore previous frozen state).
+
+    For scoped usage, prefer the `frozen()` context manager.
 
     Raises ValueError if dt is not timezone-aware and set to UTC.
     """
