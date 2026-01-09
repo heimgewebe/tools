@@ -2920,7 +2920,7 @@ def iter_report_blocks(
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
     artifact_refs: Optional[Dict[str, str]] = None,
-    meta_density: str = "full",
+    meta_density: str = "auto",
 ) -> Iterator[str]:
     if extras is None:
         extras = ExtrasConfig.none()
@@ -3910,7 +3910,7 @@ def generate_report_content(
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
     artifact_refs: Optional[Dict[str, str]] = None,
-    meta_density: str = "full",
+    meta_density: str = "auto",
 ) -> str:
     report = "".join(
         iter_report_blocks(
@@ -4175,7 +4175,7 @@ def write_reports_v2(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
-    meta_density: str = "full",
+    meta_density: str = "auto",
 ) -> MergeArtifacts:
     out_paths = []
 

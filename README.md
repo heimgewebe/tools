@@ -2,7 +2,7 @@
 
 Kurzüberblick über Ordner:
 - `scripts/` – wiederverwendbare Helfer
-- `merger/repoLens/` – **repoLens** (Primary Tool) – erzeugt strukturierte Merge-Berichte für KIs.
+- `merger/lenskit/` – **repoLens** (Primary Tool) – erzeugt strukturierte Merge-Berichte für KIs.
 - `merger/repomerger/` – Legacy-Merger (Standalone).
 
 ## Nutzung (Beispiele)
@@ -13,13 +13,13 @@ Das Hauptwerkzeug, um Repositories für LLMs aufzubereiten.
 
 ```bash
 # Overview
-python3 merger/lenskit/frontends/pythonista/repolens.py . --level overview
+python3 -m merger.lenskit.cli.rlens . --level overview
 
-# Full Merge mit Split (20MB)
-python3 merger/lenskit/frontends/pythonista/repolens.py . --level max --split-size 20MB --meta-density standard
+# Full Merge mit Split (20MB) und Meta-Drosselung
+python3 -m merger.lenskit.cli.rlens . --level max --split-size 20MB --meta-density standard
 ```
 
-Siehe [merger/repoLens/README.md](merger/repoLens/README.md) für Details.
+Siehe [merger/lenskit/repoLens-spec.md](merger/lenskit/repoLens-spec.md) für Details.
 
 ### JSONL Tools
 
