@@ -2935,6 +2935,7 @@ def iter_report_blocks(
 
     # Resolve Auto-Throttling
     # "Wenn Filter aktiv -> default meta_density=standard (oder min)"
+    original_meta_density = meta_density
     if meta_density == "auto":
         if path_filter or ext_filter:
             meta_density = "standard"
