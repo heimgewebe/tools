@@ -3118,7 +3118,7 @@ def iter_report_blocks(
 
     if meta_density != "full":
         header.append(f"**Meta-Density:** `{meta_density}` (Reduzierter Overhead)")
-        if meta_density == "standard" and (path_filter or ext_filter):
+        if original_meta_density == "auto" and meta_density == "standard":
             header.append("⚠️ **Auto-Drosselung:** Wegen aktiver Filter wurde der Meta-Overhead reduziert.")
         header.append("")
 

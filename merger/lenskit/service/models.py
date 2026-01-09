@@ -77,7 +77,10 @@ class JobRequest(BaseModel):
     # Default: Minimal (Agent-fokussiert). Nur Sidecars.
     # Aligning with repolens.py logic to prevent drift.
     extras: Optional[str] = "json_sidecar,augment_sidecar"
-    meta_density: Literal["min", "standard", "full", "auto"] = "full"
+    meta_density: Literal["min", "standard", "full", "auto"] = Field(
+        default="auto",
+        description="Controls the density of metadata (headers, file_meta blocks) in the report. 'auto' switches to 'standard' if filters are active."
+    )
     json_sidecar: bool = True  # Default true for service
     force_new: bool = False
 

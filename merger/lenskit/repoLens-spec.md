@@ -240,19 +240,24 @@ nicht die Profile/Configs.
 
 ## 3e. Meta-Drosselung (Meta Density)
 
-Um bei kleinen Merges (z. B. 3 Dateien) den Overhead zu minimieren, wird eine Drosselung (`meta_density`) eingeführt. Diese Tabelle definiert die Block-Sichtbarkeit verbindlich (Contract):
+Um bei kleinen Merges (z. B. 3 Dateien) den Overhead zu minimieren, wird eine Drosselung (`meta_density`) eingeführt:
 
-| Feature / Block | `min` | `standard` | `full` |
-| :--- | :--- | :--- | :--- |
-| **File Header** | Path only | No MD5 | Full (Path, Cat, Tags, Size, MD5) |
-| **file_meta** | Nur bei `partial`/`truncated` | Nur bei `partial`/`truncated` | Immer |
-| **Index** | Reduziert (Hinweis) | Standard | Standard |
-| **Hotspots** | 0 (aus) | Max 3 pro Lens | Max 8 pro Lens |
-| **Zweck** | Minimale Token-Last | Fokus auf Inhalt | Vollständige Auditierbarkeit |
-
-**Auto-Logik (`meta_density=auto`):**
-- Wenn `path_filter` oder `ext_filter` aktiv sind → `standard` (mit Warnhinweis "Auto-Drosselung").
-- Sonst → `full`.
+- **`min`**:
+  - Kein per-File Header (Category/Tags/MD5/Size).
+  - Kein `file_meta`-Kommentarblock (außer bei `partial` oder `truncated`).
+  - Reduzierter Index.
+  - Reading Lenses (Hotspots) deaktiviert (Budget = 0).
+- **`standard`**:
+  - Headers ohne MD5.
+  - `file_meta` nur bei nicht-vollen Dateien.
+  - Hotspots: Budget = 3 Dateien pro Lens.
+- **`full`** (Default):
+  - Volle Headers (inkl. MD5).
+  - `file_meta` immer.
+  - Hotspots: Budget = 8 Dateien pro Lens.
+- **`auto`**:
+  - Wechselt automatisch zu `standard`, wenn Pfad- oder Extension-Filter aktiv sind.
+  - Zeigt Warnhinweis im Header ("Auto-Drosselung").
 
 ---
 
