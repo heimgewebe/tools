@@ -49,6 +49,7 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         "path_filter": path_filter,
         "extras": extras_str,
         "json_sidecar": req.json_sidecar,
+        "meta_density": req.meta_density,
         "include_paths": inc_paths
         # Merges dir excluded from content hash:
         # Same content, different output path = same logical job.
