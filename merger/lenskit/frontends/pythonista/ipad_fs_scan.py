@@ -12,6 +12,8 @@ Updates for AI-Readiness:
 - Excludes '._*' (AppleDouble) by default to reduce noise.
 - Adds 'relpath' and 'segments' to every node for easier querying and diffing.
 - Normalizes filenames to Unicode NFC to ensure deterministic output.
+- Truth Preservation: Stores both `os_name` (raw) and `path` (normalized NFC).
+- Collision Protection: Detects and marks NFC collisions while preserving both entries.
 """
 
 import os
@@ -23,6 +25,7 @@ import platform
 import pathlib
 import logging
 import unicodedata
+from collections import Counter
 
 # Set up logging to stderr (machine-readable tools should not pollute stdout)
 logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='[%(levelname)s] %(message)s')
@@ -188,6 +191,7 @@ class iPadFSScanner:
         if self.entry_count >= self.max_entries:
             return {
                 "path": self._normalize(current_path.name),
+                "os_name": current_path.name,
                 "relpath": current_relpath,
                 "segments": current_segments,
                 "type": "dir",
@@ -198,17 +202,15 @@ class iPadFSScanner:
         self.entry_count += 1
 
         normalized_name = self._normalize(current_path.name)
-        # For root node (depth 0), current_path.name might be absolute, but we want the logical name or just '.'
-        # However, caller sets name correctly?
-        # _scan_root sets root path.
-        # current_path.name for root is the dir name.
-        # We store it in 'path'.
+        # For root node (depth 0), current_path.name might be absolute.
+        # However, caller (scan_root) uses root_path variable, current_path.name is simple dir name.
 
         # Base node structure
         node = {
-            "path": normalized_name,
-            "relpath": current_relpath,
-            "segments": current_segments,
+            "path": normalized_name,  # Logical/Normalized name
+            "os_name": current_path.name, # Original OS name
+            "relpath": current_relpath, # Logical relpath based on normalized names
+            "segments": current_segments, # Logical segments
             "type": "dir",
             "status": "ok",
             "mtime": self._safe_mtime(current_path)
@@ -216,10 +218,6 @@ class iPadFSScanner:
 
         # Initial summary for THIS node.
         # We start with dirs=1 (counting self) but move it to skipped if we abort.
-        # However, to meet "stats non-overcount", we will define:
-        # dirs = fully scanned directories
-        # dirs_skipped = partially scanned or skipped directories
-        # So we start with dirs=1, dirs_skipped=0, and swap if we fail.
         summary = {"dirs": 1, "dirs_skipped": 0, "files": 0, "bytes": 0, "status": "ok"}
 
         # Depth limit check
@@ -237,8 +235,15 @@ class iPadFSScanner:
         try:
             # We use os.scandir for better performance
             with os.scandir(current_path) as it:
-                # Sort entries by normalized name for determinism
-                entries = sorted(list(it), key=lambda e: self._normalize(e.name).lower())
+                # 1. Read all entries first to detect collisions
+                raw_entries = list(it)
+
+                # 2. Pre-calculate normalized names and detect collisions
+                # Map: norm_name -> count
+                norm_counts = Counter(self._normalize(e.name) for e in raw_entries)
+
+                # 3. Sort entries by normalized name for determinism
+                entries = sorted(raw_entries, key=lambda e: self._normalize(e.name).lower())
 
                 for entry in entries:
                     normalized_entry_name = self._normalize(entry.name)
@@ -246,13 +251,16 @@ class iPadFSScanner:
                     if self._is_excluded(normalized_entry_name):
                         continue
 
-                    # Calculate relpath and segments for child
+                    # Detect collision
+                    is_collision = norm_counts[normalized_entry_name] > 1
+
+                    # Calculate relpath and segments for child using normalized name
                     child_relpath = f"{current_relpath}/{normalized_entry_name}" if current_relpath else normalized_entry_name
                     child_segments = current_segments + [normalized_entry_name]
 
                     # Process File
                     if entry.is_file(follow_symlinks=self.follow_symlinks):
-                        file_node = self._process_file(entry, child_relpath, child_segments)
+                        file_node = self._process_file(entry, child_relpath, child_segments, is_collision)
                         children_nodes.append(file_node)
                         summary["files"] += 1
                         summary["bytes"] += file_node.get("size", 0)
@@ -266,14 +274,17 @@ class iPadFSScanner:
                             child_relpath,
                             child_segments
                         )
+                        # Apply collision marker to directory node
+                        if is_collision:
+                            dir_node["collision"] = True
+                            dir_node["collision_key"] = normalized_entry_name
+
                         children_nodes.append(dir_node)
                         summary["dirs"] += dir_summary["dirs"]
                         summary["dirs_skipped"] += dir_summary.get("dirs_skipped", 0)
                         summary["files"] += dir_summary["files"]
                         summary["bytes"] += dir_summary["bytes"]
 
-                        # Propagate warnings/errors to parent summary
-                        # If a child is incomplete or has warnings/errors, the parent is also incomplete
                         if dir_summary["status"] != "ok":
                             summary["status"] = "incomplete"
 
@@ -308,7 +319,7 @@ class iPadFSScanner:
 
         return node, summary
 
-    def _process_file(self, entry, relpath, segments):
+    def _process_file(self, entry, relpath, segments, is_collision=False):
         """
         Create a node for a file entry.
         """
@@ -322,8 +333,9 @@ class iPadFSScanner:
 
         normalized_name = self._normalize(entry.name)
 
-        return {
-            "path": normalized_name,
+        node = {
+            "path": normalized_name, # Normalized/Logical
+            "os_name": entry.name,   # Raw OS name
             "relpath": relpath,
             "segments": segments,
             "type": "file",
@@ -332,6 +344,12 @@ class iPadFSScanner:
             "mtime": mtime,
             "extension": pathlib.Path(normalized_name).suffix.lower()
         }
+
+        if is_collision:
+            node["collision"] = True
+            node["collision_key"] = normalized_name
+
+        return node
 
     def _normalize(self, name):
         """

@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unicodedata
+from unittest.mock import patch, MagicMock
 from merger.lenskit.frontends.pythonista.ipad_fs_scan import iPadFSScanner
 
 class TestiPadFSScanner(unittest.TestCase):
@@ -92,6 +93,10 @@ class TestiPadFSScanner(unittest.TestCase):
         self.assertNotIn("excluded", names)
         self.assertNotIn("node_modules", names)
         self.assertNotIn("._test.txt", names)
+
+        # Check that os_name is preserved
+        file1_node = next(c for c in children if c["path"] == "file1.txt")
+        self.assertEqual(file1_node["os_name"], "file1.txt")
 
         # Check Subdirectory
         sub_node = next(c for c in children if c["path"] == "sub")
@@ -192,6 +197,87 @@ class TestiPadFSScanner(unittest.TestCase):
             # then just verify we see the file.
             self.assertIn(nfc_name, children_paths)
 
+    def test_collision_handling(self):
+        """
+        Simulate a directory containing two files that normalize to the same NFC string.
+        """
+        roots = [{
+            "root_id": "test_root",
+            "label": "Test Root",
+            "source": "test",
+            "path": self.root_path
+        }]
+
+        scanner = iPadFSScanner(
+            roots=roots,
+            output_dir=self.output_dir
+        )
+
+        # We need two strings that normalize to the same NFC but are different.
+        # Example: 'Å' (U+00C5) and 'A' + combining ring (U+0041 U+030A)
+        name1 = "\u00C5"       # NFC form
+        name2 = "A\u030A"      # NFD form
+
+        # Mocking os.scandir to return entries for these two names
+        # We don't need real files on disk because we mock scandir.
+
+        # Create mock entries
+        mock_entry1 = MagicMock()
+        mock_entry1.name = name1
+        mock_entry1.is_file.return_value = True
+        mock_entry1.is_dir.return_value = False
+        mock_entry1.stat.return_value.st_size = 100
+        mock_entry1.stat.return_value.st_mtime = 1234567890
+
+        mock_entry2 = MagicMock()
+        mock_entry2.name = name2
+        mock_entry2.is_file.return_value = True
+        mock_entry2.is_dir.return_value = False
+        mock_entry2.stat.return_value.st_size = 200
+        mock_entry2.stat.return_value.st_mtime = 1234567890
+
+        # We need to mock os.scandir only for the specific path, but it's recursive.
+        # Easier to mock it globally for this test block.
+
+        # The recursion calls _scan_recursive(root_path).
+        # We want the root to contain these two files.
+
+        with patch('os.scandir') as mock_scandir:
+            # os.scandir returns an iterator
+            mock_scandir.return_value.__enter__.return_value = iter([mock_entry1, mock_entry2])
+
+            # Since we mock scandir for root, we don't need real files.
+            # But the scanner checks root existence first in _scan_root.
+            # Real root exists (setUp), so that passes.
+
+            result = scanner.scan()
+
+            tree = result["roots"][0]["tree"]
+            children = tree["children"]
+
+            # Expect 2 children
+            self.assertEqual(len(children), 2)
+
+            # Both should have normalized path "Å" (\u00C5)
+            normalized_target = unicodedata.normalize("NFC", name1)
+
+            node1 = children[0]
+            node2 = children[1]
+
+            self.assertEqual(node1["path"], normalized_target)
+            self.assertEqual(node2["path"], normalized_target)
+
+            # One should be name1, one name2 (sorting order might vary depending on impl)
+            # The scanner sorts by normalized name. They are equal. So original sort order or stable sort applies.
+            # Let's check that both OS names are present.
+            os_names = [c["os_name"] for c in children]
+            self.assertIn(name1, os_names)
+            self.assertIn(name2, os_names)
+
+            # Check collision markers
+            self.assertTrue(node1.get("collision"))
+            self.assertTrue(node2.get("collision"))
+            self.assertEqual(node1["collision_key"], normalized_target)
 
     def test_non_existent_root(self):
         roots = [{
