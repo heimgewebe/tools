@@ -3115,9 +3115,14 @@ class MergerUI(object):
             if isinstance(entry, dict):
                 # Structured: compressed is list (partial) or None (ALL)
                 compressed = entry.get("compressed")
+                raw = entry.get("raw")
                 if compressed is None:
                     return None
                 if isinstance(compressed, list):
+                    # Fallback to raw if compressed is empty but raw has content
+                    # This handles deserialization edge case where non-strings are filtered
+                    if len(compressed) == 0 and isinstance(raw, list) and len(raw) > 0:
+                        return raw
                     return compressed
                 return None
             # Legacy fallback
@@ -3131,8 +3136,7 @@ class MergerUI(object):
         for name in selected_repos:
             paths = get_pool_include_paths(name)
             if paths is not None:
-                if isinstance(paths, list):
-                    total_paths += len(paths)
+                total_paths += len(paths)
                 repos_with_filters += 1
 
         # HUD / Log Feedback
