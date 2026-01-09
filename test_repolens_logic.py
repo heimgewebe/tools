@@ -156,6 +156,39 @@ def test_deserialization_preserves_both_fields():
     print("✓ test_deserialization_preserves_both_fields passed")
 
 
+def test_deserialization_handles_empty_lists():
+    """Test deserialization keeps empty lists and filters non-strings"""
+    ui = TestUI()
+
+    structured_pool = {
+        'repo1': {
+            "raw": [],
+            "compressed": []
+        },
+        'repo2': {
+            "raw": ["src/main.py", None, 123],
+            "compressed": ["docs", {}, "src/utils.py"]
+        }
+    }
+
+    deserialized = ui._deserialize_prescan_pool(structured_pool)
+
+    assert deserialized['repo1']['raw'] == [], "Empty raw list should stay empty"
+    assert deserialized['repo1']['compressed'] == [], "Empty compressed list should stay empty"
+    assert deserialized['repo2']['raw'] == ["src/main.py"], "Non-strings should be filtered from raw"
+    assert deserialized['repo2']['compressed'] == ["docs", "src/utils.py"], "Non-strings should be filtered from compressed"
+
+    legacy_pool = {
+        'repo3': []
+    }
+
+    deserialized_legacy = ui._deserialize_prescan_pool(legacy_pool)
+    assert deserialized_legacy['repo3']['raw'] == [], "Legacy empty list should stay empty"
+    assert deserialized_legacy['repo3']['compressed'] == [], "Legacy empty list should stay empty"
+
+    print("✓ test_deserialization_handles_empty_lists passed")
+
+
 def test_append_union_both_fields():
     """Test append unions both raw and compressed fields"""
     ui = TestUI()
@@ -229,6 +262,7 @@ def run_all_tests():
     test_serialization_structured()
     test_deserialization_legacy()
     test_deserialization_preserves_both_fields()
+    test_deserialization_handles_empty_lists()
     test_append_union_both_fields()
     test_all_plus_partial_equals_all()
     
@@ -238,4 +272,3 @@ def run_all_tests():
 
 if __name__ == '__main__':
     run_all_tests()
-
