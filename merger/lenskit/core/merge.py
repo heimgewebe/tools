@@ -18,6 +18,7 @@ from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
 
 from . import lenses
+from . import clock
 
 try:
     import yaml  # PyYAML
@@ -426,7 +427,7 @@ class HealthCollector:
             dt = self._parse_dt(gen.strip())
             if not dt:
                 return True
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = clock.now_utc()
             # normalize naive datetimes to UTC to avoid crashes
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=datetime.timezone.utc)
@@ -2264,7 +2265,7 @@ def _generate_run_id(
         A deterministic run_id string
     """
     if timestamp is None:
-        timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M")
+        timestamp = clock.now_utc().strftime("%y%m%d-%H%M")
 
     components: List[str] = []
 
@@ -2399,7 +2400,7 @@ def make_output_filename(
 
     # Legacy behavior: build filename from components
     # 1. Timestamp (jetzt immer am Ende)
-    ts = timestamp if timestamp else datetime.datetime.now().strftime("%y%m%d-%H%M")
+    ts = timestamp if timestamp else clock.now_utc().strftime("%y%m%d-%H%M")
 
     # 2. Repo-Block
     if not repo_names:
@@ -2947,7 +2948,7 @@ def iter_report_blocks(
     nav = NavStyle(emit_search_markers=False)
 
     # UTC Timestamp - ensure strict UTC for Z-suffix validity
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = clock.now_utc()
 
     # Strict Path Filtering (Hard Include)
     # Move before sort for performance (minor optimization)
@@ -3962,7 +3963,7 @@ def generate_json_sidecar(
     Generate a JSON sidecar structure for machine consumption.
     Contains meta, files array, and minimal verification guards.
     """
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = clock.now_utc()
     requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only}
     plan_only, code_only, normalized_requested = _normalize_mode_flags(
         requested_flags.get("plan_only", False),
@@ -4191,7 +4192,7 @@ def write_reports_v2(
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
 
     # Global consistent timestamp for this run (all parts/formats must share it)
-    global_ts = datetime.datetime.now().strftime("%y%m%d-%H%M")
+    global_ts = clock.now_utc().strftime("%y%m%d-%H%M")
 
     # Phase 1.3: Generate deterministic run_id once for this merge
     repo_names = [s["name"] for s in repo_summaries]
@@ -4377,37 +4378,47 @@ def write_reports_v2(
             out_paths.extend(final_paths)
 
         else:
-            # Standard single file (no split logic active, e.g. split_size=0)
-            content = generate_report_content(
-                target_files,
-                detail,
-                max_bytes,
-                target_sources,
-                plan_only,
-                code_only,
-                debug,
-                path_filter,
-                ext_filter,
-                extras,
-                delta_meta,
-                artifact_refs=artifact_refs,
-                meta_density=meta_density,
-            )
-
-            # Spec v2.4: Always enforce Part N/M header, even for single files (1/1)
-            lines = content.splitlines(True)
-            if lines:
-                prefix_ver = "# repoLens Report (v"
-                prefix_main = "# repoLens Report"
-                for i, line in enumerate(lines):
-                    stripped = line.lstrip("\ufeff")
-                    if stripped.startswith(prefix_ver) or stripped.startswith(prefix_main):
-                        lines[i] = "# repoLens Report (Part 1/1)\n"
-                        break
-            content = "".join(lines)
-
+            # Standard single file (Streamed Write)
             out_path = output_filename_base_func(part_suffix="")
-            out_path.write_text(content, encoding="utf-8")
+
+            with out_path.open("w", encoding="utf-8") as f:
+                if plan_only:
+                    f.write("<!-- MODE:PLAN_ONLY -->\n")
+
+                iterator = iter_report_blocks(
+                    target_files,
+                    detail,
+                    max_bytes,
+                    target_sources,
+                    plan_only,
+                    code_only,
+                    debug,
+                    path_filter,
+                    ext_filter,
+                    extras,
+                    delta_meta,
+                    artifact_refs=artifact_refs,
+                    meta_density=meta_density,
+                )
+
+                first_block_processed = False
+
+                for block in iterator:
+                    # Enforce Part 1/1 header on the first block that contains the title
+                    if not first_block_processed and "# repoLens Report" in block:
+                        lines = block.splitlines(True)
+                        for i, line in enumerate(lines):
+                            stripped = line.lstrip("\ufeff")
+                            if stripped.startswith("# repoLens Report"):
+                                lines[i] = "# repoLens Report (Part 1/1)\n"
+                                break
+                        block = "".join(lines)
+                        first_block_processed = True
+
+                    validator.feed(block)
+                    f.write(block)
+
+            validator.close()
             out_paths.append(out_path)
 
     if mode == "gesamt":
