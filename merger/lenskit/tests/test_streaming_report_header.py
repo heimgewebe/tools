@@ -3,33 +3,46 @@ import pytest
 from pathlib import Path
 from merger.lenskit.core import merge
 
-def create_dummy_file_info(tmp_path, name="file.txt", content="content"):
-    """Robust helper to create a FileInfo with a real file backing it."""
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir(exist_ok=True)
-    fpath = repo_dir / name
+def create_dummy_file_info(base_dir, rel_path="file.txt", content="content"):
+    """
+    Robust helper to create a FileInfo with a real file backing it.
+
+    Args:
+        base_dir: The root directory where the file should be created.
+        rel_path: Relative path (string or Path) from base_dir.
+        content: Text content to write to the file.
+
+    Returns:
+        FileInfo object populated with correct paths and stats.
+    """
+    fpath = base_dir / rel_path
+    # Ensure parent dirs exist
+    fpath.parent.mkdir(parents=True, exist_ok=True)
     fpath.write_text(content, encoding="utf-8")
 
     # Instantiate FileInfo with all fields matching current signature
     return merge.FileInfo(
-        root_label="repo",
+        root_label=base_dir.name,
         abs_path=fpath,
-        rel_path=Path(name),
+        rel_path=Path(rel_path),
         size=len(content.encode('utf-8')),
         is_text=True,
-        md5="abc", # Dummy MD5
+        md5="0" * 32, # Valid-looking MD5
         category="source",
         tags=[],
         ext=fpath.suffix,
         skipped=False,
         reason=None,
-        content=None,
+        content=None, # Content typically read on demand
         inclusion_reason="normal"
-    ), repo_dir
+    )
 
 def test_iter_report_blocks_first_block_contains_report_title(tmp_path):
     """Ensure the first block yielded by iter_report_blocks contains the report title."""
-    fi, repo_dir = create_dummy_file_info(tmp_path)
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    fi = create_dummy_file_info(repo_dir, "file.txt")
 
     # Call iter_report_blocks with explicit keyword arguments matching signature
     iterator = merge.iter_report_blocks(
@@ -43,8 +56,15 @@ def test_iter_report_blocks_first_block_contains_report_title(tmp_path):
     # Get the first block
     first_block = next(iterator)
 
-    # Check for title
-    assert "# repoLens Report" in first_block
+    # Check strict header contract: first line (ignoring BOM) must start with title
+    lines = first_block.splitlines()
+    found = False
+    for line in lines:
+        if line.lstrip('\ufeff').startswith("# repoLens Report"):
+            found = True
+            break
+
+    assert found, f"Report title not found at start of block:\n{first_block}"
 
 def test_write_reports_v2_single_file_enforces_part_1_1_header(tmp_path):
     """Ensure write_reports_v2 in single-file mode enforces 'Part 1/1' header."""
@@ -57,8 +77,8 @@ def test_write_reports_v2_single_file_enforces_part_1_1_header(tmp_path):
     repo_dir = hub / "test-repo"
     repo_dir.mkdir()
 
-    # Create dummy file info using helper
-    fi, _ = create_dummy_file_info(tmp_path, name="README.md", content="# Hi")
+    # Create dummy file info located INSIDE the repo_dir
+    fi = create_dummy_file_info(repo_dir, "README.md", "# Hi")
 
     repo_summary = {
         "name": "test-repo",
@@ -66,7 +86,7 @@ def test_write_reports_v2_single_file_enforces_part_1_1_header(tmp_path):
         "files": [fi]
     }
 
-    # We use plan_only=True to focus on header generation
+    # We use plan_only=True to focus on header generation logic in the writer
     artifacts = merge.write_reports_v2(
         merges_dir=merges_dir,
         hub=hub,
@@ -90,7 +110,8 @@ def test_write_reports_v2_single_file_enforces_part_1_1_header(tmp_path):
     # Look for the header line
     header_found = False
     for line in lines:
-        if line.strip() == "# repoLens Report (Part 1/1)":
+        # Strict exact match for the enforced single-part header
+        if line.lstrip('\ufeff').strip() == "# repoLens Report (Part 1/1)":
             header_found = True
             break
 
