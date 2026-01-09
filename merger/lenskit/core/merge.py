@@ -4401,11 +4401,11 @@ def write_reports_v2(
                     meta_density=meta_density,
                 )
 
-                first_block_processed = False
+                is_first_block = True
 
                 for block in iterator:
-                    # Enforce Part 1/1 header on the first block that contains the title
-                    if not first_block_processed and "# repoLens Report" in block:
+                    # Enforce Part 1/1 header strictly on the first yielded block (Header contract)
+                    if is_first_block:
                         lines = block.splitlines(True)
                         for i, line in enumerate(lines):
                             stripped = line.lstrip("\ufeff")
@@ -4413,7 +4413,7 @@ def write_reports_v2(
                                 lines[i] = "# repoLens Report (Part 1/1)\n"
                                 break
                         block = "".join(lines)
-                        first_block_processed = True
+                        is_first_block = False
 
                     validator.feed(block)
                     f.write(block)

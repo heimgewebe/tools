@@ -1,27 +1,52 @@
 """
 Central time source for lenskit.
 Provides deterministic time for testing and consistent UTC timestamps.
+Thread-safe and async-safe via contextvars.
 """
 import datetime
-from typing import Optional
+import contextlib
+from typing import Optional, Generator
+from contextvars import ContextVar
 
-_frozen_time: Optional[datetime.datetime] = None
+# ContextVar for thread/task-local storage of frozen time
+_frozen_time_var: ContextVar[Optional[datetime.datetime]] = ContextVar("frozen_time", default=None)
 
 def now_utc() -> datetime.datetime:
     """
     Returns the current time in UTC.
-    If time is frozen (via `freeze_time`), returns the frozen time.
+    If time is frozen (via `freeze_time` or `frozen` context), returns the frozen time.
     """
-    if _frozen_time:
-        return _frozen_time
+    frozen = _frozen_time_var.get()
+    if frozen:
+        return frozen
     return datetime.datetime.now(datetime.timezone.utc)
 
 def freeze_time(dt: Optional[datetime.datetime]) -> None:
     """
-    Freeze the time to a specific datetime.
+    Freeze the time to a specific datetime for the current context.
     Pass None to unfreeze.
+
+    Raises ValueError if dt is not timezone-aware and set to UTC.
     """
-    global _frozen_time
-    if dt is not None and dt.tzinfo is None:
-        raise ValueError("Frozen time must be timezone-aware (UTC)")
-    _frozen_time = dt
+    if dt is not None:
+        if dt.tzinfo != datetime.timezone.utc:
+             # Strict UTC enforcement
+             raise ValueError("Frozen time must be strictly UTC (tzinfo=datetime.timezone.utc)")
+
+    _frozen_time_var.set(dt)
+
+@contextlib.contextmanager
+def frozen(dt: datetime.datetime) -> Generator[None, None, None]:
+    """
+    Context manager to safely freeze time for a block.
+    Restores the previous time state upon exit.
+    """
+    # Validate first
+    if dt.tzinfo != datetime.timezone.utc:
+        raise ValueError("Frozen time must be strictly UTC (tzinfo=datetime.timezone.utc)")
+
+    token = _frozen_time_var.set(dt)
+    try:
+        yield
+    finally:
+        _frozen_time_var.reset(token)
