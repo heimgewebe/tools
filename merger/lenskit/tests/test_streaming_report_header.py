@@ -56,7 +56,8 @@ def test_iter_report_blocks_first_block_contains_report_title(tmp_path):
     # Get the first block
     first_block = next(iterator)
 
-    # Check strict header contract: first line (ignoring BOM) must start with title
+    # Check strict header contract: the report title must appear in the first block
+    # We search lines to handle BOM or potential mode markers gracefully
     lines = first_block.splitlines()
     found = False
     for line in lines:
@@ -64,7 +65,7 @@ def test_iter_report_blocks_first_block_contains_report_title(tmp_path):
             found = True
             break
 
-    assert found, f"Report title not found at start of block:\n{first_block}"
+    assert found, f"Report title not found in first block:\n{first_block}"
 
 def test_write_reports_v2_single_file_enforces_part_1_1_header(tmp_path):
     """Ensure write_reports_v2 in single-file mode enforces 'Part 1/1' header."""
