@@ -1012,7 +1012,7 @@ def _find_augment_file_for_sources(sources: List[Path]) -> Optional[Path]:
     return None
 
 
-def _render_augment_block(sources: List[Path]) -> str:
+def _render_augment_block(sources: List[Path], meta_density: str = "full") -> str:
     """
     Render the Augment Intelligence block based on an augment sidecar, if present.
     The expected structure matches tools_augment.yml (augment.hotspots, suggestions, risks, dependencies, priorities, context).
@@ -1064,7 +1064,7 @@ def _render_augment_block(sources: List[Path]) -> str:
     lines.append("")
 
     hotspots = augment.get("hotspots") or []
-    if isinstance(hotspots, list) and hotspots:
+    if isinstance(hotspots, list) and hotspots and meta_density != "min":
         lines.append("### Hotspots")
         for hs in hotspots:
             if not isinstance(hs, dict):
@@ -2949,6 +2949,13 @@ def iter_report_blocks(
     # UTC Timestamp - ensure strict UTC for Z-suffix validity
     now = datetime.datetime.now(datetime.timezone.utc)
 
+    # Strict Path Filtering (Hard Include)
+    # Move before sort for performance (minor optimization)
+    if path_filter:
+        # User explicitly requested a filter path.
+        # This acts as a hard filter for manifest and content, overriding force_include logic from scan_repo.
+        files = [f for f in files if path_filter in f.rel_path.as_posix()]
+
     # Sort files according to strict multi-repo order and then path
     files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
 
@@ -3485,7 +3492,7 @@ def iter_report_blocks(
         plan.append("")
 
     hotspots = build_hotspots(processed_files)
-    if hotspots:
+    if hotspots and meta_density != "min":
         plan.extend(hotspots)
         plan.append("")
     plan.append("**Folder Highlights:**")
@@ -3614,7 +3621,7 @@ def iter_report_blocks(
 
     # --- Augment Intelligence (Stage 4: Sidecar) ---
     if extras.augment_sidecar:
-        augment_block = _render_augment_block(sources)
+        augment_block = _render_augment_block(sources, meta_density=meta_density)
         if augment_block:
             yield augment_block
 
