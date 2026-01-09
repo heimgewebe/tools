@@ -2949,14 +2949,15 @@ def iter_report_blocks(
     # UTC Timestamp - ensure strict UTC for Z-suffix validity
     now = datetime.datetime.now(datetime.timezone.utc)
 
-    # Sort files according to strict multi-repo order and then path
-    files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
-
     # Strict Path Filtering (Hard Include)
+    # Move before sort for performance (minor optimization)
     if path_filter:
         # User explicitly requested a filter path.
         # This acts as a hard filter for manifest and content, overriding force_include logic from scan_repo.
         files = [f for f in files if path_filter in f.rel_path.as_posix()]
+
+    # Sort files according to strict multi-repo order and then path
+    files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
 
     # Optional Code-only-Filter
     if code_only:
