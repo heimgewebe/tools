@@ -206,6 +206,11 @@ repoLens speichert den Hub-Pfad in `.repolens-hub-path.txt` im Skript-Verzeichni
   - `overview`, `summary`, `dev`, `max`
   - steuert Umfang und Detailgrad des Inhalts
 
+- `path_filter` (string, optional)
+  - Wirkt als **harter Include-Filter** für Manifest und Content.
+  - Nur Dateien, deren Pfad den Filter-String enthält (Substring), werden aufgenommen.
+  - Dies überschreibt auch "Force Include"-Regeln (z. B. README oder .ai-context), falls diese nicht matchen.
+
 - `plan_only` (bool)
   - `false` (Default): Voll-Merge entsprechend Profil (inkl. Structure / Manifest / Content)
   - `true`: PLAN-ONLY-Modus
