@@ -3365,7 +3365,7 @@ def main_cli():
     parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
     parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
     parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
-    parser.add_argument("--meta-density", choices=["min", "standard", "full", "auto"], default="full", help="Control metadata verbosity")
+    parser.add_argument("--meta-density", choices=["min", "standard", "full", "auto"], default="auto", help="Control metadata verbosity")
 
     args = parser.parse_args()
 

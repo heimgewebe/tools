@@ -270,8 +270,46 @@ def test_file_meta_safety_in_min_mode(tmp_path):
     # Conclusion: The safety rule applies if we *re-enable* truncation or have a "partial" status that renders a block.
     # If we manually force status to 'truncated' for the test, we can verify the gate.
 
-    # We can mock determining status or just force it in the test by modifying `merge.determine_inclusion_status`?
-    # Or constructing `processed_files` manually if we were unit testing `iter_report_blocks` directly.
-    # Using `iter_report_blocks` is better here.
+    # Direct Unit Test of iter_report_blocks
+    # We bypass scanning logic and provide manually constructed FileInfos
+    # to simulate a "truncated" file.
 
-    pass # Skipped for now as "truncated" is practically unreachable in current config
+    # Manually constructed file list
+    files = [fi]
+    # sources is List[Path]
+    sources = [root]
+
+    # We need to monkeypatch `read_smart_content` or `determine_inclusion_status`?
+    # Actually, `iter_report_blocks` calls `determine_inclusion_status`.
+    # And we want status="truncated".
+
+    # Let's monkeypatch determine_inclusion_status to force 'truncated' for this file
+    original_determine = merge.determine_inclusion_status
+    def mock_determine(f, l, m):
+        if f.rel_path.name == "large.py":
+            return "truncated"
+        return original_determine(f, l, m)
+
+    merge.determine_inclusion_status = mock_determine
+
+    try:
+        # Run generator
+        blocks = list(merge.iter_report_blocks(
+            files=files,
+            level="dev",
+            max_file_bytes=100,
+            sources=sources,
+            plan_only=False,
+            meta_density="min" # Requested minimal density
+        ))
+
+        full_text = "".join(blocks)
+
+        # In 'min' mode, full files have NO file_meta.
+        # But this file is 'truncated', so it MUST have file_meta.
+        assert "file_meta:" in full_text
+        assert "included: truncated" in full_text
+
+    finally:
+        # Restore
+        merge.determine_inclusion_status = original_determine
