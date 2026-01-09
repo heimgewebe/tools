@@ -3,7 +3,6 @@ import json
 import os
 import shutil
 import tempfile
-from unittest.mock import MagicMock, patch
 from merger.lenskit.frontends.pythonista.ipad_fs_scan import iPadFSScanner
 
 class TestiPadFSScanner(unittest.TestCase):
