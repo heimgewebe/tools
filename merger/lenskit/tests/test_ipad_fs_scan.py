@@ -237,11 +237,22 @@ class TestiPadFSScanner(unittest.TestCase):
             create_mock_entry(name2)
         ]
 
-        # Custom side effect for os.scandir
-        # os.scandir is a context manager returning an iterator
+        # Store original scandir to fallback for non-mock paths if needed
+        # (Though unit tests should be isolated, safety first)
+        original_scandir = os.scandir
+
         @contextlib.contextmanager
         def fake_scandir(path):
-            yield iter(mock_entries)
+            # Check if we are scanning the root path we intend to mock
+            # We compare string representations to handle Path vs str
+            if str(path) == str(self.root_path):
+                yield iter(mock_entries)
+            else:
+                # Fallback or empty? Since we only expect root scan in this test,
+                # we can return empty or fallback. Fallback is safer for unexpected recursion.
+                # However, original_scandir might fail if path doesn't exist.
+                # Since we are in a tempdir, let's return empty if it's a subdir we don't care about.
+                yield iter([])
 
         with patch('os.scandir', side_effect=fake_scandir):
             result = scanner.scan()
@@ -297,7 +308,11 @@ class TestiPadFSScanner(unittest.TestCase):
 
         @contextlib.contextmanager
         def fake_scandir(path):
-            yield iter(mock_entries)
+            # Only mock the root path
+            if str(path) == str(self.root_path):
+                yield iter(mock_entries)
+            else:
+                yield iter([])
 
         with patch('os.scandir', side_effect=fake_scandir):
             result = scanner.scan()
