@@ -48,10 +48,8 @@ def test_path_filter_hard_include():
 
     assert "docs/adr/001-decision.md" in report
     # README.md is mentioned in "Reading Plan", so we check for Manifest/Content specific markers
-    # We use the generated anchor (file-test-repo-readme-md) to verify exclusion
-    # because the static header mentions "README.md".
-    # Note: anchor format uses "file-<repo>-<path>" slugified.
-    assert "file-test-repo-readme-md" not in report
+    # We check for the explicit Path line which indicates content presence.
+    assert "**Path:** `README.md`" not in report
     assert ".github/workflows/main.yml" not in report
     assert "001-decision.md" in report # Content should be there
 
@@ -80,7 +78,8 @@ def test_meta_density_min_no_hotspots_anywhere():
     assert "Reading Lenses" not in report
     # "## 📄 Content" is not strictly required to check here (layout fragile),
     # but confirming the report isn't empty is good.
-    assert "file-test-repo-src-main-py" in report
+    # Check for path presence robustly
+    assert "**Path:** `src/main.py`" in report
 
 def test_hotspots_present_in_standard():
     """
