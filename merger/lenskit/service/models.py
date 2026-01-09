@@ -49,6 +49,7 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         "path_filter": path_filter,
         "extras": extras_str,
         "json_sidecar": req.json_sidecar,
+        "meta_density": req.meta_density,
         "include_paths": inc_paths
         # Merges dir excluded from content hash:
         # Same content, different output path = same logical job.
@@ -77,6 +78,10 @@ class JobRequest(BaseModel):
     # Default: Minimal (Agent-fokussiert). Nur Sidecars.
     # Aligning with repolens.py logic to prevent drift.
     extras: Optional[str] = "json_sidecar,augment_sidecar"
+    meta_density: Literal["min", "standard", "full", "auto"] = Field(
+        default="auto",
+        description="Controls the density of metadata (headers, file_meta blocks) in the report. 'auto' switches to 'standard' if filters are active."
+    )
     json_sidecar: bool = True  # Default true for service
     force_new: bool = False
 

@@ -87,8 +87,10 @@ Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
       - max → `Tools – Vollsnapshot`
    - Coverage-Zeile ergänzen, z. B.:
      - `Coverage: 17/35 Dateien mit vollem Inhalt`
+   - **Meta-Drosselung (Throttling)** einführen (siehe Abschnitt 3e).
    - Im `@meta`-Block:
      - `merge.extras.*`-Flags für alle aktivierten Extras ergänzen.
+     - `merge.meta_density` (min, standard, full, auto) ergänzen.
      - Schema `repolens-report.schema.json` entsprechend erweitern.
      - Beispiel:
 
@@ -235,6 +237,22 @@ nicht die Profile/Configs.
     Links zum Manifest. Es gibt keine versteckten Bedeutungen; KIs sollen
     die Inhalte so lesen, wie sie sind – ohne eigene Struktur in den Merge
     „hineinzuphantasieren“.
+
+## 3e. Meta-Drosselung (Meta Density)
+
+Um bei kleinen Merges (z. B. 3 Dateien) den Overhead zu minimieren, wird eine Drosselung (`meta_density`) eingeführt. Diese Tabelle definiert die Block-Sichtbarkeit verbindlich (Contract):
+
+| Feature / Block | `min` | `standard` | `full` |
+| :--- | :--- | :--- | :--- |
+| **File Header** | Path only | No MD5 | Full (Path, Cat, Tags, Size, MD5) |
+| **file_meta** | Nur bei `partial`/`truncated` | Nur bei `partial`/`truncated` | Immer |
+| **Index** | Reduziert (Hinweis) | Standard | Standard |
+| **Hotspots** | 0 (aus) | Max 3 pro Lens | Max 8 pro Lens |
+| **Zweck** | Minimale Token-Last | Fokus auf Inhalt | Vollständige Auditierbarkeit |
+
+**Auto-Logik (`meta_density=auto`):**
+- Wenn `path_filter` oder `ext_filter` aktiv sind → `standard` (mit Warnhinweis "Auto-Drosselung").
+- Sonst → `full`.
 
 ---
 

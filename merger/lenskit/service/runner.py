@@ -286,7 +286,8 @@ class JobRunner:
                 debug=False,
                 path_filter=path_filter,
                 ext_filter=ext_list,
-                extras=extras
+                extras=extras,
+                meta_density=req.meta_density,
             )
 
             # 5. Register Artifacts

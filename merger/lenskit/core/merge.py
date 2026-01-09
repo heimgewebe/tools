@@ -2595,11 +2595,16 @@ def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
     return warnings
 
 
-def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = None) -> List[str]:
+def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = None, meta_density: str = "full") -> List[str]:
     """
     Renders the 'Reading Lenses' block.
     Shows recommended subset (focus overlay) per lens.
     """
+    if meta_density == "min":
+        return []
+
+    limit = 3 if meta_density == "standard" else 8
+
     if active_lenses is None:
         active_lenses = lenses.LENS_IDS
 
@@ -2637,7 +2642,7 @@ def _render_reading_lenses(files: List[FileInfo], active_lenses: List[str] = Non
 
         # Sort and take top 5-10
         candidates.sort(key=score_candidate, reverse=True)
-        top = candidates[:6] # Keep it brief
+        top = candidates[:limit]
 
         lines.append(f"**({lens_id})**")
         for f in top:
@@ -2915,6 +2920,7 @@ def iter_report_blocks(
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
     artifact_refs: Optional[Dict[str, str]] = None,
+    meta_density: str = "auto",
 ) -> Iterator[str]:
     if extras is None:
         extras = ExtrasConfig.none()
@@ -2926,6 +2932,15 @@ def iter_report_blocks(
 
     if debug:
         print("[lenskit] merge.py loaded from:", __file__)
+
+    # Resolve Auto-Throttling
+    # "Wenn Filter aktiv -> default meta_density=standard (oder min)"
+    original_meta_density = meta_density
+    if meta_density == "auto":
+        if path_filter or ext_filter:
+            meta_density = "standard"
+        else:
+            meta_density = "full"
 
     # Navigation style: default should be quiet.
     # You can later expose this as a UI toggle if desired.
@@ -3102,6 +3117,12 @@ def iter_report_blocks(
 
     render_mode = _effective_render_mode(plan_only, code_only)
 
+    if meta_density != "full":
+        header.append(f"**Meta-Density:** `{meta_density}` (Reduzierter Overhead)")
+        if original_meta_density == "auto" and meta_density == "standard":
+            header.append("⚠️ **Auto-Drosselung:** Wegen aktiver Filter wurde der Meta-Overhead reduziert.")
+        header.append("")
+
     if render_mode == "meta-only":
         header.append("**META-ONLY Modus:** Dieser Merge enthält ausschließlich Meta-, Struktur-, Index- und Analyse-Informationen.")
         header.append("**Kein Code, keine Planinhalte. Gedacht als Entscheidungs- und Steuerungsartefakt für Agenten.**")
@@ -3253,6 +3274,7 @@ def iter_report_blocks(
             "source_repos": sorted([s.name for s in sources]) if sources else [],
             "path_filter": path_filter,  # Use actual value, not description
             "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
+            "meta_density": meta_density,
             "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
             "total_files": total_files,        # Total number of files in the merge
             "total_size_bytes": total_size,    # Sum of all file sizes
@@ -3355,7 +3377,8 @@ def iter_report_blocks(
         active_lenses = lenses.LENS_IDS # Default to all canonical
 
         # Reading Lenses
-        header.extend(_render_reading_lenses(files, active_lenses))
+        # Pass meta_density for budgeting
+        header.extend(_render_reading_lenses(files, active_lenses, meta_density=meta_density))
 
         # Epistemic Status
         header.extend(_render_epistemic_status(files, active_lenses, ep_metrics))
@@ -3614,50 +3637,54 @@ def iter_report_blocks(
     index_blocks = []
     index_blocks.extend(_heading_block(2, "index", "🧭 Index", nav=nav))
 
-    # Pre-check which categories/tags have files
-    cats_to_idx = ["source", "doc", "config", "contract", "test"]
-    non_empty_cats = []
-    for c in cats_to_idx:
-        cat_files = [f for f in files if f.category == c]
-        if cat_files:
-            non_empty_cats.append(c)
+    if meta_density == "min":
+        index_blocks.append("_Index reduced (meta=min)_")
+        index_blocks.append("")
+    else:
+        # Pre-check which categories/tags have files
+        cats_to_idx = ["source", "doc", "config", "contract", "test"]
+        non_empty_cats = []
+        for c in cats_to_idx:
+            cat_files = [f for f in files if f.category == c]
+            if cat_files:
+                non_empty_cats.append(c)
 
-    # Check tag presence
-    ci_files = [f for f in files if "ci" in (f.tags or [])]
-    wgx_files = [f for f in files if "wgx-profile" in f.tags]
+        # Check tag presence
+        ci_files = [f for f in files if "ci" in (f.tags or [])]
+        wgx_files = [f for f in files if "wgx-profile" in f.tags]
 
-    # Build TOC - only for non-empty sections
-    for c in non_empty_cats:
-        index_blocks.append(f"- [{c.capitalize()}](#cat-{_slug_token(c)})")
+        # Build TOC - only for non-empty sections
+        for c in non_empty_cats:
+            index_blocks.append(f"- [{c.capitalize()}](#cat-{_slug_token(c)})")
 
-    # Add tag TOC entries only if they have files
-    if ci_files:
-        index_blocks.append("- [CI Pipelines](#tag-ci)")
-    if wgx_files:
-        index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
+        # Add tag TOC entries only if they have files
+        if ci_files:
+            index_blocks.append("- [CI Pipelines](#tag-ci)")
+        if wgx_files:
+            index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
 
-    index_blocks.append("")
-
-    # Category Lists - only non-empty
-    for c in non_empty_cats:
-        cat_files = [f for f in files if f.category == c]
-        index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}", nav=nav))
-        for f in cat_files:
-            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
         index_blocks.append("")
 
-    # Tag Lists – only non-empty
-    if ci_files:
-        index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci", nav=nav))
-        for f in ci_files:
-            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-        index_blocks.append("")
+        # Category Lists - only non-empty
+        for c in non_empty_cats:
+            cat_files = [f for f in files if f.category == c]
+            index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}", nav=nav))
+            for f in cat_files:
+                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+            index_blocks.append("")
 
-    if wgx_files:
-        index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile", nav=nav))
-        for f in wgx_files:
-            index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-        index_blocks.append("")
+        # Tag Lists – only non-empty
+        if ci_files:
+            index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci", nav=nav))
+            for f in ci_files:
+                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+            index_blocks.append("")
+
+        if wgx_files:
+            index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile", nav=nav))
+            for f in wgx_files:
+                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
+            index_blocks.append("")
 
     yield "\n".join(index_blocks) + "\n"
 
@@ -3804,27 +3831,45 @@ def iter_report_blocks(
         # Level 4 for Files (was 3)
         block.extend(_heading_block(4, fi.anchor, nav=nav))
         block.append(f"**Path:** `{fi.rel_path}`")
-        block.append(f"- Category: {fi.category}")
-        if fi.tags:
-            block.append(f"- Tags: {', '.join(fi.tags)}")
-        else:
-            block.append("- Tags: -")
-        block.append(f"- Size: {human_size(fi.size)}")
-        block.append(f"- Included: {status}")
-        block.append(f"- MD5: {fi.md5}")
+
+        # Header Drosselung: meta=min versteckt Details
+        if meta_density != "min":
+            block.append(f"- Category: {fi.category}")
+            if fi.tags:
+                block.append(f"- Tags: {', '.join(fi.tags)}")
+            else:
+                block.append("- Tags: -")
+            block.append(f"- Size: {human_size(fi.size)}")
+            block.append(f"- Included: {status}")
+
+            # MD5 nur bei full oder standard (wenn gewünscht, hier full only)
+            if meta_density == "full":
+                block.append(f"- MD5: {fi.md5}")
 
         content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
 
         # File Meta Block (Spec Patch)
-        block.append("<!--")
-        block.append("file_meta:")
-        block.append(f"  repo: {fi.root_label}")
-        block.append(f"  path: {fi.rel_path}")
-        block.append(f"  lines: {len(content.splitlines())}")
-        block.append(f"  included: {status}")
-        if getattr(fi, "inclusion_reason", "normal") != "normal":
-            block.append(f"  inclusion_reason: {fi.inclusion_reason}")
-        block.append("-->")
+        # Gate: min -> aus, standard -> nur wenn partial/truncated, full -> immer
+        show_file_meta = False
+        if meta_density == "full":
+            show_file_meta = True
+        elif meta_density == "standard":
+            if status != "full":
+                show_file_meta = True
+        # Sonderregel: bei partial/truncated zwingend minimale Herkunftsspur
+        if status != "full":
+            show_file_meta = True
+
+        if show_file_meta:
+            block.append("<!--")
+            block.append("file_meta:")
+            block.append(f"  repo: {fi.root_label}")
+            block.append(f"  path: {fi.rel_path}")
+            block.append(f"  lines: {len(content.splitlines())}")
+            block.append(f"  included: {status}")
+            if getattr(fi, "inclusion_reason", "normal") != "normal":
+                block.append(f"  inclusion_reason: {fi.inclusion_reason}")
+            block.append("-->")
 
         # Dynamic fence length to escape content containing backticks
         max_ticks = 0
@@ -3865,6 +3910,7 @@ def generate_report_content(
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
     artifact_refs: Optional[Dict[str, str]] = None,
+    meta_density: str = "auto",
 ) -> str:
     report = "".join(
         iter_report_blocks(
@@ -3880,6 +3926,7 @@ def generate_report_content(
             extras,
             delta_meta,
             artifact_refs,
+            meta_density=meta_density,
         )
     )
     if plan_only:
@@ -4128,6 +4175,7 @@ def write_reports_v2(
     ext_filter: Optional[List[str]] = None,
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
+    meta_density: str = "auto",
 ) -> MergeArtifacts:
     out_paths = []
 
@@ -4220,6 +4268,7 @@ def write_reports_v2(
                 extras,
                 delta_meta,
                 artifact_refs=artifact_refs,
+                meta_density=meta_density,
             )
 
             for block in iterator:
@@ -4335,6 +4384,7 @@ def write_reports_v2(
                 extras,
                 delta_meta,
                 artifact_refs=artifact_refs,
+                meta_density=meta_density,
             )
 
             # Spec v2.4: Always enforce Part N/M header, even for single files (1/1)
