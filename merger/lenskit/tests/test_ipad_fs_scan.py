@@ -4,8 +4,22 @@ import os
 import shutil
 import tempfile
 import unicodedata
+import contextlib
 from unittest.mock import patch, MagicMock
 from merger.lenskit.frontends.pythonista.ipad_fs_scan import iPadFSScanner
+
+# Helper to create robust mock entries
+def create_mock_entry(name, is_file=True, size=100, mtime=1234567890):
+    entry = MagicMock()
+    entry.name = name
+    entry.is_file.return_value = is_file
+    entry.is_dir.return_value = not is_file
+    entry.path = f"/mock/{name}"
+    stat_mock = MagicMock()
+    stat_mock.st_size = size
+    stat_mock.st_mtime = mtime
+    entry.stat.return_value = stat_mock
+    return entry
 
 class TestiPadFSScanner(unittest.TestCase):
     def setUp(self):
@@ -200,6 +214,7 @@ class TestiPadFSScanner(unittest.TestCase):
     def test_collision_handling(self):
         """
         Simulate a directory containing two files that normalize to the same NFC string.
+        Use a robust FakeScandir to avoid flaky mocks.
         """
         roots = [{
             "root_id": "test_root",
@@ -213,71 +228,85 @@ class TestiPadFSScanner(unittest.TestCase):
             output_dir=self.output_dir
         )
 
-        # We need two strings that normalize to the same NFC but are different.
-        # Example: 'Å' (U+00C5) and 'A' + combining ring (U+0041 U+030A)
-        name1 = "\u00C5"       # NFC form
-        name2 = "A\u030A"      # NFD form
+        name1 = "\u00C5"       # NFC form (Angstrom)
+        name2 = "A\u030A"      # NFD form (A + Ring)
+        normalized_target = unicodedata.normalize("NFC", name1)
 
-        # Mocking os.scandir to return entries for these two names
-        # We don't need real files on disk because we mock scandir.
+        mock_entries = [
+            create_mock_entry(name1),
+            create_mock_entry(name2)
+        ]
 
-        # Create mock entries
-        mock_entry1 = MagicMock()
-        mock_entry1.name = name1
-        mock_entry1.is_file.return_value = True
-        mock_entry1.is_dir.return_value = False
-        mock_entry1.stat.return_value.st_size = 100
-        mock_entry1.stat.return_value.st_mtime = 1234567890
+        # Custom side effect for os.scandir
+        # os.scandir is a context manager returning an iterator
+        @contextlib.contextmanager
+        def fake_scandir(path):
+            yield iter(mock_entries)
 
-        mock_entry2 = MagicMock()
-        mock_entry2.name = name2
-        mock_entry2.is_file.return_value = True
-        mock_entry2.is_dir.return_value = False
-        mock_entry2.stat.return_value.st_size = 200
-        mock_entry2.stat.return_value.st_mtime = 1234567890
-
-        # We need to mock os.scandir only for the specific path, but it's recursive.
-        # Easier to mock it globally for this test block.
-
-        # The recursion calls _scan_recursive(root_path).
-        # We want the root to contain these two files.
-
-        with patch('os.scandir') as mock_scandir:
-            # os.scandir returns an iterator
-            mock_scandir.return_value.__enter__.return_value = iter([mock_entry1, mock_entry2])
-
-            # Since we mock scandir for root, we don't need real files.
-            # But the scanner checks root existence first in _scan_root.
-            # Real root exists (setUp), so that passes.
-
+        with patch('os.scandir', side_effect=fake_scandir):
             result = scanner.scan()
 
             tree = result["roots"][0]["tree"]
             children = tree["children"]
 
-            # Expect 2 children
             self.assertEqual(len(children), 2)
-
-            # Both should have normalized path "Å" (\u00C5)
-            normalized_target = unicodedata.normalize("NFC", name1)
 
             node1 = children[0]
             node2 = children[1]
 
+            # Check they have same path but different os_names
             self.assertEqual(node1["path"], normalized_target)
             self.assertEqual(node2["path"], normalized_target)
 
-            # One should be name1, one name2 (sorting order might vary depending on impl)
-            # The scanner sorts by normalized name. They are equal. So original sort order or stable sort applies.
-            # Let's check that both OS names are present.
-            os_names = [c["os_name"] for c in children]
-            self.assertIn(name1, os_names)
-            self.assertIn(name2, os_names)
+            os_names = sorted([node1["os_name"], node2["os_name"]])
+            expected_os_names = sorted([name1, name2])
+            self.assertEqual(os_names, expected_os_names)
 
             # Check collision markers
             self.assertTrue(node1.get("collision"))
             self.assertTrue(node2.get("collision"))
             self.assertEqual(node1["collision_key"], normalized_target)
+
+    def test_exclude_filters_both_variants(self):
+        """
+        Verify that excluding the canonical (NFC) name excludes both NFC and NFD variants,
+        preventing them from appearing in the output or causing collisions.
+        """
+        roots = [{
+            "root_id": "test_root",
+            "label": "Test Root",
+            "source": "test",
+            "path": self.root_path
+        }]
+
+        # Exclude "Å" (NFC form). Since the scanner normalizes before filtering,
+        # this should match both "Å" (NFC) and "A" + ring (NFD).
+        scanner = iPadFSScanner(
+            roots=roots,
+            output_dir=self.output_dir,
+            excludes=["\u00C5"]
+        )
+
+        name1 = "\u00C5"       # NFC form
+        name2 = "A\u030A"      # NFD form
+
+        mock_entries = [
+            create_mock_entry(name1),
+            create_mock_entry(name2)
+        ]
+
+        @contextlib.contextmanager
+        def fake_scandir(path):
+            yield iter(mock_entries)
+
+        with patch('os.scandir', side_effect=fake_scandir):
+            result = scanner.scan()
+
+            tree = result["roots"][0]["tree"]
+            children = tree["children"]
+
+            # Expect 0 children because both map to the excluded NFC key
+            self.assertEqual(len(children), 0)
 
     def test_non_existent_root(self):
         roots = [{

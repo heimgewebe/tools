@@ -235,22 +235,26 @@ class iPadFSScanner:
         try:
             # We use os.scandir for better performance
             with os.scandir(current_path) as it:
-                # 1. Read all entries first to detect collisions
+                # 1. Read all entries first
                 raw_entries = list(it)
 
-                # 2. Pre-calculate normalized names and detect collisions
+                # 2. Filter entries and pre-calculate normalized names
+                # Only consider non-excluded entries for collision detection
+                kept_entries = []
+                for e in raw_entries:
+                     normalized = self._normalize(e.name)
+                     if not self._is_excluded(normalized):
+                         kept_entries.append((e, normalized))
+
+                # 3. Detect collisions based on filtered set
                 # Map: norm_name -> count
-                norm_counts = Counter(self._normalize(e.name) for e in raw_entries)
+                norm_counts = Counter(normalized for (_, normalized) in kept_entries)
 
-                # 3. Sort entries by normalized name for determinism
-                entries = sorted(raw_entries, key=lambda e: self._normalize(e.name).lower())
+                # 4. Sort entries by normalized name for determinism
+                # We reuse the filtered list `kept_entries`
+                sorted_entries = sorted(kept_entries, key=lambda pair: pair[1].lower())
 
-                for entry in entries:
-                    normalized_entry_name = self._normalize(entry.name)
-
-                    if self._is_excluded(normalized_entry_name):
-                        continue
-
+                for entry, normalized_entry_name in sorted_entries:
                     # Detect collision
                     is_collision = norm_counts[normalized_entry_name] > 1
 
