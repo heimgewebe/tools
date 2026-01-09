@@ -7,6 +7,13 @@ Generates a canonical 'ipad.fs.index.json' that explicitly maps the
 folder structure, including visibility limits and permissions.
 
 Goal: Provide AI systems with a reliable map of the iPad's accessible file system.
+
+Updates for AI-Readiness:
+- Excludes '._*' (AppleDouble) by default to reduce noise.
+- Adds 'relpath' and 'segments' to every node for easier querying and diffing.
+- Normalizes filenames to Unicode NFC to ensure deterministic output.
+- Truth Preservation: Stores both `os_name` (raw) and `path` (normalized NFC).
+- Collision Protection: Detects and marks NFC collisions while preserving both entries.
 """
 
 import os
@@ -17,6 +24,8 @@ import fnmatch
 import platform
 import pathlib
 import logging
+import unicodedata
+from collections import Counter
 
 # Set up logging to stderr (machine-readable tools should not pollute stdout)
 logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='[%(levelname)s] %(message)s')
@@ -39,7 +48,7 @@ DEFAULT_MAX_DEPTH = 8
 DEFAULT_MAX_ENTRIES = 200000
 DEFAULT_EXCLUDES = [
     "__pycache__", ".git", ".idea", ".vscode", "node_modules",
-    ".DS_Store", "venv", ".venv"
+    ".DS_Store", "venv", ".venv", "._*"
 ]
 DEFAULT_OUTPUT_DIR = "fs-exports"
 
@@ -159,7 +168,8 @@ class iPadFSScanner:
 
         # Start recursion
         try:
-            tree, summary = self._scan_recursive(root_path, depth=0)
+            # Root has explicit relpath "" and empty segments
+            tree, summary = self._scan_recursive(root_path, depth=0, current_relpath="", current_segments=[])
             root_result['tree'] = tree
             root_result['summary'] = summary
         except Exception as e:
@@ -173,14 +183,17 @@ class iPadFSScanner:
 
         return root_result
 
-    def _scan_recursive(self, current_path, depth):
+    def _scan_recursive(self, current_path, depth, current_relpath, current_segments):
         """
         Recursive scanner. Returns (node_dict, summary_dict).
         """
         # Global limit check
         if self.entry_count >= self.max_entries:
             return {
-                "path": current_path.name,
+                "path": self._normalize(current_path.name),
+                "os_name": current_path.name,
+                "relpath": current_relpath,
+                "segments": current_segments,
                 "type": "dir",
                 "status": "out_of_scope",
                 "reason": "Global entry limit reached"
@@ -188,9 +201,16 @@ class iPadFSScanner:
 
         self.entry_count += 1
 
+        normalized_name = self._normalize(current_path.name)
+        # For root node (depth 0), current_path.name might be absolute.
+        # However, caller (scan_root) uses root_path variable, current_path.name is simple dir name.
+
         # Base node structure
         node = {
-            "path": current_path.name,
+            "path": normalized_name,  # Logical/Normalized name
+            "os_name": current_path.name, # Original OS name
+            "relpath": current_relpath, # Logical relpath based on normalized names
+            "segments": current_segments, # Logical segments
             "type": "dir",
             "status": "ok",
             "mtime": self._safe_mtime(current_path)
@@ -198,10 +218,6 @@ class iPadFSScanner:
 
         # Initial summary for THIS node.
         # We start with dirs=1 (counting self) but move it to skipped if we abort.
-        # However, to meet "stats non-overcount", we will define:
-        # dirs = fully scanned directories
-        # dirs_skipped = partially scanned or skipped directories
-        # So we start with dirs=1, dirs_skipped=0, and swap if we fail.
         summary = {"dirs": 1, "dirs_skipped": 0, "files": 0, "bytes": 0, "status": "ok"}
 
         # Depth limit check
@@ -219,15 +235,36 @@ class iPadFSScanner:
         try:
             # We use os.scandir for better performance
             with os.scandir(current_path) as it:
-                entries = sorted(list(it), key=lambda e: e.name.lower())
+                # 1. Read all entries first
+                raw_entries = list(it)
 
-                for entry in entries:
-                    if self._is_excluded(entry.name):
-                        continue
+                # 2. Filter entries and pre-calculate normalized names
+                # Only consider non-excluded entries for collision detection
+                kept_entries = []
+                for e in raw_entries:
+                     normalized = self._normalize(e.name)
+                     if not self._is_excluded(normalized):
+                         kept_entries.append((e, normalized))
+
+                # 3. Detect collisions based on filtered set
+                # Map: norm_name -> count
+                norm_counts = Counter(normalized for (_, normalized) in kept_entries)
+
+                # 4. Sort entries by normalized name for determinism
+                # We reuse the filtered list `kept_entries`
+                sorted_entries = sorted(kept_entries, key=lambda pair: pair[1].lower())
+
+                for entry, normalized_entry_name in sorted_entries:
+                    # Detect collision
+                    is_collision = norm_counts[normalized_entry_name] > 1
+
+                    # Calculate relpath and segments for child using normalized name
+                    child_relpath = f"{current_relpath}/{normalized_entry_name}" if current_relpath else normalized_entry_name
+                    child_segments = current_segments + [normalized_entry_name]
 
                     # Process File
                     if entry.is_file(follow_symlinks=self.follow_symlinks):
-                        file_node = self._process_file(entry)
+                        file_node = self._process_file(entry, child_relpath, child_segments, is_collision)
                         children_nodes.append(file_node)
                         summary["files"] += 1
                         summary["bytes"] += file_node.get("size", 0)
@@ -235,15 +272,23 @@ class iPadFSScanner:
 
                     # Process Directory
                     elif entry.is_dir(follow_symlinks=self.follow_symlinks):
-                        dir_node, dir_summary = self._scan_recursive(pathlib.Path(entry.path), depth + 1)
+                        dir_node, dir_summary = self._scan_recursive(
+                            pathlib.Path(entry.path),
+                            depth + 1,
+                            child_relpath,
+                            child_segments
+                        )
+                        # Apply collision marker to directory node
+                        if is_collision:
+                            dir_node["collision"] = True
+                            dir_node["collision_key"] = normalized_entry_name
+
                         children_nodes.append(dir_node)
                         summary["dirs"] += dir_summary["dirs"]
                         summary["dirs_skipped"] += dir_summary.get("dirs_skipped", 0)
                         summary["files"] += dir_summary["files"]
                         summary["bytes"] += dir_summary["bytes"]
 
-                        # Propagate warnings/errors to parent summary
-                        # If a child is incomplete or has warnings/errors, the parent is also incomplete
                         if dir_summary["status"] != "ok":
                             summary["status"] = "incomplete"
 
@@ -278,7 +323,7 @@ class iPadFSScanner:
 
         return node, summary
 
-    def _process_file(self, entry):
+    def _process_file(self, entry, relpath, segments, is_collision=False):
         """
         Create a node for a file entry.
         """
@@ -290,14 +335,31 @@ class iPadFSScanner:
             size = 0
             mtime = None
 
-        return {
-            "path": entry.name,
+        normalized_name = self._normalize(entry.name)
+
+        node = {
+            "path": normalized_name, # Normalized/Logical
+            "os_name": entry.name,   # Raw OS name
+            "relpath": relpath,
+            "segments": segments,
             "type": "file",
             "status": "ok",
             "size": size,
             "mtime": mtime,
-            "extension": pathlib.Path(entry.name).suffix.lower()
+            "extension": pathlib.Path(normalized_name).suffix.lower()
         }
+
+        if is_collision:
+            node["collision"] = True
+            node["collision_key"] = normalized_name
+
+        return node
+
+    def _normalize(self, name):
+        """
+        Normalize string to Unicode NFC.
+        """
+        return unicodedata.normalize("NFC", name) if isinstance(name, str) else name
 
     def _is_excluded(self, name):
         """

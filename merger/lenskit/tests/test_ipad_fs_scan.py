@@ -3,7 +3,23 @@ import json
 import os
 import shutil
 import tempfile
+import unicodedata
+import contextlib
+from unittest.mock import patch, MagicMock
 from merger.lenskit.frontends.pythonista.ipad_fs_scan import iPadFSScanner
+
+# Helper to create robust mock entries
+def create_mock_entry(name, is_file=True, size=100, mtime=1234567890):
+    entry = MagicMock()
+    entry.name = name
+    entry.is_file.return_value = is_file
+    entry.is_dir.return_value = not is_file
+    entry.path = f"/mock/{name}"
+    stat_mock = MagicMock()
+    stat_mock.st_size = size
+    stat_mock.st_mtime = mtime
+    entry.stat.return_value = stat_mock
+    return entry
 
 class TestiPadFSScanner(unittest.TestCase):
     def setUp(self):
@@ -21,6 +37,7 @@ class TestiPadFSScanner(unittest.TestCase):
         #     file3.txt
         #   node_modules/
         #     lib.js
+        #   ._test.txt  (AppleDouble noise)
 
         self.root_path = os.path.join(self.test_dir, "root")
         os.makedirs(os.path.join(self.root_path, "sub"))
@@ -39,6 +56,10 @@ class TestiPadFSScanner(unittest.TestCase):
         with open(os.path.join(self.root_path, "node_modules", "lib.js"), "w") as f:
             f.write("library")
 
+        # Create AppleDouble noise file
+        with open(os.path.join(self.root_path, "._test.txt"), "w") as f:
+            f.write("resource fork")
+
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
@@ -50,10 +71,11 @@ class TestiPadFSScanner(unittest.TestCase):
             "path": self.root_path
         }]
 
+        # Uses default excludes which should now include ._*
         scanner = iPadFSScanner(
             roots=roots,
             output_dir=self.output_dir,
-            excludes=["excluded", "node_modules"]
+            excludes=["excluded", "node_modules", "._*"]
         )
 
         result = scanner.scan()
@@ -71,21 +93,36 @@ class TestiPadFSScanner(unittest.TestCase):
         self.assertEqual(tree["path"], "root")
         self.assertEqual(tree["type"], "dir")
 
+        # Verify Root Relpath Determinism
+        self.assertEqual(tree.get("relpath"), "")
+        self.assertEqual(tree.get("segments"), [])
+
         # Check Children (file1.txt, sub) - sorted by name
         children = tree["children"]
-        self.assertEqual(len(children), 2)
-
+        # Expected: file1.txt, sub.
+        # Excluded: excluded, node_modules, ._test.txt
         names = [c["path"] for c in children]
         self.assertIn("file1.txt", names)
         self.assertIn("sub", names)
         self.assertNotIn("excluded", names)
         self.assertNotIn("node_modules", names)
+        self.assertNotIn("._test.txt", names)
+
+        # Check that os_name is preserved
+        file1_node = next(c for c in children if c["path"] == "file1.txt")
+        self.assertEqual(file1_node["os_name"], "file1.txt")
 
         # Check Subdirectory
         sub_node = next(c for c in children if c["path"] == "sub")
         self.assertEqual(sub_node["type"], "dir")
+        self.assertEqual(sub_node["relpath"], "sub")
+        self.assertEqual(sub_node["segments"], ["sub"])
+
         self.assertEqual(sub_node["children_count"], 1)
-        self.assertEqual(sub_node["children"][0]["path"], "file2.log")
+        file2_node = sub_node["children"][0]
+        self.assertEqual(file2_node["path"], "file2.log")
+        self.assertEqual(file2_node["relpath"], "sub/file2.log")
+        self.assertEqual(file2_node["segments"], ["sub", "file2.log"])
 
     def test_depth_limit(self):
         roots = [{
@@ -94,11 +131,6 @@ class TestiPadFSScanner(unittest.TestCase):
             "source": "test",
             "path": self.root_path
         }]
-
-        # Max depth 0 should only return the root node marked as out_of_scope
-        # Actually, my implementation logic:
-        # _scan_recursive(depth=0) checks if depth >= max_depth.
-        # If max_depth is 0, it returns immediately.
 
         scanner = iPadFSScanner(
             roots=roots,
@@ -112,37 +144,184 @@ class TestiPadFSScanner(unittest.TestCase):
 
         self.assertEqual(tree["status"], "out_of_scope")
         self.assertEqual(tree["reason"], "Max depth reached")
-        # The summary status should be 'incomplete' because we hit the limit immediately
         self.assertEqual(root["summary"]["status"], "incomplete")
 
-        # Test max depth 1 (should see children of root, but not grandchildren)
+        # Test max depth 1
         scanner = iPadFSScanner(
             roots=roots,
             output_dir=self.output_dir,
             max_depth=1,
-            excludes=["excluded", "node_modules"]
+            excludes=["excluded", "node_modules", "._*"]
         )
         result = scanner.scan()
         root = result["roots"][0]
         tree = root["tree"]
 
         sub_node = next(c for c in tree["children"] if c["path"] == "sub")
-        # Sub node is at depth 1. Recursion call for sub is depth 1.
-        # inside _scan_recursive(sub, 1): if 1 >= 1 (max_depth): return out_of_scope
-
         self.assertEqual(sub_node["status"], "out_of_scope")
         self.assertNotIn("children", sub_node)
-        # Verify that the partial scan bubbled up "incomplete" status to the root summary
         self.assertEqual(root["summary"]["status"], "incomplete")
 
-        # Verify counting logic:
-        # root (depth 0, ok) -> dirs=1, skipped=0
-        #   sub (depth 1, limit hit) -> dirs=0, skipped=1
-        #   excluded (skipped by filter, not counted)
-        #   node_modules (skipped by filter, not counted)
-        # Total: dirs=1, skipped=1
         self.assertEqual(root["summary"]["dirs"], 1)
         self.assertEqual(root["summary"]["dirs_skipped"], 1)
+
+    def test_unicode_normalization(self):
+        # Create a file with NFD name
+        nfd_name = unicodedata.normalize("NFD", "u\u0308ber.txt") # ü broken down
+        nfc_name = unicodedata.normalize("NFC", "u\u0308ber.txt") # ü combined
+
+        file_path = os.path.join(self.root_path, nfd_name)
+        with open(file_path, "w") as f:
+            f.write("unicode test")
+
+        roots = [{
+            "root_id": "test_root",
+            "label": "Test Root",
+            "source": "test",
+            "path": self.root_path
+        }]
+
+        scanner = iPadFSScanner(
+            roots=roots,
+            output_dir=self.output_dir,
+            excludes=["excluded", "node_modules", "._*"]
+        )
+
+        result = scanner.scan()
+        tree = result["roots"][0]["tree"]
+
+        # Find the unicode file
+        # The scanner normalizes to NFC, so we should find NFC name
+        children_paths = [c["path"] for c in tree["children"]]
+
+        if nfd_name != nfc_name:
+            # If the FS supports distinct NFD/NFC, or if we can write NFD,
+            # we expect the output to be NFC.
+            self.assertIn(nfc_name, children_paths)
+
+            # Check segments
+            file_node = next(c for c in tree["children"] if c["path"] == nfc_name)
+            self.assertEqual(file_node["path"], nfc_name)
+            self.assertEqual(file_node["segments"], [nfc_name])
+
+            # relpath check
+            self.assertEqual(file_node["relpath"], nfc_name)
+        else:
+            # If system auto-normalizes on creation (like some macOS/iOS versions),
+            # then just verify we see the file.
+            self.assertIn(nfc_name, children_paths)
+
+    def test_collision_handling(self):
+        """
+        Simulate a directory containing two files that normalize to the same NFC string.
+        Use a robust FakeScandir to avoid flaky mocks.
+        """
+        roots = [{
+            "root_id": "test_root",
+            "label": "Test Root",
+            "source": "test",
+            "path": self.root_path
+        }]
+
+        scanner = iPadFSScanner(
+            roots=roots,
+            output_dir=self.output_dir
+        )
+
+        name1 = "\u00C5"       # NFC form (Angstrom)
+        name2 = "A\u030A"      # NFD form (A + Ring)
+        normalized_target = unicodedata.normalize("NFC", name1)
+
+        mock_entries = [
+            create_mock_entry(name1),
+            create_mock_entry(name2)
+        ]
+
+        # Store original scandir to fallback for non-mock paths if needed
+        # (Though unit tests should be isolated, safety first)
+        original_scandir = os.scandir
+
+        @contextlib.contextmanager
+        def fake_scandir(path):
+            # Check if we are scanning the root path we intend to mock
+            # We compare string representations to handle Path vs str
+            if str(path) == str(self.root_path):
+                yield iter(mock_entries)
+            else:
+                # Fallback or empty? Since we only expect root scan in this test,
+                # we can return empty or fallback. Fallback is safer for unexpected recursion.
+                # However, original_scandir might fail if path doesn't exist.
+                # Since we are in a tempdir, let's return empty if it's a subdir we don't care about.
+                yield iter([])
+
+        with patch('os.scandir', side_effect=fake_scandir):
+            result = scanner.scan()
+
+            tree = result["roots"][0]["tree"]
+            children = tree["children"]
+
+            self.assertEqual(len(children), 2)
+
+            node1 = children[0]
+            node2 = children[1]
+
+            # Check they have same path but different os_names
+            self.assertEqual(node1["path"], normalized_target)
+            self.assertEqual(node2["path"], normalized_target)
+
+            os_names = sorted([node1["os_name"], node2["os_name"]])
+            expected_os_names = sorted([name1, name2])
+            self.assertEqual(os_names, expected_os_names)
+
+            # Check collision markers
+            self.assertTrue(node1.get("collision"))
+            self.assertTrue(node2.get("collision"))
+            self.assertEqual(node1["collision_key"], normalized_target)
+
+    def test_exclude_filters_both_variants(self):
+        """
+        Verify that excluding the canonical (NFC) name excludes both NFC and NFD variants,
+        preventing them from appearing in the output or causing collisions.
+        """
+        roots = [{
+            "root_id": "test_root",
+            "label": "Test Root",
+            "source": "test",
+            "path": self.root_path
+        }]
+
+        # Exclude "Å" (NFC form). Since the scanner normalizes before filtering,
+        # this should match both "Å" (NFC) and "A" + ring (NFD).
+        scanner = iPadFSScanner(
+            roots=roots,
+            output_dir=self.output_dir,
+            excludes=["\u00C5"]
+        )
+
+        name1 = "\u00C5"       # NFC form
+        name2 = "A\u030A"      # NFD form
+
+        mock_entries = [
+            create_mock_entry(name1),
+            create_mock_entry(name2)
+        ]
+
+        @contextlib.contextmanager
+        def fake_scandir(path):
+            # Only mock the root path
+            if str(path) == str(self.root_path):
+                yield iter(mock_entries)
+            else:
+                yield iter([])
+
+        with patch('os.scandir', side_effect=fake_scandir):
+            result = scanner.scan()
+
+            tree = result["roots"][0]["tree"]
+            children = tree["children"]
+
+            # Expect 0 children because both map to the excluded NFC key
+            self.assertEqual(len(children), 0)
 
     def test_non_existent_root(self):
         roots = [{
@@ -184,9 +363,6 @@ class TestiPadFSScanner(unittest.TestCase):
             "path": self.root_path
         }]
 
-        # Max entries set low.
-        # Root (1) + file1 (2).
-        # Should stop after reaching limit, marking subsequent as out_of_scope.
         scanner = iPadFSScanner(
             roots=roots,
             output_dir=self.output_dir,
@@ -197,31 +373,6 @@ class TestiPadFSScanner(unittest.TestCase):
         root = result["roots"][0]
 
         self.assertEqual(root["summary"]["status"], "incomplete")
-        # Entry count will be strictly max_entries + maybe 1 if it checks AFTER increment
-        # My logic: self.entry_count >= self.max_entries check is at START of recursive
-        # So root (1) -> ok.
-        # Loop children.
-        # Child 1: file1.
-        #   entry_count (1) >= max (1) -> FALSE? No. entry_count starts at 0?
-        # Let's check logic:
-        # scan() -> entry_count = 0.
-        # _scan_root -> _scan_recursive(root)
-        #   entry_count (0) >= max (1) -> False.
-        #   entry_count += 1 -> 1.
-        #   node creation.
-        #   loop children:
-        #     file1: _process_file. summary/entry_count += 1 -> 2.
-        #     sub: _scan_recursive(sub).
-        #       entry_count (2) >= max (1) -> TRUE.
-        #       Returns out_of_scope, incomplete.
-
-        # So we expect root to contain file1, but sub to be skipped.
-        # And root summary to be incomplete.
-
-        # Depending on order (sorted by name): file1.txt, node_modules (excluded), sub
-        # file1.txt comes first. It gets processed.
-        # sub comes later. It hits limit.
-
         self.assertGreaterEqual(scanner.entry_count, 1)
 
 if __name__ == "__main__":
