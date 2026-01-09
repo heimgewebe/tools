@@ -2,6 +2,8 @@
 Central time source for lenskit.
 Provides deterministic time for testing and consistent UTC timestamps.
 Thread-safe and async-safe via contextvars.
+
+Time is sourced from lenskit.core.clock.now_utc(); tests should prefer clock.frozen().
 """
 import datetime
 import contextlib
