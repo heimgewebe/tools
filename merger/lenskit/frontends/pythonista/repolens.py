@@ -1434,8 +1434,16 @@ class MergerUI(object):
                 else:
                     # Partial - keep both raw and compressed
                     # Normalize paths for consistency
-                    normalized_raw = [normalize_path(p) for p in raw] if (raw and isinstance(raw, list)) else None
-                    normalized_compressed = [normalize_path(p) for p in compressed] if (compressed and isinstance(compressed, list)) else None
+                    normalized_raw = (
+                        [normalize_path(p) for p in raw if isinstance(p, str)]
+                        if isinstance(raw, list)
+                        else None
+                    )
+                    normalized_compressed = (
+                        [normalize_path(p) for p in compressed if isinstance(p, str)]
+                        if isinstance(compressed, list)
+                        else None
+                    )
                     deserialized[repo] = {
                         "raw": normalized_raw,
                         "compressed": normalized_compressed
@@ -1444,7 +1452,7 @@ class MergerUI(object):
                 # Legacy format: simple list - use for both raw and compressed
                 # Filter out None values and validate strings
                 valid_paths = [p for p in selection if isinstance(p, str)]
-                normalized = [normalize_path(p) for p in valid_paths] if valid_paths else None
+                normalized = [normalize_path(p) for p in valid_paths]
                 deserialized[repo] = {"raw": normalized, "compressed": normalized}
             else:
                 # Unknown format - skip
@@ -3107,18 +3115,24 @@ class MergerUI(object):
             if isinstance(entry, dict):
                 # Structured: compressed is list (partial) or None (ALL)
                 compressed = entry.get("compressed")
-                # Treat empty list as "no override" (same as None/ALL)
-                return compressed if (compressed and len(compressed) > 0) else None
+                if compressed is None:
+                    return None
+                if isinstance(compressed, list):
+                    return compressed
+                return None
             # Legacy fallback
-            return entry if entry else None
+            if isinstance(entry, list):
+                return entry
+            return None
 
         # Calculate Stats for UX
         total_paths = 0
         repos_with_filters = 0
         for name in selected_repos:
             paths = get_pool_include_paths(name)
-            if paths:
-                total_paths += len(paths)
+            if paths is not None:
+                if isinstance(paths, list):
+                    total_paths += len(paths)
                 repos_with_filters += 1
 
         # HUD / Log Feedback
