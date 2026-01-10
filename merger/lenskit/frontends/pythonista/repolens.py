@@ -1447,11 +1447,12 @@ class MergerUI(object):
                     
                     # Maintain invariant: if compressed becomes empty after filtering
                     # but raw has content, use raw for compressed to preserve intent
+                    # Use copy() to avoid shared mutable state between raw and compressed
                     if (isinstance(normalized_compressed, list) and 
                         len(normalized_compressed) == 0 and
                         isinstance(normalized_raw, list) and 
                         len(normalized_raw) > 0):
-                        normalized_compressed = normalized_raw
+                        normalized_compressed = normalized_raw.copy()
                     
                     deserialized[repo] = {
                         "raw": normalized_raw,

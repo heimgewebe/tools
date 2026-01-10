@@ -307,6 +307,20 @@ def test_fallback_to_raw_when_compressed_empty():
     assert deserialized4['repo4']['raw'] == [], "Empty raw should stay empty"
     assert deserialized4['repo4']['compressed'] == [], "Empty compressed should stay empty"
     
+    # Test Case 5: Normalization occurs before fallback
+    # Paths with ./ prefix should be normalized before fallback logic
+    structured_pool5 = {
+        'repo5': {
+            "raw": ["./src/main.py", "./docs/README.md"],
+            "compressed": [None, 123]  # Non-strings, will be filtered to empty
+        }
+    }
+    
+    deserialized5 = ui._deserialize_prescan_pool(structured_pool5)
+    # Both raw and compressed should contain normalized paths (without ./)
+    assert deserialized5['repo5']['raw'] == ["src/main.py", "docs/README.md"], "Raw should be normalized (no ./)"
+    assert deserialized5['repo5']['compressed'] == ["src/main.py", "docs/README.md"], "Compressed fallback should use normalized paths"
+    
     print("✓ test_fallback_to_raw_when_compressed_empty passed")
 
 
