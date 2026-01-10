@@ -1444,6 +1444,16 @@ class MergerUI(object):
                         if isinstance(compressed, list)
                         else None
                     )
+                    
+                    # Maintain invariant: if compressed becomes empty after filtering
+                    # but raw has content, use raw for compressed to preserve intent
+                    # Use copy() to avoid shared mutable state between raw and compressed
+                    if (isinstance(normalized_compressed, list) and 
+                        len(normalized_compressed) == 0 and
+                        isinstance(normalized_raw, list) and 
+                        len(normalized_raw) > 0):
+                        normalized_compressed = normalized_raw.copy()
+                    
                     deserialized[repo] = {
                         "raw": normalized_raw,
                         "compressed": normalized_compressed
@@ -3131,8 +3141,7 @@ class MergerUI(object):
         for name in selected_repos:
             paths = get_pool_include_paths(name)
             if paths is not None:
-                if isinstance(paths, list):
-                    total_paths += len(paths)
+                total_paths += len(paths)
                 repos_with_filters += 1
 
         # HUD / Log Feedback

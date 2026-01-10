@@ -251,6 +251,79 @@ def test_all_plus_partial_equals_all():
     print("✓ test_all_plus_partial_equals_all passed")
 
 
+def test_fallback_to_raw_when_compressed_empty():
+    """Test that deserialization repairs compressed when it becomes empty after filtering"""
+    ui = TestUI()
+    
+    # Test Case 1: compressed filtered to empty, raw has content
+    # After deserialization, compressed should be repaired to match raw
+    structured_pool = {
+        'repo1': {
+            "raw": ["src/main.py", "docs/README.md"],
+            "compressed": [None, 123, {}]  # All non-strings, will be filtered
+        }
+    }
+    
+    deserialized = ui._deserialize_prescan_pool(structured_pool)
+    
+    # Deserialization should repair: when compressed becomes [] but raw has content,
+    # set compressed = raw to preserve user intent
+    assert deserialized['repo1']['raw'] == ["src/main.py", "docs/README.md"], "Raw should preserve valid strings"
+    assert deserialized['repo1']['compressed'] == ["src/main.py", "docs/README.md"], "Compressed should fallback to raw when filtered to empty"
+    
+    # Test Case 2: Both empty after filtering - should stay empty (intentional block)
+    structured_pool2 = {
+        'repo2': {
+            "raw": [None, 123],
+            "compressed": [{}]
+        }
+    }
+    
+    deserialized2 = ui._deserialize_prescan_pool(structured_pool2)
+    assert deserialized2['repo2']['raw'] == [], "Raw should be empty after filtering"
+    assert deserialized2['repo2']['compressed'] == [], "Compressed should stay empty (intentional block)"
+    
+    # Test Case 3: Compressed has valid content - should preserve as-is
+    structured_pool3 = {
+        'repo3': {
+            "raw": ["src/main.py", "src/utils.py"],
+            "compressed": ["src"]
+        }
+    }
+    
+    deserialized3 = ui._deserialize_prescan_pool(structured_pool3)
+    assert deserialized3['repo3']['raw'] == ["src/main.py", "src/utils.py"], "Raw should preserve content"
+    assert deserialized3['repo3']['compressed'] == ["src"], "Compressed should preserve valid content"
+    
+    # Test Case 4: Explicitly empty lists (not filtered) - should stay empty
+    structured_pool4 = {
+        'repo4': {
+            "raw": [],
+            "compressed": []
+        }
+    }
+    
+    deserialized4 = ui._deserialize_prescan_pool(structured_pool4)
+    assert deserialized4['repo4']['raw'] == [], "Empty raw should stay empty"
+    assert deserialized4['repo4']['compressed'] == [], "Empty compressed should stay empty"
+    
+    # Test Case 5: Normalization occurs before fallback
+    # Paths with ./ prefix should be normalized before fallback logic
+    structured_pool5 = {
+        'repo5': {
+            "raw": ["./src/main.py", "./docs/README.md"],
+            "compressed": [None, 123]  # Non-strings, will be filtered to empty
+        }
+    }
+    
+    deserialized5 = ui._deserialize_prescan_pool(structured_pool5)
+    # Both raw and compressed should contain normalized paths (without ./)
+    assert deserialized5['repo5']['raw'] == ["src/main.py", "docs/README.md"], "Raw should be normalized (no ./)"
+    assert deserialized5['repo5']['compressed'] == ["src/main.py", "docs/README.md"], "Compressed fallback should use normalized paths"
+    
+    print("✓ test_fallback_to_raw_when_compressed_empty passed")
+
+
 def run_all_tests():
     """Run all tests"""
     print("Running prescan pool tests with structured format...")
@@ -265,6 +338,7 @@ def run_all_tests():
     test_deserialization_handles_empty_lists()
     test_append_union_both_fields()
     test_all_plus_partial_equals_all()
+    test_fallback_to_raw_when_compressed_empty()
     
     print()
     print("All tests passed! ✓")
