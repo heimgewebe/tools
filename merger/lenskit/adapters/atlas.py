@@ -14,6 +14,7 @@ class AtlasScanner:
         self.max_depth = max_depth
         self.max_entries = max_entries
         self.exclude_globs = exclude_globs or ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**", "**/.cache/**"]
+        self._exclude_patterns = self._build_exclude_patterns(self.exclude_globs)
         self.stats = {
             "total_files": 0,
             "total_dirs": 0,
@@ -27,6 +28,25 @@ class AtlasScanner:
         }
         self.tree = {} # Nested dict structure representing the tree
 
+    @staticmethod
+    def _build_exclude_patterns(globs: List[str]) -> List[str]:
+        patterns = []
+        seen = set()
+        for glob in globs:
+            normalized = str(glob).replace("\\", "/")
+            candidates = [normalized]
+            if normalized.startswith("**/"):
+                candidates.append(normalized[3:])
+            if normalized.endswith("/**"):
+                candidates.append(normalized[:-3])
+            if normalized.startswith("**/") and normalized.endswith("/**"):
+                candidates.append(normalized[3:-3])
+            for candidate in candidates:
+                if candidate and candidate not in seen:
+                    seen.add(candidate)
+                    patterns.append(candidate)
+        return patterns
+
     def _is_excluded(self, path: Path) -> bool:
         # Check against globs
         # We match relative path from root
@@ -35,9 +55,9 @@ class AtlasScanner:
         except ValueError:
             return True # Should not happen if walking from root
 
-        str_path = str(rel_path)
-        for glob in self.exclude_globs:
-            if fnmatch.fnmatch(str_path, glob):
+        str_path = rel_path.as_posix()
+        for pattern in self._exclude_patterns:
+            if fnmatch.fnmatch(str_path, pattern):
                 return True
         return False
 
