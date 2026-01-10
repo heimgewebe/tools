@@ -221,6 +221,17 @@ repoLens speichert den Hub-Pfad in `.repolens-hub-path.txt` im Skript-Verzeichni
       - `@meta`-Block
     - keine `Structure`-, `Manifest`- oder `Content`-Sektionen
 
+- `meta_none` (bool)
+  - `false` (Default): Standardverhalten
+  - `true`: META-NONE-Modus
+    - Deaktiviert alle epistemischen und interpretativen Meta-Schichten:
+      - Keine Epistemic Charter / Declaration
+      - Keine Reading Lenses
+      - Keine Interpretativen Marker (Augment, Heatmap, Risk)
+    - Setzt `@meta.mode = "none"` und `@meta.warning = "interpretation_disabled"`
+    - Hält alle strukturellen Sicherheits-Invarianten (Path Security, Contract Version, Manifest) aufrecht.
+    - Zweck: Referenz- und Diagnosemodus für Rohsicht auf Inhalte.
+
 ### KI-Lesepfad-Minimum (nur Output, keine Configs)
 
 Dieser Abschnitt definiert den minimalen Lesepfad für KIs, die
