@@ -2217,8 +2217,11 @@ def compute_epistemic_metrics(files: List[FileInfo], processed_files: List[Tuple
 
 # --- Reporting Logic V2 ---
 
-def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
-    """Return the effective render mode based on plan/code switches."""
+def _effective_render_mode(plan_only: bool, code_only: bool, meta_none: bool = False) -> str:
+    """Return the effective render mode based on flags."""
+
+    if meta_none:
+        return "none"
 
     plan_only = bool(plan_only)
     code_only = bool(code_only)
@@ -2231,15 +2234,27 @@ def _effective_render_mode(plan_only: bool, code_only: bool) -> str:
     return "full"
 
 
-def _normalize_mode_flags(plan_only: bool, code_only: bool) -> Tuple[bool, bool, Dict[str, bool]]:
-    """Normalize plan/code flags and retain the original user request."""
+def _normalize_mode_flags(plan_only: bool, code_only: bool, meta_none: bool = False) -> Tuple[bool, bool, bool, Dict[str, bool]]:
+    """Normalize plan/code/meta flags and retain the original user request."""
 
-    requested_flags = {"plan_only": bool(plan_only), "code_only": bool(code_only)}
+    requested_flags = {
+        "plan_only": bool(plan_only),
+        "code_only": bool(code_only),
+        "meta_none": bool(meta_none),
+    }
 
-    plan_only = requested_flags["plan_only"]
-    code_only = False if plan_only else requested_flags["code_only"]
+    meta_none = requested_flags["meta_none"]
 
-    return plan_only, code_only, requested_flags
+    if meta_none:
+        # meta: none implies raw content view, so plan_only is strictly False.
+        # code_only is allowed as a filter, but we treat it as orthogonal.
+        plan_only = False
+        code_only = requested_flags["code_only"]
+    else:
+        plan_only = requested_flags["plan_only"]
+        code_only = False if plan_only else requested_flags["code_only"]
+
+    return plan_only, code_only, meta_none, requested_flags
 
 
 def _generate_run_id(
@@ -2250,6 +2265,7 @@ def _generate_run_id(
     plan_only: bool = False,
     code_only: bool = False,
     timestamp: Optional[str] = None,
+    meta_none: bool = False,
 ) -> str:
     """
     Generate a deterministic run_id for consistent primary artifact naming.
@@ -2260,6 +2276,7 @@ def _generate_run_id(
         path_filter: Optional path filter
         ext_filter: Optional extension filter
         timestamp: Optional timestamp string (if None, uses current time)
+        meta_none: meta: none mode
 
     Returns:
         A deterministic run_id string
@@ -2269,7 +2286,7 @@ def _generate_run_id(
 
     components: List[str] = []
 
-    plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
+    plan_only, code_only, meta_none, _ = _normalize_mode_flags(plan_only, code_only, meta_none)
 
     # Path block first (stable anchor).
     if path_filter:
@@ -2288,7 +2305,7 @@ def _generate_run_id(
         components.append(f"multi-{repo_hash}")
 
     # Mode + profile blocks
-    components.append(_effective_render_mode(plan_only, code_only))
+    components.append(_effective_render_mode(plan_only, code_only, meta_none))
     components.append(detail)
 
     # Optional filters (makes run_id unique per filter combination)
@@ -2367,6 +2384,7 @@ def make_output_filename(
     plan_only: bool = False,
     code_only: bool = False,
     timestamp: Optional[str] = None,
+    meta_none: bool = False,
 ) -> Path:
     """
     Erzeugt den endgültigen Dateinamen für den Merge-Report.
@@ -2379,8 +2397,8 @@ def make_output_filename(
     - Danach der bisherige Rest (Repo-Block, Detail, Timestamp, evtl. Filter/Part)
     """
 
-    plan_only, code_only, _ = _normalize_mode_flags(plan_only, code_only)
-    render_mode = _effective_render_mode(plan_only, code_only)
+    plan_only, code_only, meta_none, _ = _normalize_mode_flags(plan_only, code_only, meta_none)
+    render_mode = _effective_render_mode(plan_only, code_only, meta_none)
 
     # Normalize "no path filter" sentinels coming from UI/config.
     # If the UI stores "root" (or "/") to mean "no specific subpath selected",
@@ -2922,6 +2940,7 @@ def iter_report_blocks(
     delta_meta: Optional[Dict[str, Any]] = None,
     artifact_refs: Optional[Dict[str, str]] = None,
     meta_density: str = "auto",
+    meta_none: bool = False,
 ) -> Iterator[str]:
     if extras is None:
         extras = ExtrasConfig.none()
@@ -2937,7 +2956,9 @@ def iter_report_blocks(
     # Resolve Auto-Throttling
     # "Wenn Filter aktiv -> default meta_density=standard (oder min)"
     original_meta_density = meta_density
-    if meta_density == "auto":
+    if meta_none:
+        meta_density = "none"
+    elif meta_density == "auto":
         if path_filter or ext_filter:
             meta_density = "standard"
         else:
@@ -3123,9 +3144,12 @@ def iter_report_blocks(
     header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.index_json`")
     header.append("")
 
-    render_mode = _effective_render_mode(plan_only, code_only)
+    render_mode = _effective_render_mode(plan_only, code_only, meta_none)
 
-    if meta_density != "full":
+    if meta_none:
+        header.append("**Meta-Mode:** `none` (Interpretation disabled)")
+        header.append("")
+    elif meta_density != "full":
         header.append(f"**Meta-Density:** `{meta_density}` (Reduzierter Overhead)")
         if original_meta_density == "auto" and meta_density == "standard":
             header.append("⚠️ **Auto-Drosselung:** Wegen aktiver Filter wurde der Meta-Overhead reduziert.")
@@ -3277,6 +3301,8 @@ def iter_report_blocks(
             "plan_only": plan_only,
             "code_only": code_only,
             "render_mode": render_mode,
+            "mode": "none" if meta_none else None,
+            "warning": "interpretation_disabled" if meta_none else None,
             "max_file_bytes": max_file_bytes,
             "scope": scope_desc,
             "source_repos": sorted([s.name for s in sources]) if sources else [],
@@ -3362,26 +3388,29 @@ def iter_report_blocks(
     # Spec v2.4 requirement: Charter is mandatory in all modes, including plan-only.
     # User requested condensed version in report header.
     # Full charter is available in assets/epistemic_reading_charter.md
-    header.append(_CHARTER_FALLBACK)
-    header.append("")
 
-    # Epistemic Declaration
-    # Use computed metrics
-    _risk_level = ep_metrics["risk"]["level"]
-    _contact_ratio_pct = int(ep_metrics["ratios"]["contact_ratio"] * 100)
+    # META: NONE GUARD
+    if not meta_none:
+        header.append(_CHARTER_FALLBACK)
+        header.append("")
 
-    decl = []
-    decl.append("## Epistemic Declaration")
-    decl.append("")
-    decl.append("- **Charter:** epistemic_reading_charter v1")
-    decl.append("- **Claim Language Guard:** active")
-    decl.append(f"- **Risk Level:** {_risk_level}")
-    decl.append(f"- **Contact Ratio:** {_contact_ratio_pct}%")
-    decl.append("")
-    header.extend(decl)
+        # Epistemic Declaration
+        # Use computed metrics
+        _risk_level = ep_metrics["risk"]["level"]
+        _contact_ratio_pct = int(ep_metrics["ratios"]["contact_ratio"] * 100)
+
+        decl = []
+        decl.append("## Epistemic Declaration")
+        decl.append("")
+        decl.append("- **Charter:** epistemic_reading_charter v1")
+        decl.append("- **Claim Language Guard:** active")
+        decl.append(f"- **Risk Level:** {_risk_level}")
+        decl.append(f"- **Contact Ratio:** {_contact_ratio_pct}%")
+        decl.append("")
+        header.extend(decl)
 
     # --- 3a. Reading Lenses & Epistemic Status (New in v2.4) ---
-    if not plan_only:
+    if not plan_only and not meta_none:
         active_lenses = lenses.LENS_IDS # Default to all canonical
 
         # Reading Lenses
@@ -3919,6 +3948,7 @@ def generate_report_content(
     delta_meta: Optional[Dict[str, Any]] = None,
     artifact_refs: Optional[Dict[str, str]] = None,
     meta_density: str = "auto",
+    meta_none: bool = False,
 ) -> str:
     report = "".join(
         iter_report_blocks(
@@ -3935,6 +3965,7 @@ def generate_report_content(
             delta_meta,
             artifact_refs,
             meta_density=meta_density,
+            meta_none=meta_none,
         )
     )
     if plan_only:
@@ -3958,22 +3989,25 @@ def generate_json_sidecar(
     total_size: int = 0,
     delta_meta: Optional[Dict[str, Any]] = None,
     requested_flags: Optional[Dict[str, bool]] = None,
+    meta_none: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate a JSON sidecar structure for machine consumption.
     Contains meta, files array, and minimal verification guards.
     """
     now = clock.now_utc()
-    requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only}
-    plan_only, code_only, normalized_requested = _normalize_mode_flags(
+    requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only, "meta_none": meta_none}
+    plan_only, code_only, meta_none, normalized_requested = _normalize_mode_flags(
         requested_flags.get("plan_only", False),
         requested_flags.get("code_only", False),
+        requested_flags.get("meta_none", False),
     )
-    render_mode = _effective_render_mode(plan_only, code_only)
+    render_mode = _effective_render_mode(plan_only, code_only, meta_none)
 
     requested_flags = {
         "plan_only": bool(normalized_requested["plan_only"]),
         "code_only": bool(normalized_requested["code_only"]),
+        "meta_none": bool(normalized_requested["meta_none"]),
     }
 
     if code_only:
@@ -4008,11 +4042,14 @@ def generate_json_sidecar(
         "spec_version": SPEC_VERSION,
         "profile": level,
         "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "mode": "none" if meta_none else None,
+        "warning": "interpretation_disabled" if meta_none else None,
         "plan_only": plan_only,
         "code_only": code_only,
         "requested_flags": {
             "plan_only": bool(requested_flags["plan_only"]),
             "code_only": bool(requested_flags["code_only"]),
+            "meta_none": bool(requested_flags.get("meta_none", False)),
         },
         "max_file_bytes": max_file_bytes,
         "total_files": len(files),
@@ -4030,19 +4067,21 @@ def generate_json_sidecar(
             "binary_policy": "ignore",
             "content_policy": render_mode,
         },
-        "epistemic_charter": {
+    }
+
+    if not meta_none:
+        meta["epistemic_charter"] = {
             "applied": True,
             "location": "document_header",
             "version": "1.0",
             "claim_language_guard": "active"
-        },
-        "epistemic_declaration": {
+        }
+        meta["epistemic_declaration"] = {
             "charter": "epistemic_reading_charter v1",
             "claim_language_guard": "active",
             "risk_level": ep_metrics["risk"]["level"],
             "contact_ratio": ep_metrics["ratios"]["contact_ratio"]
-        },
-    }
+        }
 
     files_out = []
     contact_list = []
@@ -4130,7 +4169,7 @@ def generate_json_sidecar(
             "md_required": True,
             "json_role": "index_and_metadata_only",
             "md_contains_full_information": True,
-            "lenses_applied": True
+            "lenses_applied": not meta_none,
         },
         "artifacts": {
             # filled by writer (paths)
@@ -4184,10 +4223,11 @@ def write_reports_v2(
     extras: Optional[ExtrasConfig] = None,
     delta_meta: Optional[Dict[str, Any]] = None,
     meta_density: str = "auto",
+    meta_none: bool = False,
 ) -> MergeArtifacts:
     out_paths = []
 
-    plan_only, code_only, requested_flags = _normalize_mode_flags(plan_only, code_only)
+    plan_only, code_only, meta_none, requested_flags = _normalize_mode_flags(plan_only, code_only, meta_none)
 
     ext_filter_str = ",".join(sorted(ext_filter)) if ext_filter else None
 
@@ -4198,7 +4238,7 @@ def write_reports_v2(
     repo_names = [s["name"] for s in repo_summaries]
     run_id = _generate_run_id(
         repo_names, detail, path_filter, ext_filter_str,
-        plan_only=plan_only, code_only=code_only, timestamp=global_ts
+        plan_only=plan_only, code_only=code_only, timestamp=global_ts, meta_none=meta_none
     )
 
     # Helper for writing logic
@@ -4277,6 +4317,7 @@ def write_reports_v2(
                 delta_meta,
                 artifact_refs=artifact_refs,
                 meta_density=meta_density,
+                meta_none=meta_none,
             )
 
             for block in iterator:
@@ -4399,6 +4440,7 @@ def write_reports_v2(
                     delta_meta,
                     artifact_refs=artifact_refs,
                     meta_density=meta_density,
+                meta_none=meta_none,
                 )
 
                 for i, block in enumerate(iterator):
@@ -4441,6 +4483,7 @@ def write_reports_v2(
                 plan_only=plan_only,
                 code_only=code_only,
                 timestamp=global_ts,
+                meta_none=meta_none,
             ),
         )
 
@@ -4462,6 +4505,7 @@ def write_reports_v2(
                 total_size,
                 delta_meta,
                 requested_flags=requested_flags,
+                meta_none=meta_none,
             )
             # Generate JSON filename: use first MD file for name, or fallback to deterministic name
             if out_paths:
@@ -4478,7 +4522,8 @@ def write_reports_v2(
                     run_id,
                     plan_only=plan_only,
                     code_only=code_only,
-                        timestamp=global_ts,
+                    timestamp=global_ts,
+                    meta_none=meta_none,
                 ).with_suffix('.json')
 
             json_data["artifacts"]["index_json"] = str(json_path)
@@ -4523,6 +4568,7 @@ def write_reports_v2(
                     plan_only=plan_only,
                     code_only=code_only,
                     timestamp=global_ts,
+                    meta_none=meta_none,
                 ),
             )
 
@@ -4544,6 +4590,7 @@ def write_reports_v2(
                     total_size,
                     delta_meta,
                     requested_flags=requested_flags,
+                    meta_none=meta_none,
                 )
                 # Generate JSON filename: use last MD file for name, or fallback to deterministic name
                 if out_paths:
@@ -4561,6 +4608,7 @@ def write_reports_v2(
                         plan_only=plan_only,
                         code_only=code_only,
                         timestamp=global_ts,
+                        meta_none=meta_none,
                     ).with_suffix('.json')
 
                 json_data["artifacts"]["index_json"] = str(json_path)

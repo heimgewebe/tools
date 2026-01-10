@@ -25,6 +25,11 @@
         "contract_version": { "const": "v2" },
         "generated_at": { "type": "string" },
         "profile": { "type": "string" },
+        "mode": {
+          "type": "string",
+          "enum": ["full", "plan-only", "code-only", "none"],
+          "description": "Operational mode. 'none' disables all epistemic/interpretative layers."
+        },
         "plan_only": { "type": "boolean" },
         "code_only": { "type": "boolean" },
         "max_file_bytes": { "type": "integer" },
