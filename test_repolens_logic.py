@@ -252,67 +252,60 @@ def test_all_plus_partial_equals_all():
 
 
 def test_fallback_to_raw_when_compressed_empty():
-    """Test fallback to raw when compressed is empty but raw has content"""
+    """Test that deserialization repairs compressed when it becomes empty after filtering"""
     ui = TestUI()
     
-    # Simulate deserialization edge case: compressed filtered to empty, raw has content
+    # Test Case 1: compressed filtered to empty, raw has content
+    # After deserialization, compressed should be repaired to match raw
     structured_pool = {
         'repo1': {
             "raw": ["src/main.py", "docs/README.md"],
-            "compressed": []
-        },
-        'repo2': {
-            "raw": [],
-            "compressed": []
-        },
-        'repo3': {
-            "raw": ["src/utils.py"],
-            "compressed": ["src/utils.py"]
+            "compressed": [None, 123, {}]  # All non-strings, will be filtered
         }
     }
     
     deserialized = ui._deserialize_prescan_pool(structured_pool)
     
-    # Now test that get_pool_include_paths falls back to raw when compressed is empty
-    # We need to simulate the pool_norm structure that would be created
-    from repolens import normalize_repo_id
+    # Deserialization should repair: when compressed becomes [] but raw has content,
+    # set compressed = raw to preserve user intent
+    assert deserialized['repo1']['raw'] == ["src/main.py", "docs/README.md"], "Raw should preserve valid strings"
+    assert deserialized['repo1']['compressed'] == ["src/main.py", "docs/README.md"], "Compressed should fallback to raw when filtered to empty"
     
-    # Create normalized pool
-    pool_norm = {}
-    for repo, entry in deserialized.items():
-        pool_norm[normalize_repo_id(repo)] = entry
+    # Test Case 2: Both empty after filtering - should stay empty (intentional block)
+    structured_pool2 = {
+        'repo2': {
+            "raw": [None, 123],
+            "compressed": [{}]
+        }
+    }
     
-    # Helper function (copy from repolens.py logic)
-    def get_pool_include_paths(repo_name):
-        entry = pool_norm.get(normalize_repo_id(repo_name))
-        if not entry:
-            return None
-        if isinstance(entry, dict):
-            compressed = entry.get("compressed")
-            raw = entry.get("raw")
-            if compressed is None:
-                return None
-            if isinstance(compressed, list):
-                # Fallback to raw if compressed is empty but raw has content
-                if len(compressed) == 0 and isinstance(raw, list) and len(raw) > 0:
-                    return raw
-                return compressed
-            return None
-        if isinstance(entry, list):
-            return entry
-        return None
+    deserialized2 = ui._deserialize_prescan_pool(structured_pool2)
+    assert deserialized2['repo2']['raw'] == [], "Raw should be empty after filtering"
+    assert deserialized2['repo2']['compressed'] == [], "Compressed should stay empty (intentional block)"
     
-    # Test repo1: compressed=[], raw has content -> should return raw
-    paths1 = get_pool_include_paths('repo1')
-    assert paths1 == ["src/main.py", "docs/README.md"], "Should fallback to raw when compressed is empty but raw has content"
+    # Test Case 3: Compressed has valid content - should preserve as-is
+    structured_pool3 = {
+        'repo3': {
+            "raw": ["src/main.py", "src/utils.py"],
+            "compressed": ["src"]
+        }
+    }
     
-    # Test repo2: compressed=[], raw=[] -> should return [] (intentional block)
-    paths2 = get_pool_include_paths('repo2')
-    assert paths2 == [], "Should return empty list when both are empty (intentional block)"
+    deserialized3 = ui._deserialize_prescan_pool(structured_pool3)
+    assert deserialized3['repo3']['raw'] == ["src/main.py", "src/utils.py"], "Raw should preserve content"
+    assert deserialized3['repo3']['compressed'] == ["src"], "Compressed should preserve valid content"
     
-    # Test repo3: compressed has content -> should return compressed
-    paths3 = get_pool_include_paths('repo3')
-    assert paths3 == ["src/utils.py"], "Should return compressed when it has content"
+    # Test Case 4: Explicitly empty lists (not filtered) - should stay empty
+    structured_pool4 = {
+        'repo4': {
+            "raw": [],
+            "compressed": []
+        }
+    }
+    
+    deserialized4 = ui._deserialize_prescan_pool(structured_pool4)
+    assert deserialized4['repo4']['raw'] == [], "Empty raw should stay empty"
+    assert deserialized4['repo4']['compressed'] == [], "Empty compressed should stay empty"
     
     print("✓ test_fallback_to_raw_when_compressed_empty passed")
 

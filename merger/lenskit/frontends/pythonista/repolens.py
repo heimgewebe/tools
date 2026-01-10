@@ -1444,6 +1444,15 @@ class MergerUI(object):
                         if isinstance(compressed, list)
                         else None
                     )
+                    
+                    # Maintain invariant: if compressed becomes empty after filtering
+                    # but raw has content, use raw for compressed to preserve intent
+                    if (isinstance(normalized_compressed, list) and 
+                        len(normalized_compressed) == 0 and
+                        isinstance(normalized_raw, list) and 
+                        len(normalized_raw) > 0):
+                        normalized_compressed = normalized_raw
+                    
                     deserialized[repo] = {
                         "raw": normalized_raw,
                         "compressed": normalized_compressed
@@ -3115,14 +3124,9 @@ class MergerUI(object):
             if isinstance(entry, dict):
                 # Structured: compressed is list (partial) or None (ALL)
                 compressed = entry.get("compressed")
-                raw = entry.get("raw")
                 if compressed is None:
                     return None
                 if isinstance(compressed, list):
-                    # Fallback to raw if compressed is empty but raw has content
-                    # This handles deserialization edge case where non-strings are filtered
-                    if len(compressed) == 0 and isinstance(raw, list) and len(raw) > 0:
-                        return raw
                     return compressed
                 return None
             # Legacy fallback
