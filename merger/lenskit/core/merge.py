@@ -33,6 +33,9 @@ EPISTEMIC_HUMILITY_WARNING = "⚠️ **Hinweis:** Dieses Profil/Filter erlaubt k
 def _slug_token(s: str) -> str:
     """Deterministic ASCII token suitable for heading ids across renderers."""
 
+    # Normalize to NFC to ensure consistent handling of diacritics
+    # (e.g. ü as single char vs u+umlaut) before regex stripping
+    s = unicodedata.normalize("NFC", s)
     s = s.lower()
     s = s.replace("/", "-").replace(".", "-")
     s = _NON_ALNUM.sub("-", s).strip("-")

@@ -469,3 +469,31 @@ Falls ein JSON Sidecar generiert wird (`artifacts.index_json`), gelten folgende 
 - **Paired Change Rule**: Änderungen am Schema (`repolens-agent.v*.schema.json`) müssen zeitgleich mit Updates an `merge.py` (Producer) und den Regression-Tests erfolgen.
 - **No-Legacy Acceptance**: Consumers sollen strikt gegen die angegebene `contract_version` validieren. Veraltete Versionen (z. B. v1) werden nicht "best effort" unterstützt, sobald v2 etabliert ist.
 - **CI as Gate**: Die Einhaltung des Contracts (Schema-Validierung) ist Teil der CI-Pipeline und darf nicht fehlschlagen.
+
+## 14. Prescan Pool Semantics (Spec Extension)
+
+Dieses Kapitel definiert die Semantik für persistierte Selektionen („Pools“) im Frontend (z. B. Pythonista, WebUI).
+
+### 14.1 Structured Entry Contract
+
+Ein Pool-Eintrag kann entweder eine einfache Liste (Legacy) oder ein strukturiertes Objekt sein.
+
+**Strukturiertes Format:**
+```json
+{
+  "raw": ["file1", "file2"],
+  "compressed": ["dir1/"]
+}
+```
+
+**Semantik-Tabelle:**
+
+| `compressed` Value | Bedeutung | Semantik |
+| :--- | :--- | :--- |
+| `null` (JSON) | **ALL** | Es gibt keine Einschränkung. Alle Dateien werden einbezogen (Standard-Filter gelten weiterhin). (Python: `None`) |
+| `[]` (empty list) | **BLOCK** | Nichts wird einbezogen. Explizite Blockierung. |
+| `["..."]` | **PARTIAL** | Nur die gelisteten Pfade (und deren Kinder) werden einbezogen. |
+
+**Invariante:**
+- `compressed: null` ist der einzige Weg, **ALL** im strukturierten Format auszudrücken.
+- Ein leeres Array `[]` bedeutet immer **BLOCK**, niemals **ALL**.

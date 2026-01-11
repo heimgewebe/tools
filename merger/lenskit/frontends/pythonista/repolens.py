@@ -28,6 +28,17 @@ import datetime
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
+# Import new utils/helpers (Avoid circular imports!)
+try:
+    from .repolens_utils import normalize_path, normalize_repo_id, safe_script_path
+    from .repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+except ImportError:
+    # If running as script, relative imports might fail if package not setup correctly
+    # Fallback to appending current dir
+    sys.path.append(str(Path(__file__).parent.resolve()))
+    from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
+    from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+
 
 DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
@@ -81,95 +92,6 @@ except Exception:
 # Keep track of the currently presented Merger UI view (Pythonista).
 # This prevents stacking multiple fullscreen windows when the script is opened repeatedly.
 _ACTIVE_MERGER_VIEW = None
-
-
-def normalize_path(p: str) -> str:
-    """
-    Normalize a path for consistent comparisons.
-    Similar to WebUI's normalizePath function.
-    
-    Rules:
-    - Remove leading "./"
-    - Remove trailing "/" (except for root)
-    - Keep "/" as separator
-    - Empty string becomes "."
-    """
-    if not isinstance(p, str):
-        return "."
-    
-    p = p.strip()
-    
-    # Handle absolute root
-    if p == "/":
-        return "/"
-    
-    # Remove leading "./"
-    if p.startswith("./"):
-        p = p[2:]
-    
-    # Remove trailing "/" (but not if it's just "/")
-    if len(p) > 1 and p.endswith("/"):
-        p = p[:-1]
-    
-    # Empty becomes "."
-    if p == "":
-        return "."
-    
-    return p
-
-
-def normalize_repo_id(s: str) -> str:
-    """
-    Normalize repository identifiers for robust matching.
-    Handles common drift forms:
-      - leading './'
-      - trailing '/'
-      - backslashes
-      - accidental path inputs (hub/foo -> foo)
-      - case drift (pragmatic on iOS)
-    """
-    s = str(s).strip().replace("\\", "/")
-    # Drop leading "./" repeatedly
-    while s.startswith("./"):
-        s = s[2:]
-    # Drop trailing slashes
-    s = s.rstrip("/")
-    # If a path slipped in, keep last segment
-    if "/" in s:
-        s = s.split("/")[-1]
-    # Pragmatic: collapse case drift
-    s = s.lower()
-    return s
-
-
-def safe_script_path() -> Path:
-    """
-    Versucht, den Pfad dieses Skripts robust zu bestimmen.
-
-    Reihenfolge:
-    1. __file__ (Standard-Python)
-    2. sys.argv[0] (z. B. in Shortcuts / eingebetteten Umgebungen)
-    3. aktuelle Arbeitsdirectory (Last Resort)
-    """
-    try:
-        return Path(__file__).resolve()
-    except NameError:
-        # Pythonista / Shortcuts oder exotischer Kontext
-        argv0 = None
-        try:
-            if getattr(sys, "argv", None):
-                argv0 = sys.argv[0] or None
-        except Exception:
-            argv0 = None
-
-        if argv0:
-            try:
-                return Path(argv0).resolve()
-            except Exception as e:
-                sys.stderr.write(f"Warning: Failed to resolve argv0 path: {e}\n")
-
-        # Fallback: aktuelle Arbeitsdirectory
-        return Path.cwd().resolve()
 
 
 # Cache script path at module level for consistent behavior
@@ -1407,58 +1329,6 @@ class MergerUI(object):
                     serialized[repo] = {"raw": selection, "compressed": selection}
         return serialized
 
-    def _deserialize_prescan_pool(self, pool_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-        """
-        Deserialize prescan pool with migration support.
-        Handles legacy formats and converts to structured internal representation.
-        
-        Internal representation (structured):
-        - {"raw": None, "compressed": None}: ALL state
-        - {"raw": list[str], "compressed": list[str]}: Partial selection
-        
-        Returns dict mapping repo -> {"raw": ..., "compressed": ...}
-        """
-        deserialized = {}
-        for repo, selection in pool_data.items():
-            if selection is None:
-                # ALL state in legacy format
-                deserialized[repo] = {"raw": None, "compressed": None}
-            elif isinstance(selection, dict):
-                # Structured format - preserve both fields
-                raw = selection.get("raw")
-                compressed = selection.get("compressed")
-                
-                if raw is None and compressed is None:
-                    # ALL state
-                    deserialized[repo] = {"raw": None, "compressed": None}
-                else:
-                    # Partial - keep both raw and compressed
-                    # Normalize paths for consistency
-                    normalized_raw = (
-                        [normalize_path(p) for p in raw if isinstance(p, str)]
-                        if isinstance(raw, list)
-                        else None
-                    )
-                    normalized_compressed = (
-                        [normalize_path(p) for p in compressed if isinstance(p, str)]
-                        if isinstance(compressed, list)
-                        else None
-                    )
-                    deserialized[repo] = {
-                        "raw": normalized_raw,
-                        "compressed": normalized_compressed
-                    }
-            elif isinstance(selection, list):
-                # Legacy format: simple list - use for both raw and compressed
-                # Filter out None values and validate strings
-                valid_paths = [p for p in selection if isinstance(p, str)]
-                normalized = [normalize_path(p) for p in valid_paths]
-                deserialized[repo] = {"raw": normalized, "compressed": normalized}
-            else:
-                # Unknown format - skip
-                pass
-        return deserialized
-
     def save_last_state(self, ignore_only: bool = False) -> None:
         """
         Speichert den UI-Zustand in einer JSON-Datei.
@@ -1587,7 +1457,7 @@ class MergerUI(object):
                 self.extras_config.json_sidecar = extras_data["json_sidecar"]
 
         # Restore Prescan Pool (with migration support)
-        self.saved_prescan_selections = self._deserialize_prescan_pool(data.get("prescan_pool", {}))
+        self.saved_prescan_selections = deserialize_prescan_pool(data.get("prescan_pool", {}))
 
         # Update hint text to match restored profile
         self.on_profile_changed(None)
@@ -3110,20 +2980,7 @@ class MergerUI(object):
         # Helper to get include_paths from pool with normalized O(1) lookup
         def get_pool_include_paths(repo_name):
             entry = pool_norm.get(normalize_repo_id(repo_name))
-            if not entry:
-                return None # Default behavior (global filters apply)
-            if isinstance(entry, dict):
-                # Structured: compressed is list (partial) or None (ALL)
-                compressed = entry.get("compressed")
-                if compressed is None:
-                    return None
-                if isinstance(compressed, list):
-                    return compressed
-                return None
-            # Legacy fallback
-            if isinstance(entry, list):
-                return entry
-            return None
+            return resolve_pool_include_paths(entry)
 
         # Calculate Stats for UX
         total_paths = 0
