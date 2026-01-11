@@ -224,11 +224,12 @@ repoLens speichert den Hub-Pfad in `.repolens-hub-path.txt` im Skript-Verzeichni
 - `meta_none` (bool)
   - `false` (Default): Standardverhalten
   - `true`: META-NONE-Modus
+    - **One Knob, Output State:** `meta_none` ist der Eingabeparameter. Das Resultat im Sidecar ist `meta.mode="none"`.
     - Deaktiviert alle epistemischen und interpretativen Meta-Schichten:
       - Keine Epistemic Charter / Declaration
       - Keine Reading Lenses
       - Keine Interpretativen Marker (Augment, Heatmap, Risk)
-    - Setzt `@meta.mode = "none"` und `@meta.warning = "interpretation_disabled"`
+    - Setzt `@meta.mode = "none"` und `@meta.warning = "interpretation_disabled"` (Felder entfallen, wenn inaktiv).
     - Hält alle strukturellen Sicherheits-Invarianten (Path Security, Contract Version, Manifest) aufrecht.
     - Zweck: Referenz- und Diagnosemodus für Rohsicht auf Inhalte.
 

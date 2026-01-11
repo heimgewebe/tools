@@ -96,6 +96,22 @@ class TestMetaNone(unittest.TestCase):
         # 3. Check reading lenses disabled
         self.assertFalse(json_data["reading_policy"]["lenses_applied"])
 
+    def test_meta_full_no_nulls(self):
+        """Verify that meta_none=False results in absent mode/warning keys, not nulls."""
+        json_data = generate_json_sidecar(
+            files=self.files,
+            level="max",
+            max_file_bytes=0,
+            sources=self.sources,
+            plan_only=False,
+            meta_none=False
+        )
+        meta = json_data["meta"]
+
+        # Keys should be absent
+        self.assertNotIn("mode", meta)
+        self.assertNotIn("warning", meta)
+
     def test_meta_none_vs_full_structure(self):
         """Verify that meta: none preserves structure/content compared to full."""
         # Run with meta: full (default)
