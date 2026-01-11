@@ -23,6 +23,10 @@ class TestPrescanPool(unittest.TestCase):
         # PARTIAL
         self.assertEqual(resolve_pool_include_paths({"compressed": ["a", "b"]}), ["a", "b"])
 
+        # LEGACY LIST
+        self.assertEqual(resolve_pool_include_paths(["a", "b"]), ["a", "b"])
+        self.assertEqual(resolve_pool_include_paths([]), [])
+
     def test_deserialize_sanitization(self):
         # Non-string filtering
         data = {
@@ -36,12 +40,6 @@ class TestPrescanPool(unittest.TestCase):
 
     def test_deserialize_fallback(self):
         # Case: Compressed corrupted (empty) but Raw has data and sanitization happened
-        # This simulates a case where compressed might have had bad data dropped, or just desync?
-        # The prompt requirement:
-        # if compressed == []
-        # raw contains valid strings
-        # _sanitized_dropped == True
-        # then fallback to raw
 
         # 1. Fallback triggered
         data_bad = {
@@ -75,6 +73,28 @@ class TestPrescanPool(unittest.TestCase):
         res3 = deserialize_prescan_pool(data_empty)
         # Empty
         self.assertEqual(res3["repo1"]["compressed"], [])
+
+    def test_structured_compressed_none_semantics(self):
+        # Case: compressed explicitly None in structured input -> Should remain None (ALL)
+        data = {
+            "repo1": {
+                "raw": ["a"],
+                "compressed": None
+            }
+        }
+        res = deserialize_prescan_pool(data)
+        self.assertIsNone(res["repo1"]["compressed"])
+        self.assertEqual(res["repo1"]["raw"], ["a"])
+
+        # Case: compressed explicitly [] in structured input -> Should remain [] (BLOCK)
+        data_block = {
+            "repo2": {
+                "raw": ["a"],
+                "compressed": []
+            }
+        }
+        res2 = deserialize_prescan_pool(data_block)
+        self.assertEqual(res2["repo2"]["compressed"], [])
 
     def test_legacy_format(self):
         data = {

@@ -2,12 +2,13 @@
 from typing import Dict, Any, Optional, List, Union
 from .repolens_utils import normalize_path
 
-def resolve_pool_include_paths(pool_entry: Optional[Dict[str, Any]]) -> Optional[List[str]]:
+def resolve_pool_include_paths(pool_entry: Optional[Union[Dict[str, Any], List[str]]]) -> Optional[List[str]]:
     """
     Resolves the effective include_paths for scan_repo from a pool entry.
 
     Contract:
     - Input None or empty dict -> None (ALL) [Implicit fallthrough, should not happen if called correctly]
+    - Entry is list -> list (Legacy Partial/Block)
     - Entry 'compressed': None -> None (ALL)
     - Entry 'compressed': [] -> [] (BLOCK)
     - Entry 'compressed': [...] -> [...] (PARTIAL)
@@ -15,8 +16,16 @@ def resolve_pool_include_paths(pool_entry: Optional[Dict[str, Any]]) -> Optional
     This function strictly decides the semantic meaning for the merger.
     It does NOT implement fallback logic or sanitization; that happens during deserialization.
     """
-    if not pool_entry:
+    if pool_entry is None:
         # No entry -> default behavior (usually ALL, handled by caller passing None to scan_repo)
+        return None
+
+    # Handle Legacy List
+    if isinstance(pool_entry, list):
+        return pool_entry
+
+    # Handle empty dict
+    if isinstance(pool_entry, dict) and not pool_entry:
         return None
 
     # Structured format expectation
@@ -88,13 +97,21 @@ def _deserialize_entry(selection: Any) -> Optional[Dict[str, Any]]:
     # Case: Partial / Block
     # Sanitize inputs
     raw_clean, raw_dropped = _sanitize_list(raw_input)
-    compressed_clean, compressed_dropped = _sanitize_list(compressed_input)
+
+    # Special handling for compressed=None (Explicit ALL in structured format)
+    # If compressed_input is explicitly None, it should remain None (ALL), NOT become [] (BLOCK).
+    # _sanitize_list(None) returns [], False which would convert None to [].
+    if compressed_input is None:
+        compressed_clean = None
+        compressed_dropped = False
+    else:
+        compressed_clean, compressed_dropped = _sanitize_list(compressed_input)
 
     sanitized_dropped = raw_dropped or compressed_dropped
 
     # Fallback Logic (Strictly Limited)
     # If:
-    #   - compressed is empty (BLOCK)
+    #   - compressed is empty (BLOCK) - but NOT None
     #   - raw has content
     #   - we dropped something during sanitization (indicating data corruption/type issues)
     # Then:
@@ -102,7 +119,8 @@ def _deserialize_entry(selection: Any) -> Optional[Dict[str, Any]]:
 
     final_compressed = compressed_clean
 
-    if (len(final_compressed) == 0 and
+    # Only consider fallback if compressed is an empty list (BLOCK), not if it is None (ALL)
+    if (final_compressed is not None and len(final_compressed) == 0 and
         len(raw_clean) > 0 and
         sanitized_dropped):
             # One-time fallback
@@ -110,7 +128,10 @@ def _deserialize_entry(selection: Any) -> Optional[Dict[str, Any]]:
 
     # Normalize paths
     normalized_raw = [normalize_path(p) for p in raw_clean]
-    normalized_compressed = [normalize_path(p) for p in final_compressed]
+
+    normalized_compressed = None
+    if final_compressed is not None:
+        normalized_compressed = [normalize_path(p) for p in final_compressed]
 
     return {
         "raw": normalized_raw,
