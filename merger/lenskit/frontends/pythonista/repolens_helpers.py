@@ -7,7 +7,8 @@ def resolve_pool_include_paths(pool_entry: Optional[Union[Dict[str, Any], List[s
     Resolves the effective include_paths for scan_repo from a pool entry.
 
     Contract:
-    - Input None or empty dict -> None (ALL) [Implicit fallthrough, should not happen if called correctly]
+    - Input None -> None (ALL)
+    - Input {} (empty dict) -> None (ALL)
     - Entry is list -> list (Legacy Partial/Block)
     - Entry 'compressed': None -> None (ALL)
     - Entry 'compressed': [] -> [] (BLOCK)
