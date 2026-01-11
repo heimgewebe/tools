@@ -32,7 +32,8 @@ EPISTEMIC_HUMILITY_WARNING = "⚠️ **Hinweis:** Dieses Profil/Filter erlaubt k
 
 def _slug_token(s: str) -> str:
     """Deterministic ASCII token suitable for heading ids across renderers."""
-
+    # Ensure NFC normalization (Requirement: renderer-robustness)
+    s = unicodedata.normalize("NFC", s)
     s = s.lower()
     s = s.replace("/", "-").replace(".", "-")
     s = _NON_ALNUM.sub("-", s).strip("-")
@@ -3854,18 +3855,28 @@ def iter_report_blocks(
         # Fix PR13-Followup: Quote id as well for consistency
         block.append(f'<!-- file:id="{fid}" path="{fi.rel_path}" -->')
 
-        # 2. Stable Anchor (explicit) - PR1
-        # Extract short hash from fid "FILE:f_<hash>" -> "file-f_<hash>"
-        short_id_anchor = fid.replace("FILE:", "file-")
-        block.append(f'<a id="{short_id_anchor}"></a>')
+        # 2. Stable Anchors (explicit) - Double Anchoring Strategy
+        # Requirement: Every file block MUST have stable anchors in BOTH forms.
 
-        # Backwards-compatible alias anchor (old style without suffix)
-        if getattr(fi, "anchor_alias", "") and fi.anchor_alias != fi.anchor:
-            # Provide HTML id for alias too (quiet mode: no visible marker spam)
-            block.append(f'<a id="{fi.anchor_alias}"></a>')
-            block.append("")
+        # Form A: Human-stable (FILE_ID based)
+        # fid is FILE:f_<hash>, we want file-f_<hash>
+        human_stable_id = fid.replace("FILE:", "file-")
+        block.append(f'<a id="{human_stable_id}"></a>')
+
+        # Form B: Path-stable (file-<repo>-<path-sanitized>)
+        # fi.anchor_alias holds the base anchor (file-{repo_slug}-{rel_id})
+        path_stable_id = fi.anchor_alias
+
+        # fi.anchor is the ID used for the heading (may include collision suffix)
+        header_id = fi.anchor
+
+        # Avoid duplicate ID if path_stable_id == header_id, as _heading_block will emit header_id
+        if path_stable_id != header_id:
+            block.append(f'<a id="{path_stable_id}"></a>')
+
         # Level 4 for Files (was 3)
-        block.extend(_heading_block(4, fi.anchor, nav=nav))
+        # _heading_block emits <a id="{header_id}"></a> which covers the path-stable ID + suffix case
+        block.extend(_heading_block(4, header_id, nav=nav))
         block.append(f"**Path:** `{fi.rel_path}`")
 
         # Header Drosselung: meta=min versteckt Details
