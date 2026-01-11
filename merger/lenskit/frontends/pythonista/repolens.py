@@ -269,6 +269,22 @@ except ImportError:
         parse_human_size,
     )
 
+# Import helpers (extracted for testability)
+try:
+    from .repolens_helpers import resolve_pool_include_paths
+except ImportError:
+    # Fallback for direct execution where relative imports might fail
+    try:
+        from repolens_helpers import resolve_pool_include_paths
+    except ImportError:
+        # Define inline fallback if file missing (should not happen in deployment)
+        def resolve_pool_include_paths(pool_norm, repo_name):
+            entry = pool_norm.get(normalize_repo_id(repo_name))
+            if not entry: return None
+            if isinstance(entry, dict):
+                return entry.get("compressed")
+            return entry if isinstance(entry, list) else None
+
 PROFILE_DESCRIPTIONS = {
     # Kurzbeschreibung der Profile für den UI-Hint
     "overview": (
@@ -1434,11 +1450,25 @@ class MergerUI(object):
                 else:
                     # Partial - keep both raw and compressed
                     # Normalize paths for consistency
-                    normalized_raw = [normalize_path(p) for p in raw] if (raw and isinstance(raw, list)) else None
-                    normalized_compressed = [normalize_path(p) for p in compressed] if (compressed and isinstance(compressed, list)) else None
+
+                    # RAW: Filter non-strings but keep track if we dropped something
+                    raw_len_before = len(raw) if isinstance(raw, list) else 0
+                    safe_raw = [p for p in raw if isinstance(p, str)] if isinstance(raw, list) else None
+                    normalized_raw = [normalize_path(p) for p in safe_raw] if safe_raw else None
+
+                    # COMPRESSED: Filter non-strings
+                    comp_len_before = len(compressed) if isinstance(compressed, list) else 0
+                    safe_compressed = [p for p in compressed if isinstance(p, str)] if isinstance(compressed, list) else None
+                    normalized_compressed = [normalize_path(p) for p in safe_compressed] if safe_compressed else None
+
+                    # Detect drops
+                    raw_dropped = (raw_len_before > 0 and (not safe_raw or len(safe_raw) < raw_len_before))
+                    comp_dropped = (comp_len_before > 0 and (not safe_compressed or len(safe_compressed) < comp_len_before))
+
                     deserialized[repo] = {
                         "raw": normalized_raw,
-                        "compressed": normalized_compressed
+                        "compressed": normalized_compressed,
+                        "_sanitized_dropped": (raw_dropped or comp_dropped)
                     }
             elif isinstance(selection, list):
                 # Legacy format: simple list - use for both raw and compressed
@@ -3101,23 +3131,15 @@ class MergerUI(object):
 
         # Helper to get include_paths from pool with normalized O(1) lookup
         def get_pool_include_paths(repo_name):
-            entry = pool_norm.get(normalize_repo_id(repo_name))
-            if not entry:
-                return None # Default behavior (global filters apply)
-            if isinstance(entry, dict):
-                # Structured: compressed is list (partial) or None (ALL)
-                compressed = entry.get("compressed")
-                # Treat empty list as "no override" (same as None/ALL)
-                return compressed if (compressed and len(compressed) > 0) else None
-            # Legacy fallback
-            return entry if entry else None
+            return resolve_pool_include_paths(pool_norm, repo_name)
 
         # Calculate Stats for UX
         total_paths = 0
         repos_with_filters = 0
         for name in selected_repos:
             paths = get_pool_include_paths(name)
-            if paths:
+            # Check for list explicitly to count length
+            if paths is not None and isinstance(paths, list):
                 total_paths += len(paths)
                 repos_with_filters += 1
 
