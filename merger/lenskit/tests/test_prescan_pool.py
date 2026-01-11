@@ -112,5 +112,14 @@ class TestPrescanPool(unittest.TestCase):
         self.assertIsNone(res["repo1"]["raw"])
         self.assertIsNone(res["repo1"]["compressed"])
 
+    def test_key_normalization(self):
+        data = {
+            "Hub/MyRepo/": ["a"]
+        }
+        res = deserialize_prescan_pool(data)
+        self.assertIn("myrepo", res)
+        self.assertNotIn("Hub/MyRepo/", res)
+        self.assertEqual(res["myrepo"]["raw"], ["a"])
+
 if __name__ == '__main__':
     unittest.main()

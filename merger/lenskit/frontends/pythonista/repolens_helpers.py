@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, Any, Optional, List, Union
-from .repolens_utils import normalize_path
+from .repolens_utils import normalize_path, normalize_repo_id
 
 def resolve_pool_include_paths(pool_entry: Optional[Union[Dict[str, Any], List[str]]]) -> Optional[List[str]]:
     """
@@ -48,6 +48,7 @@ def deserialize_prescan_pool(pool_data: Dict[str, Any]) -> Dict[str, Dict[str, A
     Deserialize prescan pool with strict contract enforcement, sanitization, and controlled fallback.
 
     Returns dict mapping repo -> {"raw": ..., "compressed": ...}
+    Keys are normalized using normalize_repo_id to prevent drift.
     """
     deserialized = {}
     if not isinstance(pool_data, dict):
@@ -56,7 +57,10 @@ def deserialize_prescan_pool(pool_data: Dict[str, Any]) -> Dict[str, Dict[str, A
     for repo, selection in pool_data.items():
         processed_entry = _deserialize_entry(selection)
         if processed_entry:
-             deserialized[repo] = processed_entry
+             # Normalize key to prevent drift (e.g. Hub/Repo -> repo)
+             norm_key = normalize_repo_id(repo)
+             if norm_key: # Ignore empty keys
+                 deserialized[norm_key] = processed_entry
 
     return deserialized
 
