@@ -229,7 +229,7 @@ repoLens speichert den Hub-Pfad in `.repolens-hub-path.txt` im Skript-Verzeichni
       - Keine Epistemic Charter / Declaration
       - Keine Reading Lenses
       - Keine Interpretativen Marker (Augment, Heatmap, Risk)
-    - Setzt `@meta.mode = "none"` und `@meta.warning = "interpretation_disabled"` (Felder entfallen, wenn inaktiv).
+    - Setzt `@meta.mode = "none"` und `@meta.warning = "interpretation_disabled"` (Felder erscheinen nur im none-Modus).
     - Hält alle strukturellen Sicherheits-Invarianten (Path Security, Contract Version, Manifest) aufrecht.
     - Zweck: Referenz- und Diagnosemodus für Rohsicht auf Inhalte.
 
