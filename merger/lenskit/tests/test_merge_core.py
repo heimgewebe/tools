@@ -2,6 +2,7 @@
 import unittest
 import sys
 import os
+import unicodedata
 from pathlib import Path
 
 # Add merger/ to sys.path so lenskit is importable
@@ -14,6 +15,7 @@ from lenskit.core.merge import (
     determine_inclusion_status,
     iter_report_blocks,
     FileInfo,
+    _stable_file_id
 )
 
 class TestMergeCore(unittest.TestCase):
@@ -23,6 +25,22 @@ class TestMergeCore(unittest.TestCase):
         self.assertEqual(_slug_token("path/to/file.txt"), "path-to-file-txt")
         self.assertEqual(_slug_token("UPPERCASE"), "uppercase")
         self.assertEqual(_slug_token("mixed_CASE/123"), "mixed-case-123")
+
+    def test_slug_token_nfc_normalization(self):
+        """Ensure NFC and NFD strings result in the same slug."""
+        # 'u' with diaeresis: \u00fc (NFC) vs \u0075\u0308 (NFD)
+        nfc_str = "t\u00fcst" # tüst
+        nfd_str = unicodedata.normalize("NFD", nfc_str)
+
+        self.assertNotEqual(nfc_str, nfd_str) # Confirm raw strings differ
+        self.assertEqual(_slug_token(nfc_str), _slug_token(nfd_str))
+
+        # Check actual output format (might strip or replace special chars depending on _NON_ALNUM)
+        # Assuming _NON_ALNUM keeps only [a-z0-9], "tüst" -> "t-st" or similar
+        # Update expectation based on actual implementation
+        slug = _slug_token(nfc_str)
+        self.assertTrue(slug.startswith("t"))
+        self.assertTrue(slug.endswith("st"))
 
     def test_classify_file_v2(self):
         # Category: Source
@@ -148,6 +166,80 @@ class TestMergeCore(unittest.TestCase):
             self.assertRegex(full_output, r"content_present:\s*(true|True)")
             self.assertRegex(full_output, r"manifest_present:\s*(true|True)")
             self.assertRegex(full_output, r"structure_present:\s*(true|True)")
+
+    def test_link_integrity_and_anchors(self):
+        """
+        Check that file blocks emit correct double anchors (HTML + Heading)
+        and that fragment IDs are robust.
+        """
+        fi = FileInfo(
+            root_label="my-repo",
+            abs_path=Path("/tmp/my-file.txt"),
+            rel_path=Path("src/My File.txt"), # Space in path
+            size=100,
+            is_text=True,
+            md5="d41d8cd98f00b204e9800998ecf8427e",
+            category="source",
+            tags=[],
+            ext=".txt",
+            content="test content",
+            inclusion_reason="normal"
+        )
+
+        # Ensure anchor logic generates deterministic values
+        # Relies on _slug_token which should be NFC normalized
+
+        files = [fi]
+        sources = [Path("/tmp/my-repo")]
+
+        iterator = iter_report_blocks(
+            files=files,
+            level="max",
+            max_file_bytes=1000,
+            sources=sources,
+            plan_only=False
+        )
+
+        full_report = ""
+        try:
+            full_report = "".join(list(iterator))
+        except OSError:
+            # We don't have the file on disk, so read_smart_content will fail/return error msg
+            # That's fine for structure testing
+            pass
+
+        # 1. Check for double anchors
+        # The code emits: <a id="file-..."></a> followed by heading
+        # Also emits legacy alias <a id="..."></a> if alias != anchor
+
+        # Expected slug for "src/My File.txt": src-my-file-txt
+        # Expected hash suffix: d41d8c (first 6 chars of md5)
+        # Anchor: file-my-repo-src-my-file-txt-d41d8c
+
+        slug_rel = _slug_token("src/My File.txt")
+        slug_repo = _slug_token("my-repo")
+
+        # Verify slug logic first
+        self.assertEqual(slug_rel, "src-my-file-txt")
+        self.assertEqual(slug_repo, "my-repo")
+
+        base_anchor = f"file-{slug_repo}-{slug_rel}"
+        full_anchor = f"{base_anchor}-d41d8c"
+
+        # Check for HTML anchor tag
+        self.assertIn(f'<a id="{full_anchor}"></a>', full_report)
+
+        # Check for Heading ID (implicit or tokenized)
+        # The heading should be: #### <anchor> or #### <Title>
+        # The code uses _heading_block which emits:
+        # <a id="token"></a>
+        # #### token
+
+        self.assertIn(f"#### {full_anchor}", full_report)
+
+        # Check for alias anchor (legacy)
+        # alias is without hash: file-my-repo-src-my-file-txt
+        self.assertIn(f'<a id="{base_anchor}"></a>', full_report)
 
 if __name__ == '__main__':
     unittest.main()
