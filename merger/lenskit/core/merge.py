@@ -3878,7 +3878,7 @@ def iter_report_blocks(
 
         # Level 4 for Files (was 3)
         # _heading_block emits <a id="{header_id}"></a> which covers the path-stable ID + suffix case
-        block.extend(_heading_block(4, header_id, nav=nav))
+        block.extend(_heading_block(4, header_id, str(fi.rel_path), nav=nav))
         block.append(f"**Path:** `{fi.rel_path}`")
 
         # Header Drosselung: meta=min versteckt Details
