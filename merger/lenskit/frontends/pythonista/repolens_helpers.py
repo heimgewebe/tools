@@ -9,7 +9,7 @@ def resolve_pool_include_paths(pool_entry: Optional[Union[Dict[str, Any], List[s
     Contract:
     - Input None -> None (ALL)
     - Input {} (empty dict) -> None (ALL)
-    - Entry is list -> list (Legacy Partial/Block)
+    - Entry is list -> list (Legacy Partial/Block; [] means BLOCK)
     - Entry 'compressed': None -> None (ALL)
     - Entry 'compressed': [] -> [] (BLOCK)
     - Entry 'compressed': [...] -> [...] (PARTIAL)

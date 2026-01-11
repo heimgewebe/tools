@@ -489,10 +489,10 @@ Ein Pool-Eintrag kann entweder eine einfache Liste (Legacy) oder ein strukturier
 
 | `compressed` Value | Bedeutung | Semantik |
 | :--- | :--- | :--- |
-| `None` | **ALL** | Es gibt keine Einschränkung. Alle Dateien werden einbezogen (Standard-Filter gelten weiterhin). |
+| `null` (JSON) | **ALL** | Es gibt keine Einschränkung. Alle Dateien werden einbezogen (Standard-Filter gelten weiterhin). (Python: `None`) |
 | `[]` (empty list) | **BLOCK** | Nichts wird einbezogen. Explizite Blockierung. |
 | `["..."]` | **PARTIAL** | Nur die gelisteten Pfade (und deren Kinder) werden einbezogen. |
 
 **Invariante:**
-- `compressed: None` ist der einzige Weg, **ALL** im strukturierten Format auszudrücken.
+- `compressed: null` ist der einzige Weg, **ALL** im strukturierten Format auszudrücken.
 - Ein leeres Array `[]` bedeutet immer **BLOCK**, niemals **ALL**.
