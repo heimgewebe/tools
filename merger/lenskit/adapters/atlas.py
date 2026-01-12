@@ -4,7 +4,7 @@ import time
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import fnmatch
 
 # Attempt to import is_probably_text from core to avoid duplication
@@ -12,6 +12,9 @@ try:
     from ..core.merge import is_probably_text
 except ImportError:
     # Fallback implementation if core is not accessible
+    # Configurable text detection limit (aligned with core's 20MB)
+    TEXT_DETECTION_MAX_BYTES = 20 * 1024 * 1024
+
     def is_probably_text(path: Path, size: int) -> bool:
         TEXT_EXTENSIONS = {
             ".md", ".txt", ".py", ".rs", ".ts", ".js", ".json", ".yml", ".yaml",
@@ -20,7 +23,8 @@ except ImportError:
         }
         if path.suffix.lower() in TEXT_EXTENSIONS or path.name.lower() in TEXT_EXTENSIONS:
             return True
-        if size > 10 * 1024 * 1024: return False
+        if size > TEXT_DETECTION_MAX_BYTES:
+            return False
         try:
             with path.open("rb") as f:
                 chunk = f.read(4096)
@@ -40,10 +44,10 @@ class AtlasScanner:
         self.inventory_strict = inventory_strict
 
         if self.inventory_strict:
-             # Minimal excludes for strict inventory: only git and venv
-             default_excludes = ["**/.git/**", "**/.venv/**"]
+            # Minimal excludes for strict inventory: only git and venv
+            default_excludes = ["**/.git/**", "**/.venv/**"]
         else:
-             default_excludes = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**", "**/.cache/**"]
+            default_excludes = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**", "**/.cache/**"]
 
         self.exclude_globs = exclude_globs if exclude_globs is not None else default_excludes
         self._exclude_patterns = self._build_exclude_patterns(self.exclude_globs)
@@ -57,6 +61,7 @@ class AtlasScanner:
             "extensions": {},
             "top_dirs": [],  # List of {"path": str, "bytes": int}
             "repo_nodes": [], # List of paths that look like git repos
+            "active_excludes": self.exclude_globs, # Transparency: list active excludes
         }
         self.tree = {} # Nested dict structure representing the tree
 
@@ -100,7 +105,7 @@ class AtlasScanner:
         Args:
             inventory_file: Optional path to write a JSONL inventory of all files.
         """
-        self.stats["start_time"] = datetime.utcnow().isoformat()
+        self.stats["start_time"] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         start_ts = time.time()
 
         current_entries = 0
@@ -183,11 +188,12 @@ class AtlasScanner:
                                 "name": f,
                                 "ext": ext,
                                 "size_bytes": size,
-                                "mtime": datetime.utcfromtimestamp(mtime).isoformat() + "Z",
+                                "mtime": datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace('+00:00', 'Z'),
                                 "is_text": is_txt,
                                 "is_symlink": is_sym
                             }
-                            inv_f.write(json.dumps(entry) + "\n")
+                            # Unicode-friendly and deterministic JSON
+                            inv_f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
 
                     except OSError:
                         continue
@@ -202,7 +208,7 @@ class AtlasScanner:
                 inv_f.close()
 
         # Calculate Duration
-        self.stats["end_time"] = datetime.utcnow().isoformat()
+        self.stats["end_time"] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         self.stats["duration_seconds"] = time.time() - start_ts
 
         # Find Top Dirs (Hotspots) - simplistic aggregation
@@ -227,7 +233,8 @@ class AtlasScanner:
 
         # Add inventory metadata to stats if file was generated
         if inventory_file:
-            self.stats["inventory_file"] = inventory_file.name
+            # Store full absolute path for robustness, as requested
+            self.stats["inventory_file"] = str(inventory_file.resolve())
             self.stats["inventory_strict"] = self.inventory_strict
 
         return {
@@ -265,7 +272,7 @@ class AtlasScanner:
 
         with output_file.open("w", encoding="utf-8") as out:
             out.write(f"# Atlas Folder Merge: {folder_rel_path}\n")
-            out.write(f"# Generated: {datetime.utcnow().isoformat()}Z\n\n")
+            out.write(f"# Generated: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}\n\n")
 
             for f_path in candidates:
                 rel_path = f_path.relative_to(self.root).as_posix()
@@ -309,6 +316,13 @@ def render_atlas_md(atlas_data: Dict[str, Any]) -> str:
         lines.append(f"**Inventory:** `{stats.get('inventory_file')}` generated.")
         if stats.get("inventory_strict"):
             lines.append("**Mode:** Strict Inventory (minimal excludes).")
+        lines.append("")
+
+    # Transparency on Excludes
+    if stats.get("active_excludes"):
+        lines.append("**Active Excludes:**")
+        for ex in sorted(stats["active_excludes"]):
+            lines.append(f"- `{ex}`")
         lines.append("")
 
     lines.append("## 📊 Overview")
