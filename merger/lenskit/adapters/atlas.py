@@ -45,9 +45,9 @@ class AtlasScanner:
 
         if self.inventory_strict:
             # Minimal excludes for strict inventory: only git and venv
-            default_excludes = ["**/.git/**", "**/.venv/**"]
+            default_excludes = ["**/.git", "**/.venv"]
         else:
-            default_excludes = ["**/.git/**", "**/node_modules/**", "**/.venv/**", "**/__pycache__/**", "**/.cache/**"]
+            default_excludes = ["**/.git", "**/node_modules", "**/.venv", "**/__pycache__", "**/.cache"]
 
         self.exclude_globs = exclude_globs if exclude_globs is not None else default_excludes
         self._exclude_patterns = self._build_exclude_patterns(self.exclude_globs)
@@ -61,7 +61,15 @@ class AtlasScanner:
             "extensions": {},
             "top_dirs": [],  # List of {"path": str, "bytes": int}
             "repo_nodes": [], # List of paths that look like git repos
-            "active_excludes": self.exclude_globs, # Transparency: list active excludes
+            "active_excludes": self.exclude_globs,
+            "truncated": {
+                "max_entries": self.max_entries,
+                "hit": False,
+                "files_seen": 0,
+                "dirs_seen": 0,
+                "depth_limit_hit": False,
+                "reason": None
+            }
         }
         self.tree = {} # Nested dict structure representing the tree
 
@@ -70,14 +78,24 @@ class AtlasScanner:
         patterns = []
         seen = set()
         for glob in globs:
+            # Normalize globs to handle both directory matching and content matching
+            # e.g. "**/node_modules" -> matches the dir itself
+            # "**/node_modules/**" -> matches contents
+            # We want to match the dir to prune traversal.
+
             normalized = str(glob).replace("\\", "/")
+
+            # Ensure we have the "dir" matching pattern
             candidates = [normalized]
-            if normalized.startswith("**/"):
-                candidates.append(normalized[3:])
+
             if normalized.endswith("/**"):
+                # If "foo/**", we also want to match "foo" to prune it.
                 candidates.append(normalized[:-3])
-            if normalized.startswith("**/") and normalized.endswith("/**"):
-                candidates.append(normalized[3:-3])
+            elif not normalized.endswith("/**"):
+                # If "foo", we implicitly want to exclude contents too, but os.walk prune
+                # relies on matching the dir name. "foo" works for that.
+                pass
+
             for candidate in candidates:
                 if candidate and candidate not in seen:
                     seen.add(candidate)
@@ -98,34 +116,30 @@ class AtlasScanner:
                 return True
         return False
 
-    def scan(self, inventory_file: Optional[Path] = None) -> Dict[str, Any]:
+    def scan(self, inventory_file: Optional[Path] = None, dirs_inventory_file: Optional[Path] = None) -> Dict[str, Any]:
         """
         Scans the directory structure.
 
         Args:
             inventory_file: Optional path to write a JSONL inventory of all files.
+            dirs_inventory_file: Optional path to write a JSONL inventory of all directories.
         """
         self.stats["start_time"] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         start_ts = time.time()
 
         current_entries = 0
+        depth_limit_hit = False
 
-        # Prepare inventory writer if needed
+        # Prepare inventory writers
         inv_f = None
-        if inventory_file:
-            try:
+        dirs_inv_f = None
+        try:
+            if inventory_file:
                 inv_f = inventory_file.open("w", encoding="utf-8")
-            except OSError as e:
-                logger.error(f"Failed to open inventory file {inventory_file}: {e}")
-
-        # Root node for stats tree
-        self.tree = {
-            "name": self.root.name,
-            "path": ".",
-            "type": "dir",
-            "children": [],
-            "stats": {"files": 0, "bytes": 0}
-        }
+            if dirs_inventory_file:
+                dirs_inv_f = dirs_inventory_file.open("w", encoding="utf-8")
+        except OSError as e:
+            logger.error(f"Failed to open inventory files: {e}")
 
         dir_sizes = {} # path -> size
 
@@ -133,7 +147,7 @@ class AtlasScanner:
             for root, dirs, files in os.walk(self.root, topdown=True):
                 current_root = Path(root)
 
-                # Check exclusions for current root (double check)
+                # Check exclusions for current root (prune traversal)
                 if self._is_excluded(current_root):
                     dirs[:] = []
                     continue
@@ -143,6 +157,7 @@ class AtlasScanner:
 
                 if depth > self.max_depth:
                     dirs[:] = []
+                    depth_limit_hit = True
                     continue
 
                 # Check for .git to mark repo node
@@ -151,10 +166,33 @@ class AtlasScanner:
                     if ".git" in dirs:
                         dirs.remove(".git")
 
-                # Filter dirs in-place
-                dirs[:] = [d for d in dirs if not self._is_excluded(current_root / d)]
+                # Filter dirs in-place (Pruning)
+                # We must check if the dir ITSELF is excluded to prune it from walk
+                # The path to check is current_root / d
+                kept_dirs = []
+                for d in dirs:
+                    d_path = current_root / d
+                    if not self._is_excluded(d_path):
+                        kept_dirs.append(d)
+                dirs[:] = kept_dirs
 
                 dir_bytes = 0
+
+                # Directory Inventory
+                if dirs_inv_f:
+                    entry = {
+                        "rel_path": rel_path.as_posix(),
+                        "depth": depth,
+                        "n_files": len(files),
+                        "n_dirs": len(dirs),
+                        # bytes will be populated post-loop or via separate logic?
+                        # For pure inventory, structure is key.
+                        # We can't know recursive bytes here yet.
+                        "mtime": datetime.fromtimestamp(current_root.stat().st_mtime, timezone.utc).isoformat().replace('+00:00', 'Z')
+                    }
+                    dirs_inv_f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+
+                self.stats["truncated"]["dirs_seen"] += 1
 
                 for f in files:
                     f_path = current_root / f
@@ -162,8 +200,12 @@ class AtlasScanner:
                         continue
 
                     current_entries += 1
+                    self.stats["truncated"]["files_seen"] = current_entries
+
                     if current_entries > self.max_entries:
-                        logger.warning("Max entries limit reached for Atlas scan.")
+                        self.stats["truncated"]["hit"] = True
+                        self.stats["truncated"]["reason"] = "max_entries"
+                        # We break the inner loop, but need to stop outer walk too
                         break
 
                     try:
@@ -192,20 +234,26 @@ class AtlasScanner:
                                 "is_text": is_txt,
                                 "is_symlink": is_sym
                             }
-                            # Unicode-friendly and deterministic JSON
                             inv_f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
 
                     except OSError:
                         continue
 
-                if current_entries > self.max_entries:
+                if self.stats["truncated"]["hit"]:
                     break
 
                 self.stats["total_dirs"] += 1
                 dir_sizes[str(rel_path)] = dir_bytes
         finally:
-            if inv_f:
-                inv_f.close()
+            if inv_f: inv_f.close()
+            if dirs_inv_f: dirs_inv_f.close()
+
+        # Update stats
+        if depth_limit_hit:
+             self.stats["truncated"]["depth_limit_hit"] = True
+             if not self.stats["truncated"]["hit"]: # If not already hit by entries
+                 self.stats["truncated"]["hit"] = True
+                 self.stats["truncated"]["reason"] = "max_depth"
 
         # Calculate Duration
         self.stats["end_time"] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -221,8 +269,6 @@ class AtlasScanner:
             p = Path(p_str)
             parent = str(p.parent)
             if parent == ".":
-                # For path "foo", parent is "."
-                # For path ".", parent is "." but we skip "." in loop above
                 pass
 
             if parent in recursive_sizes:
@@ -233,23 +279,31 @@ class AtlasScanner:
 
         # Add inventory metadata to stats if file was generated
         if inventory_file:
-            # Store full absolute path for robustness, as requested
             self.stats["inventory_file"] = str(inventory_file.resolve())
-            self.stats["inventory_strict"] = self.inventory_strict
+        if dirs_inventory_file:
+            self.stats["dirs_inventory_file"] = str(dirs_inventory_file.resolve())
+
+        self.stats["inventory_strict"] = self.inventory_strict
 
         return {
             "root": str(self.root),
             "stats": self.stats,
         }
 
-    def merge_folder(self, folder_rel_path: str, output_file: Path) -> Dict[str, Any]:
+    def merge_folder(self, folder_rel_path: str, output_file: Path,
+                     recursive: bool = False, max_files: int = 1000, max_bytes: int = 10 * 1024 * 1024) -> Dict[str, Any]:
         """
         Situative Folder Merge: Merges all text files in a specific folder into one file.
-        Non-recursive.
+
+        Args:
+            folder_rel_path: Relative path to folder to merge.
+            output_file: Path to write merged content.
+            recursive: Whether to include subdirectories.
+            max_files: Safety limit for number of files.
+            max_bytes: Safety limit for total merged size.
         """
         target_dir = (self.root / folder_rel_path).resolve()
 
-        # Security check: ensure target_dir is inside root
         try:
             target_dir.relative_to(self.root.resolve())
         except ValueError:
@@ -260,47 +314,87 @@ class AtlasScanner:
 
         files_merged = []
         files_skipped = []
+        total_merged_bytes = 0
+        file_count = 0
 
-        # Gather candidates (shallow)
+        # Gather candidates
         candidates = []
-        for item in target_dir.iterdir():
-            if item.is_file():
-                candidates.append(item)
+        if recursive:
+            for root, dirs, files in os.walk(target_dir):
+                # Apply same excludes? Or raw merge?
+                # User said "situative folder merge... roh...".
+                # Usually explicit merge implies "I want this folder".
+                # But we should probably respect excludes to avoid merging .git etc.
+                if self._is_excluded(Path(root)):
+                    dirs[:] = []
+                    continue
+                dirs[:] = [d for d in dirs if not self._is_excluded(Path(root) / d)]
+
+                for f in files:
+                    candidates.append(Path(root) / f)
+        else:
+            for item in target_dir.iterdir():
+                if item.is_file():
+                    candidates.append(item)
 
         # Deterministic sort
-        candidates.sort(key=lambda p: p.name.lower())
+        # Sort by relative path to target_dir for stability
+        candidates.sort(key=lambda p: str(p.relative_to(target_dir)).lower())
+
+        limit_hit_reason = None
 
         with output_file.open("w", encoding="utf-8") as out:
             out.write(f"# Atlas Folder Merge: {folder_rel_path}\n")
-            out.write(f"# Generated: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}\n\n")
+            out.write(f"# Generated: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}\n")
+            out.write(f"# Recursive: {recursive}\n\n")
 
             for f_path in candidates:
+                if self._is_excluded(f_path):
+                    continue
+
+                if file_count >= max_files:
+                    limit_hit_reason = "max_files"
+                    break
+
+                if total_merged_bytes >= max_bytes:
+                    limit_hit_reason = "max_bytes"
+                    break
+
                 rel_path = f_path.relative_to(self.root).as_posix()
                 try:
                     size = f_path.stat().st_size
                     if is_probably_text(f_path, size):
+                        # Peek if adding this file exceeds limit?
+                        # We merge streaming, so we check total_merged_bytes.
+
                         out.write(f"===== FILE: {rel_path} =====\n")
                         try:
                             content = f_path.read_text(encoding="utf-8", errors="replace")
                             out.write(content)
+                            total_merged_bytes += len(content.encode("utf-8")) # Rough estimate
                         except Exception as e:
                             out.write(f"[Error reading file: {e}]\n")
                         out.write("\n\n")
                         files_merged.append(rel_path)
+                        file_count += 1
                     else:
                         files_skipped.append({"path": rel_path, "reason": "binary/non-text"})
                 except OSError as e:
                     files_skipped.append({"path": rel_path, "reason": f"fs_error: {e}"})
 
+            if limit_hit_reason:
+                out.write(f"\n===== MERGE TRUNCATED: {limit_hit_reason} reached =====\n")
+
             if files_skipped:
-                out.write("===== SKIPPED FILES =====\n")
+                out.write("\n===== SKIPPED FILES =====\n")
                 for item in files_skipped:
                     out.write(f"- {item['path']} ({item['reason']})\n")
 
         return {
             "merged": files_merged,
             "skipped": files_skipped,
-            "output_file": str(output_file)
+            "output_file": str(output_file),
+            "truncated": limit_hit_reason
         }
 
 def render_atlas_md(atlas_data: Dict[str, Any]) -> str:
@@ -313,9 +407,22 @@ def render_atlas_md(atlas_data: Dict[str, Any]) -> str:
     lines.append("")
 
     if stats.get("inventory_file"):
-        lines.append(f"**Inventory:** `{stats.get('inventory_file')}` generated.")
-        if stats.get("inventory_strict"):
-            lines.append("**Mode:** Strict Inventory (minimal excludes).")
+        lines.append(f"**Inventory (Files):** `{Path(stats.get('inventory_file')).name}`")
+    if stats.get("dirs_inventory_file"):
+        lines.append(f"**Inventory (Dirs):** `{Path(stats.get('dirs_inventory_file')).name}`")
+
+    if stats.get("inventory_strict"):
+        lines.append("**Mode:** Strict Inventory (minimal excludes).")
+    lines.append("")
+
+    # Truncation Warning
+    trunc = stats.get("truncated", {})
+    if trunc.get("hit"):
+        lines.append(f"⚠️ **SCAN TRUNCATED**: {trunc.get('reason')}")
+        lines.append(f"  - Files seen: {trunc.get('files_seen')}")
+        lines.append(f"  - Limit: {trunc.get('max_entries')}")
+        if trunc.get("depth_limit_hit"):
+            lines.append("  - Depth limit hit: Yes")
         lines.append("")
 
     # Transparency on Excludes

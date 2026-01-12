@@ -63,3 +63,33 @@ def test_atlas_inventory_strict_mode(tmp_path):
     paths = {item["rel_path"] for item in items}
 
     assert "node_modules/pkg.json" in paths
+
+def test_atlas_truncation(tmp_path):
+    # Test truncation stats
+    for i in range(10):
+        (tmp_path / f"file{i}.txt").write_text("x")
+
+    scanner = AtlasScanner(tmp_path, max_entries=5)
+    result = scanner.scan()
+
+    assert result["stats"]["truncated"]["hit"] is True
+    assert result["stats"]["truncated"]["reason"] == "max_entries"
+    assert result["stats"]["truncated"]["files_seen"] == 6 # Breaks after hitting > 5
+
+def test_atlas_dirs_inventory(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a/sub").mkdir()
+
+    dirs_file = tmp_path / "dirs.jsonl"
+    scanner = AtlasScanner(tmp_path)
+    scanner.scan(dirs_inventory_file=dirs_file)
+
+    assert dirs_file.exists()
+    lines = dirs_file.read_text(encoding="utf-8").strip().splitlines()
+    items = [json.loads(line) for line in lines]
+    paths = {item["rel_path"] for item in items}
+
+    assert "a" in paths
+    assert "b" in paths
+    assert "a/sub" in paths
