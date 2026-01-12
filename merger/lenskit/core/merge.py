@@ -2038,6 +2038,12 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             abs_path = Path(dirpath) / fn
             rel_path = Path(rel_path_str)
 
+            # Security Guardrail (explicit containment check)
+            # Despite os.walk providing containment, we explicitly assert it here
+            # to prevent any future regression or traversal risks if logic changes.
+            if not str(abs_path).startswith(root_str):
+                continue
+
             # Filter Logic with Force Include
             is_critical = is_critical_file(rel_path_str)
             inclusion_reason = "normal"
