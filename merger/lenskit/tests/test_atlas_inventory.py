@@ -74,7 +74,8 @@ def test_atlas_truncation(tmp_path):
 
     assert result["stats"]["truncated"]["hit"] is True
     assert result["stats"]["truncated"]["reason"] == "max_entries"
-    assert result["stats"]["truncated"]["files_seen"] == 6 # Breaks after hitting > 5
+    # Should be exactly 5 (capped)
+    assert result["stats"]["truncated"]["files_seen"] == 5
 
 def test_atlas_dirs_inventory(tmp_path):
     (tmp_path / "a").mkdir()
@@ -93,3 +94,26 @@ def test_atlas_dirs_inventory(tmp_path):
     assert "a" in paths
     assert "b" in paths
     assert "a/sub" in paths
+
+def test_exclude_pattern_robustness(tmp_path):
+    # Test that excluding "myexclude" correctly excludes "myexclude" folder AND "myexclude/file"
+    # even if pattern was just "**/myexclude"
+
+    (tmp_path / "keep").mkdir()
+    (tmp_path / "keep" / "ok.txt").write_text("ok")
+
+    (tmp_path / "myexclude").mkdir()
+    (tmp_path / "myexclude" / "bad.txt").write_text("bad")
+
+    # Explicit custom exclude
+    scanner = AtlasScanner(tmp_path, exclude_globs=["**/myexclude"])
+
+    inventory_file = tmp_path / "inv.jsonl"
+    scanner.scan(inventory_file=inventory_file)
+
+    lines = inventory_file.read_text(encoding="utf-8").strip().splitlines()
+    items = [json.loads(line) for line in lines]
+    paths = {item["rel_path"] for item in items}
+
+    assert "keep/ok.txt" in paths
+    assert "myexclude/bad.txt" not in paths

@@ -78,23 +78,27 @@ class AtlasScanner:
         patterns = []
         seen = set()
         for glob in globs:
-            # Normalize globs to handle both directory matching and content matching
-            # e.g. "**/node_modules" -> matches the dir itself
-            # "**/node_modules/**" -> matches contents
-            # We want to match the dir to prune traversal.
-
+            # Normalize globs
             normalized = str(glob).replace("\\", "/")
 
-            # Ensure we have the "dir" matching pattern
+            # 1. The original pattern (robust normalization)
             candidates = [normalized]
 
+            # 2. If it DOES NOT end with "/**", add it to match contents recursively
+            #    e.g. "**/node_modules" -> also exclude "**/node_modules/**"
+            if not normalized.endswith("/**"):
+                candidates.append(f"{normalized}/**")
+
+            # 3. If it DOES end with "/**", add the base directory to prune traversal
+            #    e.g. "**/node_modules/**" -> also exclude "**/node_modules"
             if normalized.endswith("/**"):
-                # If "foo/**", we also want to match "foo" to prune it.
                 candidates.append(normalized[:-3])
-            elif not normalized.endswith("/**"):
-                # If "foo", we implicitly want to exclude contents too, but os.walk prune
-                # relies on matching the dir name. "foo" works for that.
-                pass
+
+            # 4. FIX: If it starts with "**/", add the suffix to match root-level directories
+            #    fnmatch('node_modules', '**/node_modules') is False.
+            #    So we need 'node_modules' as a pattern.
+            if normalized.startswith("**/"):
+                candidates.append(normalized[3:])
 
             for candidate in candidates:
                 if candidate and candidate not in seen:
@@ -168,12 +172,14 @@ class AtlasScanner:
 
                 # Filter dirs in-place (Pruning)
                 # We must check if the dir ITSELF is excluded to prune it from walk
-                # The path to check is current_root / d
                 kept_dirs = []
                 for d in dirs:
                     d_path = current_root / d
-                    if not self._is_excluded(d_path):
-                        kept_dirs.append(d)
+                    # Note: We check exclusion of the CHILD directory here.
+                    # This relies on pattern matching relative path from ROOT.
+                    if self._is_excluded(d_path):
+                        continue
+                    kept_dirs.append(d)
                 dirs[:] = kept_dirs
 
                 dir_bytes = 0
@@ -205,7 +211,8 @@ class AtlasScanner:
                     if current_entries > self.max_entries:
                         self.stats["truncated"]["hit"] = True
                         self.stats["truncated"]["reason"] = "max_entries"
-                        # We break the inner loop, but need to stop outer walk too
+                        # Reset files_seen to max_entries to reflect "stop at limit" contract
+                        self.stats["truncated"]["files_seen"] = self.max_entries
                         break
 
                     try:
@@ -244,6 +251,7 @@ class AtlasScanner:
 
                 self.stats["total_dirs"] += 1
                 dir_sizes[str(rel_path)] = dir_bytes
+
         finally:
             if inv_f: inv_f.close()
             if dirs_inv_f: dirs_inv_f.close()
@@ -251,7 +259,7 @@ class AtlasScanner:
         # Update stats
         if depth_limit_hit:
              self.stats["truncated"]["depth_limit_hit"] = True
-             if not self.stats["truncated"]["hit"]: # If not already hit by entries
+             if not self.stats["truncated"]["hit"]:
                  self.stats["truncated"]["hit"] = True
                  self.stats["truncated"]["reason"] = "max_depth"
 
@@ -325,10 +333,20 @@ class AtlasScanner:
                 # User said "situative folder merge... roh...".
                 # Usually explicit merge implies "I want this folder".
                 # But we should probably respect excludes to avoid merging .git etc.
-                if self._is_excluded(Path(root)):
+
+                # Exclude directories from traversal
+                # Similar logic to scan() pruning
+                current_root = Path(root)
+                if self._is_excluded(current_root):
                     dirs[:] = []
                     continue
-                dirs[:] = [d for d in dirs if not self._is_excluded(Path(root) / d)]
+
+                kept_dirs = []
+                for d in dirs:
+                    d_path = current_root / d
+                    if not self._is_excluded(d_path):
+                        kept_dirs.append(d)
+                dirs[:] = kept_dirs
 
                 for f in files:
                     candidates.append(Path(root) / f)
@@ -349,6 +367,7 @@ class AtlasScanner:
             out.write(f"# Recursive: {recursive}\n\n")
 
             for f_path in candidates:
+                # Check exclusion again for the file path
                 if self._is_excluded(f_path):
                     continue
 
@@ -364,9 +383,6 @@ class AtlasScanner:
                 try:
                     size = f_path.stat().st_size
                     if is_probably_text(f_path, size):
-                        # Peek if adding this file exceeds limit?
-                        # We merge streaming, so we check total_merged_bytes.
-
                         out.write(f"===== FILE: {rel_path} =====\n")
                         try:
                             content = f_path.read_text(encoding="utf-8", errors="replace")
