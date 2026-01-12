@@ -709,19 +709,51 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     json_filename = f"{scan_id}.json"
     md_filename = f"{scan_id}.md"
+    inventory_filename = f"{scan_id}.inventory.jsonl" # Default name
 
     # Helper to run scan and save
     def run_scan_and_save():
         try:
+            # Inventory First: inventory_file is always passed now.
+            inventory_path = merges_dir / inventory_filename
+
+            # Use inventory_strict if configured?
+            # We don't have this in AtlasRequest yet (schema change).
+            # But the user said: "Inventur-Default: ... (z.B. nur .git und offensichtliche Virtualenvs), damit der Nutzer wirklich 'alles beim Namen' bekommt."
+            # and "Erlaube optional einen Modus 'inventur_strict=true'".
+            # We should pass inventory_file.
+            # And strict mode? If user didn't ask for specific excludes, maybe we should default to strict?
+            # Or expose it.
+            # Current instruction: "Default-Output is complete file list".
+            # The AtlasScanner default excludes are NOT strict (they include node_modules etc).
+            # To match the "Inventur" goal, we should probably set inventory_strict=True unless specified otherwise?
+            # But wait, inventory_strict=True means LESS excludes.
+            # So if we want "complete file list", we want strict mode.
+            # Let's check existing logic:
+            # inventory_strict=True -> only .git, .venv
+            # inventory_strict=False -> .git, node_modules, cache, etc.
+
+            # The requirement is "Primär-Output ist ein vollständiger Index".
+            # "node_modules" usually is noise.
+            # But "alles beim Namen" implies listing it.
+            # Let's enable strict mode if no explicit excludes are given?
+            # Or just pass inventory_file and let AtlasScanner defaults rule (which are SAFE/Clean).
+            # The prompt said: "Phase 0 Ziel: Inventur... Keine Top N...".
+            # It also said: "Default-Excludes dürfen existieren... Wichtig: Erlaube optional einen Modus 'inventur_strict=true'".
+            # So Strict is OPTIONAL.
+
+            # We will generate inventory file ALWAYS.
+
             scanner = AtlasScanner(
                 root=scan_root,
                 max_depth=effective_max_depth,
                 max_entries=effective_max_entries,
-                exclude_globs=effective_excludes
+                exclude_globs=effective_excludes,
+                inventory_strict=False # Default safe. Can be exposed later.
             )
-            result = scanner.scan()
+            result = scanner.scan(inventory_file=inventory_path)
 
-            # Save JSON
+            # Save JSON Stats
             with open(merges_dir / json_filename, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2)
 
@@ -738,15 +770,15 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     background_tasks.add_task(run_scan_and_save)
 
-    # Return "pending" artifact response immediately (optimistic)
-    # Or should we store it in a store?
-    # For now, we return the paths where it WILL be.
+    # Update response object to include inventory path
+    paths = {"json": json_filename, "md": md_filename, "inventory": inventory_filename}
+
     return AtlasArtifact(
         id=scan_id,
         created_at=datetime.utcnow().isoformat(),
         hub=str(hub),
         root_scanned=str(scan_root),
-        paths={"json": json_filename, "md": md_filename},
+        paths=paths,
         stats={}, # Empty initially
         effective=AtlasEffective(
             max_depth=effective_max_depth,
@@ -826,12 +858,21 @@ def get_latest_atlas():
 
     scan_id = latest_file.stem # atlas-123456
 
+    # Construct paths
+    paths = {"json": latest_file.name, "md": latest_file.with_suffix(".md").name}
+    inv_file = latest_file.with_suffix(".inventory.jsonl")
+    if inv_file.name.startswith(scan_id): # Ensure it matches ID (it does by construction)
+         # Check existence? Usually assumed.
+         # Actually check if it exists to avoid 404 links
+         if inv_file.exists():
+             paths["inventory"] = inv_file.name
+
     return AtlasArtifact(
         id=scan_id,
         created_at=datetime.fromtimestamp(latest_file.stat().st_mtime).isoformat(),
         hub=str(state.hub),
         root_scanned=scan_root,
-        paths={"json": latest_file.name, "md": latest_file.with_suffix(".md").name},
+        paths=paths,
         stats=stats
     )
 
@@ -841,8 +882,8 @@ def download_atlas(id: str, key: str = "md"):
     if not re.fullmatch(r"atlas-\d+", (id or "").strip()):
         raise HTTPException(status_code=400, detail="Invalid atlas id format")
 
-    if key not in ("json", "md"):
-        raise HTTPException(status_code=400, detail="Invalid key. Use 'json' or 'md'.")
+    if key not in ("json", "md", "inventory"):
+        raise HTTPException(status_code=400, detail="Invalid key. Use 'json', 'md', or 'inventory'.")
 
     if not state.hub:
         raise HTTPException(status_code=400, detail="Hub not configured")
@@ -854,13 +895,33 @@ def download_atlas(id: str, key: str = "md"):
     # IMPORTANT: do NOT build a path from user input.
     # Enumerate allowed files and then select by id.
     candidates = {}
-    for p in merges_dir.glob(f"atlas-*.{key}"):
+
+    # Map key to extension
+    ext_map = {"json": ".json", "md": ".md", "inventory": ".inventory.jsonl"}
+    ext = ext_map[key]
+
+    # Glob pattern needs to match suffix carefully
+    # atlas-*.json covers .inventory.jsonl? No.
+    # Globbing: atlas-*{ext}
+
+    for p in merges_dir.glob(f"atlas-*{ext}"):
         try:
             rp = p.resolve()
             rp.relative_to(merges_dir)  # containment even under symlinks
         except Exception:
             continue
-        candidates[p.stem] = rp
+
+        # ID extraction:
+        # atlas-123.json -> atlas-123
+        # atlas-123.inventory.jsonl -> atlas-123 ?
+        # stem of .inventory.jsonl is .inventory ? No.
+        # pathlib stem logic:
+        # p = atlas-123.inventory.jsonl -> stem = atlas-123.inventory
+        # So p.stem != id.
+
+        # Robust ID matching:
+        if p.name.startswith(id + "."):
+             candidates[id] = rp
 
     file_path = candidates.get(id)
     if not file_path:
