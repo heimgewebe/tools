@@ -2007,6 +2007,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     ext_hist: Dict[str, int] = {}
 
     root_str = str(repo_root)
+    # Guardrail: Ensure root ends with separator for safe prefix checking
+    root_guard = root_str if root_str.endswith(os.sep) else root_str + os.sep
     root_len = len(root_str)
 
     for dirpath, dirnames, filenames in os.walk(root_str):
@@ -2041,7 +2043,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             # Security Guardrail (explicit containment check)
             # Despite os.walk providing containment, we explicitly assert it here
             # to prevent any future regression or traversal risks if logic changes.
-            if not str(abs_path).startswith(root_str):
+            # Using root_guard (with trailing slash) prevents partial prefix matches.
+            if not str(abs_path).startswith(root_guard):
                 continue
 
             # Filter Logic with Force Include
