@@ -74,8 +74,7 @@ def test_atlas_truncation(tmp_path):
 
     assert result["stats"]["truncated"]["hit"] is True
     assert result["stats"]["truncated"]["reason"] == "max_entries"
-    # Adjusted assertion to match new behavior:
-    # "files_seen" is capped at max_entries when truncation occurs.
+    # Should be exactly 5 (capped)
     assert result["stats"]["truncated"]["files_seen"] == 5
 
 def test_atlas_dirs_inventory(tmp_path):
