@@ -315,7 +315,7 @@ class AtlasScanner:
         try:
             target_dir.relative_to(self.root.resolve())
         except ValueError:
-             raise ValueError(f"Target folder {folder_rel_path} is outside of atlas root.")
+            raise ValueError(f"Target folder {folder_rel_path} is outside of atlas root.")
 
         if not target_dir.exists() or not target_dir.is_dir():
             raise ValueError(f"Folder not found: {folder_rel_path}")
