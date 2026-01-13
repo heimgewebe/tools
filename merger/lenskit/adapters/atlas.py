@@ -95,7 +95,7 @@ class AtlasScanner:
                 else:
                     expanded_candidates.add(f"{cand}/**")
 
-            for candidate in expanded_candidates:
+            for candidate in sorted(expanded_candidates):
                 if candidate and candidate not in seen:
                     seen.add(candidate)
                     patterns.append(candidate)
