@@ -500,7 +500,7 @@ Ein Pool-Eintrag kann entweder eine einfache Liste (Legacy) oder ein strukturier
 
 ## 15. Frontend Feature Parity (Normative)
 
-To ensure a consistent experience across all UIs (WebUI, Pythonista, CLI), every frontend implementation **MUST** expose the following configuration controls to the user.
+To ensure a consistent experience across all UIs, every **interactive** frontend implementation (WebUI, Pythonista) **MUST** expose the following configuration controls to the user. CLI implementations **MUST** expose equivalent command-line arguments.
 
 | Control | Type | Values | Default | Purpose |
 | :--- | :--- | :--- | :--- | :--- |

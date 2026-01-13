@@ -773,7 +773,7 @@ function restoreConfig() {
             if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
             if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
             if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
-            if (config.metaDensity) document.getElementById('metaDensity').value = config.metaDensity;
+            if (config.metaDensity !== undefined) document.getElementById('metaDensity').value = config.metaDensity;
             if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
             if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
 
