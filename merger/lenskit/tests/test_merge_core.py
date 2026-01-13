@@ -227,7 +227,9 @@ class TestMergeCore(unittest.TestCase):
         self.assertIn(f'<a id="{full_anchor}"></a>', full_report)
 
         # Check for Heading ID (implicit or tokenized)
-        self.assertIn(f"#### {full_anchor}", full_report)
+        # Spec v2.4: use readable title if available
+        # self.assertIn(f"#### {full_anchor}", full_report)
+        self.assertIn(f"#### src/My File.txt", full_report)
 
         # Check for alias anchor (legacy/backward compatibility)
         self.assertIn(f'<a id="{base_anchor}"></a>', full_report)

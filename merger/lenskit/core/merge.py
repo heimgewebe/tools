@@ -447,8 +447,8 @@ class HealthCollector:
             p = self.hub_path / ".gewebe/cache/fleet.snapshot.json"
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to read fleet snapshot: {e}\n")
         return None
 
     def _pick_ai_context_paths(self, files: List["FileInfo"]) -> List[Path]:
@@ -476,8 +476,8 @@ class HealthCollector:
             p = repo_root / ".gewebe/out/sync.report.json"
             if p.exists():
                 return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to read sync report: {e}\n")
         return None
 
     def _eval_sync_status(self, report: Optional[Dict[str, Any]]) -> str:
@@ -569,8 +569,8 @@ class HealthCollector:
                     idx = len(f0.rel_path.parts) - 1
                     if idx < len(f0.abs_path.parents):
                         repo_root = f0.abs_path.parents[idx]
-            except Exception:
-                pass
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to reconstruct repo root: {e}\n")
 
         # Count files per category
         category_counts: Dict[str, int] = {}
@@ -1303,6 +1303,12 @@ REPO_ORDER = [
 
 class FileInfo(object):
     """Container for file metadata."""
+    __slots__ = (
+        "root_label", "abs_path", "rel_path", "size", "is_text", "md5",
+        "category", "tags", "ext", "skipped", "reason", "content",
+        "inclusion_reason", "anchor", "anchor_alias", "roles", "lens"
+    )
+
     def __init__(self, root_label, abs_path, rel_path, size, is_text, md5, category, tags, ext, skipped=False, reason=None, content=None, inclusion_reason="normal"):
         self.root_label = root_label
         self.abs_path = abs_path
@@ -1621,9 +1627,9 @@ def human_size(n: float) -> str:
     size = float(n)
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024.0 or unit == "GB":
-            return "{0:.2f} {1}".format(size, unit)
+            return f"{size:.2f} {unit}"
         size /= 1024.0
-    return "{0:.2f} GB".format(size)
+    return f"{size:.2f} GB"
 
 
 def is_probably_text(path: Path, size: int) -> bool:
@@ -1668,7 +1674,8 @@ def compute_md5(path: Path, limit_bytes: Optional[int] = None) -> str:
                     if remaining <= 0:
                         break
         return h.hexdigest()
-    except OSError:
+    except OSError as e:
+        sys.stderr.write(f"Warning: MD5 computation failed for {path}: {e}\n")
         return "ERROR"
 
 
@@ -1716,7 +1723,8 @@ def classify_file_v2(rel_path: Path, ext: str) -> Tuple[str, List[str]]:
     Returns (category, tags).
     Strict Pattern Matching based on v2.1 Spec.
     """
-    parts = list(rel_path.parts)
+    # Optimization: Use tuple directly, don't convert to list
+    parts = rel_path.parts
     name = rel_path.name.lower()
     tags = []
 
@@ -1998,7 +2006,12 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     total_bytes = 0
     ext_hist: Dict[str, int] = {}
 
-    for dirpath, dirnames, filenames in os.walk(str(repo_root)):
+    root_str = str(repo_root)
+    # Guardrail: Ensure root ends with separator for safe prefix checking
+    root_guard = root_str if root_str.endswith(os.sep) else root_str + os.sep
+    root_len = len(root_str)
+
+    for dirpath, dirnames, filenames in os.walk(root_str):
         # Filter directories
         keep_dirs = []
         for d in dirnames:
@@ -2007,19 +2020,32 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             keep_dirs.append(d)
         dirnames[:] = keep_dirs
 
+        # Calculate relative directory once per folder
+        if dirpath == root_str:
+            rel_dir = ""
+        else:
+            rel_dir = dirpath[root_len:].lstrip(os.sep).replace("\\", "/")
+
         for fn in filenames:
             if fn in SKIP_FILES:
                 continue
             if fn.startswith(".env") and fn not in (".env.example", ".env.template", ".env.sample"):
                 continue
 
-            abs_path = Path(dirpath) / fn
-            try:
-                rel_path = abs_path.relative_to(repo_root)
-            except ValueError:
-                continue
+            if rel_dir:
+                rel_path_str = f"{rel_dir}/{fn}"
+            else:
+                rel_path_str = fn
 
-            rel_path_str = rel_path.as_posix()
+            abs_path = Path(dirpath) / fn
+            rel_path = Path(rel_path_str)
+
+            # Security Guardrail (explicit containment check)
+            # Despite os.walk providing containment, we explicitly assert it here
+            # to prevent any future regression or traversal risks if logic changes.
+            # Using root_guard (with trailing slash) prevents partial prefix matches.
+            if not str(abs_path).startswith(root_guard):
+                continue
 
             # Filter Logic with Force Include
             is_critical = is_critical_file(rel_path_str)

@@ -167,6 +167,7 @@ class AtlasScanner:
                 # Check for .git to mark repo node
                 if ".git" in dirs:
                     self.stats["repo_nodes"].append(str(rel_path))
+                    # Don't recurse into .git
                     dirs.remove(".git")
 
                 # Filter dirs in-place (Pruning)
