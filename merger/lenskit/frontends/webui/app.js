@@ -667,6 +667,7 @@ async function runPoolMerge(e) {
         split_size: document.getElementById('splitSize').value,
         plan_only: document.getElementById('planOnly').checked,
         code_only: document.getElementById('codeOnly').checked,
+        meta_density: document.getElementById('metaDensity').value,
         json_sidecar: document.querySelector('input[value="json_sidecar"]').checked,
         path_filter: null, // Pool overrides global filters
         extensions: null,  // Pool overrides global filters
@@ -746,6 +747,7 @@ function saveConfig() {
         maxBytes: document.getElementById('maxBytes').value,
         planOnly: document.getElementById('planOnly').checked,
         codeOnly: document.getElementById('codeOnly').checked,
+        metaDensity: document.getElementById('metaDensity').value,
         pathFilter: document.getElementById('pathFilter').value,
         extFilter: document.getElementById('extFilter').value,
         extras: Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value),
@@ -771,6 +773,7 @@ function restoreConfig() {
             if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
             if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
             if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
+            if (config.metaDensity) document.getElementById('metaDensity').value = config.metaDensity;
             if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
             if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
 
@@ -1107,6 +1110,7 @@ async function startJob(e) {
         split_size: document.getElementById('splitSize').value,
         plan_only: document.getElementById('planOnly').checked,
         code_only: document.getElementById('codeOnly').checked,
+        meta_density: document.getElementById('metaDensity').value,
         json_sidecar: jsonSidecar,
         path_filter: document.getElementById('pathFilter').value.trim() || null,
         extensions: extensions,
