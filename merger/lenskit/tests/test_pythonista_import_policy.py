@@ -23,11 +23,11 @@ def test_pythonista_has_no_relative_imports():
 
     offenders = []
 
-    # Scan all .py files in the directory
-    for p in PYTHONISTA_DIR.glob("*.py"):
-        # Skip __init__.py as it might legitimately use relative imports in a package context,
-        # though in this specific 'flat script' architecture, even that is discouraged.
-        # For now, we enforce it on everything to be strict.
+    # Scan all .py files in the directory recursively to ensure no subdirectories sneak in relative imports
+    for p in PYTHONISTA_DIR.rglob("*.py"):
+        # We enforce flat script layout for Pythonista compatibility.
+        # Even __init__.py should avoid relative imports if it's meant to run in this specific environment,
+        # though standard package rules might argue otherwise. Here, flat script wins.
 
         try:
             content = p.read_text(encoding="utf-8")
@@ -36,10 +36,13 @@ def test_pythonista_has_no_relative_imports():
             continue
 
         if RELATIVE_IMPORT_PATTERN.search(content):
-            offenders.append(p.name)
+            # Report relative path for better context in recursive scan
+            rel_path = p.relative_to(PYTHONISTA_DIR)
+            offenders.append(str(rel_path))
 
     assert not offenders, (
         f"Relative imports found in Pythonista frontend files: {offenders}. "
-        "Policy: Use absolute imports (e.g. 'from repolens_utils import ...') and "
-        "ensure sys.path is set correctly in entry points."
+        "POLICY: The Pythonista frontend uses a 'flat script' layout to ensure standalone execution on iOS. "
+        "Relative imports (from . import ...) are forbidden. "
+        "Use absolute imports (e.g. 'from repolens_utils import ...') and ensure sys.path is managed in entry points."
     )
