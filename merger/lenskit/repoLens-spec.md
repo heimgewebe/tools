@@ -497,3 +497,21 @@ Ein Pool-Eintrag kann entweder eine einfache Liste (Legacy) oder ein strukturier
 **Invariante:**
 - `compressed: null` ist der einzige Weg, **ALL** im strukturierten Format auszudrücken.
 - Ein leeres Array `[]` bedeutet immer **BLOCK**, niemals **ALL**.
+
+## 15. Frontend Feature Parity (Normative)
+
+To ensure a consistent experience across all UIs, every **interactive** frontend implementation (WebUI, Pythonista) **MUST** expose the following configuration controls to the user. CLI implementations **MUST** expose equivalent command-line arguments.
+
+| Control | Type | Values | Default | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| **Level** | Select | `overview`, `summary`, `dev`, `max` | `dev` | Detail level of the report. |
+| **Mode** | Select | `gesamt` (Combined), `pro-repo` | `gesamt` | Batching strategy. |
+| **Split Size** | Input | String (e.g., `25MB`, `0`) | `25MB` | Threshold for splitting output files. |
+| **Max Bytes** | Input | String (e.g., `0`, `5MB`) | `0` | Per-file truncation limit (`0`=unlimited). |
+| **Meta Density** | Select | `auto`, `min`, `standard`, `full` | `auto` | Metadata verbosity throttle. |
+| **Plan Only** | Boolean | `true`/`false` | `false` | Skip content generation. |
+| **Code Only** | Boolean | `true`/`false` | `false` | Filter strictly for code files. |
+| **Extras** | Multi-Select | `json_sidecar`, `augment_sidecar`, `health`, etc. | `json_sidecar, augment_sidecar` | Optional analytics modules. |
+
+**Divergence Rule:**
+If a new parameter is added to the backend `JobRequest` model, it **MUST** be added to all frontends within the same release cycle.

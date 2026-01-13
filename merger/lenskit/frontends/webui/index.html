@@ -111,6 +111,16 @@
                 </div>
 
                 <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Meta Density</label>
+                    <select id="metaDensity" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        <option value="auto" selected>Auto (Default)</option>
+                        <option value="min">Min (Throttled)</option>
+                        <option value="standard">Standard</option>
+                        <option value="full">Full (Audit)</option>
+                    </select>
+                </div>
+
+                <div>
                      <div class="flex justify-between items-center mb-1">
                         <label class="block text-xs font-bold uppercase text-gray-500">Filter</label>
                         <button type="button" onclick="togglePoolPanel()" class="text-[10px] bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded text-gray-300 border border-gray-600" title="Toggle Selection Pool">Pool</button>
