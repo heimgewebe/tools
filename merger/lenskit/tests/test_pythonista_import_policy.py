@@ -1,7 +1,6 @@
 import pytest
 from pathlib import Path
 import re
-import os
 
 # Define the target directory relative to this test file
 # Location: merger/lenskit/tests/test_pythonista_import_policy.py
