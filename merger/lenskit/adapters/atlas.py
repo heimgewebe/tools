@@ -81,26 +81,21 @@ class AtlasScanner:
             # Normalize globs
             normalized = str(glob).replace("\\", "/")
 
-            # 1. The original pattern (robust normalization)
-            candidates = [normalized]
-
-            # 2. If it DOES NOT end with "/**", add it to match contents recursively
-            #    e.g. "**/node_modules" -> also exclude "**/node_modules/**"
-            if not normalized.endswith("/**"):
-                candidates.append(f"{normalized}/**")
-
-            # 3. If it DOES end with "/**", add the base directory to prune traversal
-            #    e.g. "**/node_modules/**" -> also exclude "**/node_modules"
-            if normalized.endswith("/**"):
-                candidates.append(normalized[:-3])
-
-            # 4. FIX: If it starts with "**/", add the suffix to match root-level directories
-            #    fnmatch('node_modules', '**/node_modules') is False.
-            #    So we need 'node_modules' as a pattern.
+            # Generate base candidates (original + root-stripped if starts with **/)
+            candidates_set = {normalized}
             if normalized.startswith("**/"):
-                candidates.append(normalized[3:])
+                candidates_set.add(normalized[3:])
 
-            for candidate in candidates:
+            # For each candidate, ensure we have both base and "/**" version
+            expanded_candidates = set()
+            for cand in candidates_set:
+                expanded_candidates.add(cand)
+                if cand.endswith("/**"):
+                    expanded_candidates.add(cand[:-3])
+                else:
+                    expanded_candidates.add(f"{cand}/**")
+
+            for candidate in sorted(expanded_candidates):
                 if candidate and candidate not in seen:
                     seen.add(candidate)
                     patterns.append(candidate)
@@ -184,12 +179,19 @@ class AtlasScanner:
 
                 dir_bytes = 0
 
+                # Filter files for this directory
+                kept_files = []
+                for f in files:
+                    f_path = current_root / f
+                    if not self._is_excluded(f_path):
+                        kept_files.append(f)
+
                 # Directory Inventory
                 if dirs_inv_f:
                     entry = {
                         "rel_path": rel_path.as_posix(),
                         "depth": depth,
-                        "n_files": len(files),
+                        "n_files": len(kept_files),
                         "n_dirs": len(dirs),
                         # bytes will be populated post-loop or via separate logic?
                         # For pure inventory, structure is key.
@@ -200,10 +202,9 @@ class AtlasScanner:
 
                 self.stats["truncated"]["dirs_seen"] += 1
 
-                for f in files:
+                for f in kept_files:
                     f_path = current_root / f
-                    if self._is_excluded(f_path):
-                        continue
+                    # Exclusion check already done
 
                     current_entries += 1
                     self.stats["truncated"]["files_seen"] = current_entries
