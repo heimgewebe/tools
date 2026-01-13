@@ -29,17 +29,15 @@ from pathlib import Path
 from typing import List, Any, Dict, Optional
 
 # Import new utils/helpers (Avoid circular imports!)
-# ARCHITECTURE POLICY:
-# 1. Ensure current directory is in sys.path (for script execution)
-# 2. Use absolute imports exclusively (no try/except relative)
-# 3. This avoids complexity and ensures consistent behavior.
-
-SCRIPT_DIR = Path(__file__).parent.resolve()
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
-
-from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
-from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+try:
+    from .repolens_utils import normalize_path, normalize_repo_id, safe_script_path
+    from .repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+except ImportError:
+    # If running as script, relative imports might fail if package not setup correctly
+    # Fallback to appending current dir
+    sys.path.append(str(Path(__file__).parent.resolve()))
+    from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
+    from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
 
 
 DEFAULT_LEVEL = "max"

@@ -14,16 +14,41 @@ from ..adapters.security import validate_source_dir
 # and merger/repoLens is usually in sys.path when running repolens.py.
 # We can try absolute import first.
 
-from ..core.merge import (
-    get_merges_dir,
-    scan_repo,
-    write_reports_v2,
-    _normalize_ext_list,
-    ExtrasConfig,
-    SKIP_ROOTS,
-    MERGES_DIR_NAME,
-    parse_human_size,
-)
+try:
+    from merger.lenskit.core.merge import (
+        get_merges_dir,
+        scan_repo,
+        write_reports_v2,
+        _normalize_ext_list,
+        ExtrasConfig,
+        SKIP_ROOTS,
+        MERGES_DIR_NAME,
+        parse_human_size,
+    )
+except ImportError:
+    try:
+        from lenskit.core.merge import (
+            get_merges_dir,
+            scan_repo,
+            write_reports_v2,
+            _normalize_ext_list,
+            ExtrasConfig,
+            SKIP_ROOTS,
+            MERGES_DIR_NAME,
+            parse_human_size,
+        )
+    except ImportError:
+        # Fallback to relative import if running as package
+        from ...core.merge import (
+            get_merges_dir,
+            scan_repo,
+            write_reports_v2,
+            _normalize_ext_list,
+            ExtrasConfig,
+            SKIP_ROOTS,
+            MERGES_DIR_NAME,
+            parse_human_size,
+        )
 
 def _find_repos(hub: Path) -> List[str]:
     from ..adapters.security import validate_source_dir
