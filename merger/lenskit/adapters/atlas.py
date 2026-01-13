@@ -119,8 +119,7 @@ class AtlasScanner:
             if ".git" in dirs:
                 self.stats["repo_nodes"].append(str(rel_path))
                 # Don't recurse into .git
-                if ".git" in dirs:
-                    dirs.remove(".git")
+                dirs.remove(".git")
 
             # Filter dirs in-place
             dirs[:] = [d for d in dirs if not self._is_excluded(current_root / d)]
