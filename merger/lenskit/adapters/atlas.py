@@ -167,8 +167,8 @@ class AtlasScanner:
                 # Check for .git to mark repo node
                 if ".git" in dirs:
                     self.stats["repo_nodes"].append(str(rel_path))
-                    if ".git" in dirs:
-                        dirs.remove(".git")
+                    # Don't recurse into .git
+                    dirs.remove(".git")
 
                 # Filter dirs in-place (Pruning)
                 # We must check if the dir ITSELF is excluded to prune it from walk
@@ -315,7 +315,7 @@ class AtlasScanner:
         try:
             target_dir.relative_to(self.root.resolve())
         except ValueError:
-             raise ValueError(f"Target folder {folder_rel_path} is outside of atlas root.")
+             raise ValueError(f"Target folder {folder_rel_path} is outside of root directory.")
 
         if not target_dir.exists() or not target_dir.is_dir():
             raise ValueError(f"Folder not found: {folder_rel_path}")
