@@ -2,8 +2,12 @@
 from typing import Dict, Any, Optional, List, Union
 try:
     from .repolens_utils import normalize_path, normalize_repo_id
-except ImportError:
-    from repolens_utils import normalize_path, normalize_repo_id
+except ImportError as e:
+    # Robustness for standalone script execution (Pythonista)
+    if "attempted relative import" in str(e):
+        from repolens_utils import normalize_path, normalize_repo_id
+    else:
+        raise
 
 def resolve_pool_include_paths(pool_entry: Optional[Union[Dict[str, Any], List[str]]]) -> Optional[List[str]]:
     """

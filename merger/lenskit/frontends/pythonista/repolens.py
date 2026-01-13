@@ -32,12 +32,16 @@ from typing import List, Any, Dict, Optional
 try:
     from .repolens_utils import normalize_path, normalize_repo_id, safe_script_path
     from .repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
-except ImportError:
-    # If running as script, relative imports might fail if package not setup correctly
-    # Fallback to appending current dir
-    sys.path.append(str(Path(__file__).parent.resolve()))
-    from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
-    from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+except ImportError as e:
+    # Robustness for standalone script execution (Pythonista)
+    # If running as script, relative imports fail with "attempted relative import..."
+    # In that case, we fallback to absolute imports (after ensuring sys.path is correct)
+    if "attempted relative import" in str(e):
+        sys.path.append(str(Path(__file__).parent.resolve()))
+        from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
+        from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+    else:
+        raise
 
 
 DEFAULT_LEVEL = "max"
