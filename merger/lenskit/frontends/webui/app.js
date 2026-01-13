@@ -1411,7 +1411,9 @@ async function startAtlasJob(e) {
             // Heuristic detection of root/token issues
             const lowerErr = errMsg.toLowerCase();
             const isRootTokenIssue = lowerErr.includes("missing root directory") ||
+                                     lowerErr.includes("missing atlas root") ||
                                      lowerErr.includes("invalid root directory identifier") ||
+                                     lowerErr.includes("invalid atlas root_id") ||
                                      lowerErr.includes("invalid atlas token");
 
             if (isRootTokenIssue) {
