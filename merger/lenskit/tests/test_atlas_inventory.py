@@ -118,3 +118,18 @@ def test_exclude_pattern_robustness(tmp_path):
 
     assert "keep/ok.txt" in paths
     assert "myexclude/bad.txt" not in paths
+
+def test_atlas_dirs_inventory_excludes_files(tmp_path):
+    (tmp_path / "mixed").mkdir()
+    (tmp_path / "mixed" / "ok.txt").write_text("ok")
+    (tmp_path / "mixed" / "ignore.me").write_text("ignore")
+
+    dirs_file = tmp_path / "dirs.jsonl"
+    scanner = AtlasScanner(tmp_path, exclude_globs=["**/ignore.me"])
+    scanner.scan(dirs_inventory_file=dirs_file)
+
+    lines = dirs_file.read_text(encoding="utf-8").strip().splitlines()
+    items = [json.loads(line) for line in lines]
+
+    mixed_dir = next(i for i in items if i["rel_path"] == "mixed")
+    assert mixed_dir["n_files"] == 1
