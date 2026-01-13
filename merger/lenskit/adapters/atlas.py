@@ -167,8 +167,7 @@ class AtlasScanner:
                 # Check for .git to mark repo node
                 if ".git" in dirs:
                     self.stats["repo_nodes"].append(str(rel_path))
-                    if ".git" in dirs:
-                        dirs.remove(".git")
+                    dirs.remove(".git")
 
                 # Filter dirs in-place (Pruning)
                 # We must check if the dir ITSELF is excluded to prune it from walk
@@ -186,17 +185,24 @@ class AtlasScanner:
 
                 # Directory Inventory
                 if dirs_inv_f:
+                    # Robustness: try-catch stat calls to avoid crashing on permission errors
+                    try:
+                        st_mtime = current_root.stat().st_mtime
+                        mtime_iso = datetime.fromtimestamp(st_mtime, timezone.utc).isoformat().replace('+00:00', 'Z')
+                    except OSError:
+                        mtime_iso = None
+
                     entry = {
                         "rel_path": rel_path.as_posix(),
                         "depth": depth,
                         "n_files": len(files),
                         "n_dirs": len(dirs),
-                        # bytes will be populated post-loop or via separate logic?
-                        # For pure inventory, structure is key.
-                        # We can't know recursive bytes here yet.
-                        "mtime": datetime.fromtimestamp(current_root.stat().st_mtime, timezone.utc).isoformat().replace('+00:00', 'Z')
+                        "mtime": mtime_iso
                     }
-                    dirs_inv_f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+                    try:
+                        dirs_inv_f.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+                    except OSError:
+                        pass # Ignore write errors
 
                 self.stats["truncated"]["dirs_seen"] += 1
 
@@ -315,7 +321,7 @@ class AtlasScanner:
         try:
             target_dir.relative_to(self.root.resolve())
         except ValueError:
-             raise ValueError(f"Target folder {folder_rel_path} is outside of atlas root.")
+            raise ValueError(f"Target folder {folder_rel_path} is outside of atlas root.")
 
         if not target_dir.exists() or not target_dir.is_dir():
             raise ValueError(f"Folder not found: {folder_rel_path}")
@@ -381,7 +387,14 @@ class AtlasScanner:
 
                 rel_path = f_path.relative_to(self.root).as_posix()
                 try:
+                    # Check size BEFORE reading
                     size = f_path.stat().st_size
+
+                    # Hard limit check: if adding this file would definitely exceed max_bytes
+                    if total_merged_bytes + size > max_bytes:
+                        limit_hit_reason = "max_bytes"
+                        break
+
                     if is_probably_text(f_path, size):
                         out.write(f"===== FILE: {rel_path} =====\n")
                         try:
