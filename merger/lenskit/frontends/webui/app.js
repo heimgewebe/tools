@@ -1060,11 +1060,8 @@ async function startJob(e) {
         // A pool entry with "ALL" (null) is not restrictive and allows batch processing.
         const hasRestrictiveSelection = selectedRepos.some(hasRestrictivePoolSelection);
 
-        if (mode === 'pro-repo' || hasRestrictiveSelection) {
-            if (hasRestrictiveSelection && mode !== 'pro-repo') {
-                console.log("Restrictive pool selection active: forcing pro-repo mode for safety.");
-            }
-            // Split into individual jobs
+        if (mode === 'pro-repo') {
+            // Explicit Split Mode: Submit separate jobs per repo
             selectedRepos.forEach(repo => {
                 const paths = getIncludePaths(repo);
                 const payload = {
@@ -1072,18 +1069,32 @@ async function startJob(e) {
                     repos: [repo]
                 };
                 // Only set include_paths if it is a partial selection (array)
-                // If it is null (ALL or global default), we omit it to keep payload clean
-                // and rely on backend default (which is ALL).
                 if (Array.isArray(paths)) {
                     payload.include_paths = paths;
                 }
-
                 jobsToStart.push(payload);
             });
         } else {
-            // Batch job (Standard, no restrictive pool overrides)
-            // Even if "ALL" is in the pool, it maps to standard batch behavior.
-            jobsToStart.push({ ...commonPayload, repos: selectedRepos });
+            // Combined Mode (Default): Submit one job with mapping
+            // If partial selections exist, we MUST use include_paths_by_repo + strict mode.
+            // If no partial selections exist (all are ALL/null), we can send standard payload.
+
+            if (hasRestrictiveSelection) {
+                const pathMap = {};
+                selectedRepos.forEach(repo => {
+                    pathMap[repo] = getIncludePaths(repo);
+                });
+
+                jobsToStart.push({
+                    ...commonPayload,
+                    repos: selectedRepos,
+                    include_paths_by_repo: pathMap,
+                    strict_include_paths_by_repo: true
+                });
+            } else {
+                // Standard Batch (No mapping needed)
+                jobsToStart.push({ ...commonPayload, repos: selectedRepos });
+            }
         }
 
         // Sequential launch

@@ -54,7 +54,7 @@ def page_with_static(page: Page):
 def test_run_merge_picks_up_pool_selections(page_with_static: Page):
     """
     Verifies that the 'Run Merge' button correctly picks up pool selections
-    and forces pro-repo mode when partial selections are involved.
+    and uses Combined Job Mapping (strict_include_paths_by_repo) when partial selections exist.
     """
     pool_state = {
         "repoA": {"raw": None, "compressed": None}, # Full selection
@@ -100,7 +100,7 @@ def test_run_merge_picks_up_pool_selections(page_with_static: Page):
 
     page_with_static.route("**/api/jobs", handle_jobs)
 
-    # Set mode to 'gesamt' (Combined) to test that it is OVERRIDDEN by partial pool logic
+    # Set mode to 'gesamt' (Combined)
     page_with_static.select_option("#mode", "gesamt")
 
     # Click Run Merge (Main Form Submit)
@@ -110,31 +110,31 @@ def test_run_merge_picks_up_pool_selections(page_with_static: Page):
     def wait_for_payloads():
         start = time.time()
         while time.time() - start < 5:
-            if len(payloads) == 2:
+            if len(payloads) == 1:
                 return
             page_with_static.wait_for_timeout(50)
-        raise TimeoutError(f"Payloads count {len(payloads)} != 2")
+        raise TimeoutError(f"Payloads count {len(payloads)} != 1")
 
     wait_for_payloads()
 
-    assert len(payloads) == 2
-    repos_seen = set()
-    for p in payloads:
-        assert len(p["repos"]) == 1
-        repo = p["repos"][0]
-        repos_seen.add(repo)
+    assert len(payloads) == 1
+    p = payloads[0]
 
-        # Check strictness logic degradation
-        if repo == "repoA":
-            # Full selection: include_paths should be missing/None
-            assert "include_paths" not in p or p["include_paths"] is None
-        elif repo == "repoB":
-            # Partial selection: include_paths must be present
-            assert p["include_paths"] == ["fileB.txt"]
+    # Verify Combined Job Structure
+    assert sorted(p["repos"]) == ["repoA", "repoB"]
 
-        assert "include_paths_by_repo" not in p
+    # Check for mapping
+    assert "include_paths_by_repo" in p
+    ipbr = p["include_paths_by_repo"]
+    assert ipbr["repoA"] is None # Full
+    assert ipbr["repoB"] == ["fileB.txt"] # Partial
 
-    assert repos_seen == {"repoA", "repoB"}
+    # Check strict flag
+    assert p.get("strict_include_paths_by_repo") is True
+
+    # Check that generic include_paths is NOT set
+    assert "include_paths" not in p or p["include_paths"] is None
+
 
 def test_run_merge_combined_when_no_partial_pool(page_with_static: Page):
     """
