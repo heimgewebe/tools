@@ -51,10 +51,14 @@ def page_with_static(page: Page):
 
     return page
 
-def test_pool_payload_combined(page_with_static: Page):
+def test_run_merge_picks_up_pool_selections(page_with_static: Page):
+    """
+    Verifies that the 'Run Merge' button correctly picks up pool selections
+    and forces pro-repo mode when partial selections are involved.
+    """
     pool_state = {
-        "repoA": {"raw": None, "compressed": None},
-        "repoB": {"raw": ["fileB.txt"], "compressed": ["fileB.txt"]}
+        "repoA": {"raw": None, "compressed": None}, # Full selection
+        "repoB": {"raw": ["fileB.txt"], "compressed": ["fileB.txt"]} # Partial selection
     }
 
     # Enable Test Hook
@@ -74,108 +78,35 @@ def test_pool_payload_combined(page_with_static: Page):
     # Wait for pool to be initialized using explicit signal
     page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
 
+    # Wait for repos to load (badge logic might take a moment to render)
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    # Select both repos in the list
+    page_with_static.evaluate("""
+        const boxes = document.querySelectorAll('input[name="repos"]');
+        boxes.forEach(b => b.checked = true);
+    """)
+
     payloads = []
     def handle_jobs(route: Route):
         if route.request.method == "POST":
-            # Robustly get JSON payload.
-            # Note: In Playwright Python 1.55+, post_data_json is a PROPERTY.
-            # Calling it as a method will raise TypeError.
-            # We access it as property and fallback to parsing post_data string if needed.
             data = route.request.post_data_json
             if data is None:
                 data = json.loads(route.request.post_data)
             payloads.append(data)
-            route.fulfill(json={"id": "job-123", "status": "queued"})
+            route.fulfill(json={"id": "job-" + str(len(payloads)), "status": "queued"})
         else:
             route.continue_()
 
     page_with_static.route("**/api/jobs", handle_jobs)
 
+    # Set mode to 'gesamt' (Combined) to test that it is OVERRIDDEN by partial pool logic
     page_with_static.select_option("#mode", "gesamt")
 
-    # Force Show Panel via JS to avoid UI flakiness
-    page_with_static.evaluate("""
-        const el = document.getElementById('selectionPool');
-        if(el) {
-            el.classList.remove('hidden');
-            renderSelectionPool();
-        }
-    """)
+    # Click Run Merge (Main Form Submit)
+    page_with_static.click("#jobForm button[type='submit']")
 
-    # Click Run
-    page_with_static.click("#selectionPool button:has-text('Run Merge from Pool')")
-
-    # Explicitly wait for the request to be captured instead of sleep
-    def wait_for_payload():
-        start = time.time()
-        while time.time() - start < 5:
-            if len(payloads) > 0:
-                return
-            page_with_static.wait_for_timeout(50)
-        raise TimeoutError("Payload not captured")
-
-    wait_for_payload()
-
-    assert len(payloads) == 1
-    p = payloads[0]
-
-    assert sorted(p["repos"]) == ["repoA", "repoB"]
-    ipbr = p["include_paths_by_repo"]
-    assert ipbr["repoA"] is None
-    assert ipbr["repoB"] == ["fileB.txt"]
-
-    # Check strict flag (ensured by app.js logic)
-    assert p.get("strict_include_paths_by_repo") is True
-
-    assert "include_paths" not in p or p["include_paths"] is None
-
-
-def test_pool_payload_pro_repo(page_with_static: Page):
-    # Enable Test Hook
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
-
-    pool_state = {
-        "repoA": {"raw": None, "compressed": None},
-        "repoB": {"raw": ["fileB.txt"], "compressed": ["fileB.txt"]}
-    }
-
-    page_with_static.goto("http://localhost:8000/")
-
-    page_with_static.evaluate(f"""
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
-    """)
-    page_with_static.reload()
-
-    # Wait for pool to be initialized
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
-
-    payloads = []
-    def handle_jobs(route: Route):
-        if route.request.method == "POST":
-            data = route.request.post_data_json
-            if data is None:
-                data = json.loads(route.request.post_data)
-            payloads.append(data)
-            route.fulfill(json={"id": "job-"+str(len(payloads)), "status": "queued"})
-        else:
-            route.continue_()
-
-    page_with_static.route("**/api/jobs", handle_jobs)
-
-    page_with_static.select_option("#mode", "pro-repo")
-
-    # Force Show Panel via JS
-    page_with_static.evaluate("""
-        const el = document.getElementById('selectionPool');
-        if(el) {
-            el.classList.remove('hidden');
-            renderSelectionPool();
-        }
-    """)
-
-    page_with_static.click("#selectionPool button:has-text('Run Merge from Pool')")
-
-    # Wait for 2 payloads
+    # Explicitly wait for the request to be captured
     def wait_for_payloads():
         start = time.time()
         while time.time() - start < 5:
@@ -192,10 +123,76 @@ def test_pool_payload_pro_repo(page_with_static: Page):
         assert len(p["repos"]) == 1
         repo = p["repos"][0]
         repos_seen.add(repo)
+
+        # Check strictness logic degradation
         if repo == "repoA":
+            # Full selection: include_paths should be missing/None
             assert "include_paths" not in p or p["include_paths"] is None
         elif repo == "repoB":
+            # Partial selection: include_paths must be present
             assert p["include_paths"] == ["fileB.txt"]
+
         assert "include_paths_by_repo" not in p
 
     assert repos_seen == {"repoA", "repoB"}
+
+def test_run_merge_combined_when_no_partial_pool(page_with_static: Page):
+    """
+    Verifies that 'Run Merge' keeps Combined mode if there are no partial pool selections.
+    """
+    pool_state = {
+        "repoA": {"raw": None, "compressed": None}, # Full
+        # RepoB not in pool (Standard behavior = Full)
+    }
+
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+
+    page_with_static.evaluate(f"""
+        const pool = {json.dumps(pool_state)};
+        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify(pool));
+    """)
+    page_with_static.reload()
+
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    page_with_static.evaluate("""
+        const boxes = document.querySelectorAll('input[name="repos"]');
+        boxes.forEach(b => b.checked = true);
+    """)
+
+    payloads = []
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            data = route.request.post_data_json
+            if data is None:
+                data = json.loads(route.request.post_data)
+            payloads.append(data)
+            route.fulfill(json={"id": "job-123", "status": "queued"})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
+
+    page_with_static.select_option("#mode", "gesamt")
+
+    # Click Run Merge
+    page_with_static.click("#jobForm button[type='submit']")
+
+    def wait_for_payload():
+        start = time.time()
+        while time.time() - start < 5:
+            if len(payloads) > 0:
+                return
+            page_with_static.wait_for_timeout(50)
+        raise TimeoutError("Payload not captured")
+
+    wait_for_payload()
+
+    assert len(payloads) == 1
+    p = payloads[0]
+
+    assert sorted(p["repos"]) == ["repoA", "repoB"]
+    assert "include_paths" not in p or p["include_paths"] is None
+    assert "include_paths_by_repo" not in p

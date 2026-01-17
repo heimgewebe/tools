@@ -620,13 +620,6 @@ function renderSelectionPool() {
         `;
         container.appendChild(div);
     });
-
-    // Run Button
-    const btn = document.createElement('button');
-    btn.className = "w-full bg-green-700 hover:bg-green-600 text-white text-xs font-bold py-1 rounded mt-2";
-    btn.innerText = "Run Merge from Pool";
-    btn.onclick = runPoolMerge;
-    container.appendChild(btn);
 }
 
 function clearPool() {
@@ -643,98 +636,6 @@ function removeFromPool(repo) {
     persistSavedPrescanSelections();
     renderSelectionPool();
     fetchRepos(document.getElementById('hubPath').value);
-}
-
-async function runPoolMerge(e) {
-    if (e) e.preventDefault();
-    if (window.__prescanOpen) {
-        alert("Prescan ist offen. Bitte schließen und dann Merge starten.");
-        return; // HARD GUARD
-    }
-
-    if (savedPrescanSelections.size === 0) {
-        showNotification("Pool is empty. Add repos via Prescan first.", 'warning');
-        return;
-    }
-
-    // Use default config from form for context (profile, mode, etc.)
-    const commonPayload = {
-        hub: document.getElementById('hubPath').value,
-        merges_dir: document.getElementById('mergesPath').value || null,
-        level: document.getElementById('profile').value,
-        mode: document.getElementById('mode').value,
-        max_bytes: document.getElementById('maxBytes').value,
-        split_size: document.getElementById('splitSize').value,
-        plan_only: document.getElementById('planOnly').checked,
-        code_only: document.getElementById('codeOnly').checked,
-        meta_density: document.getElementById('metaDensity').value,
-        json_sidecar: document.querySelector('input[value="json_sidecar"]').checked,
-        path_filter: null, // Pool overrides global filters
-        extensions: null,  // Pool overrides global filters
-        extras: Array.from(document.querySelectorAll('input[name="extras"]:checked')).map(cb => cb.value).join(',')
-    };
-
-    const jobsToStart = [];
-    // Ensure deterministic order
-    const selectedRepos = Array.from(savedPrescanSelections.keys()).sort();
-
-    // Key Integrity Check (Dirty Repo Keys)
-    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
-    if (dirtyKeys.length > 0) {
-        alert(`Pool selection contains invalid repo keys: ${dirtyKeys.join(", ")}. Please re-prescan or clear the pool.`);
-        return;
-    }
-
-    if (commonPayload.mode === 'pro-repo') {
-        // Explicit Split Mode: Submit separate jobs per repo
-        selectedRepos.forEach(repo => {
-            const val = savedPrescanSelections.get(repo);
-            const payload = {
-                ...commonPayload,
-                repos: [repo],
-                include_paths: val.compressed // Can be null (ALL) or array
-            };
-            jobsToStart.push(payload);
-        });
-    } else {
-        // Combined Mode (Default): Submit one job with mapping
-        const pathMap = {};
-        selectedRepos.forEach(repo => {
-            const val = savedPrescanSelections.get(repo);
-            // pool entry: { raw: Set|null, compressed: Array|null }
-            // If compressed is array -> partial. If null -> ALL.
-            pathMap[repo] = val.compressed;
-        });
-
-        // Combined job
-        // Note: We deliberately omit `include_paths` here.
-        // The backend prioritizes `include_paths_by_repo` if present.
-        jobsToStart.push({
-            ...commonPayload,
-            repos: selectedRepos,
-            include_paths_by_repo: pathMap,
-            strict_include_paths_by_repo: true // WebUI always wants strict validation for combined pool jobs
-        });
-    }
-
-    // Submit jobs
-    try {
-        for (const payload of jobsToStart) {
-             const res = await apiFetch(`${API_BASE}/jobs`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            });
-
-            if (res.status === 401) throw new Error("Unauthorized.");
-            if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
-
-            const job = await res.json();
-            streamLogs(job.id);
-        }
-    } catch (e) {
-        alert("Failed to start pool jobs: " + e.message);
-    }
 }
 
 // --- Config Management ---
