@@ -209,8 +209,12 @@ def test_create_job_blocks_absolute_path_repo(client_and_hub):
     """
     client, hub_path = client_and_hub
     headers = {"Authorization": "Bearer test-token"}
+
+    # Use a platform-agnostic absolute path
+    abs_path = str(Path.cwd().resolve())
+
     payload = {
-        "repos": ["/etc/passwd"],
+        "repos": [abs_path],
         "hub": hub_path,
         "level": "max",
         "mode": "gesamt"
