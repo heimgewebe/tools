@@ -1069,9 +1069,12 @@ async function startJob(e) {
                     repos: [repo]
                 };
                 // Only set include_paths if it is a partial selection (array)
+                // If it is null (ALL or global default), we omit it to keep payload clean
+                // and rely on backend default (which is ALL).
                 if (Array.isArray(paths)) {
                     payload.include_paths = paths;
                 }
+
                 jobsToStart.push(payload);
             });
         } else {
