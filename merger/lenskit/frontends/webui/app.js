@@ -991,6 +991,15 @@ async function startJob(e) {
     // Dynamically query selected repos from the DOM
     const selectedRepos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
 
+    // Security: Validate Repo Keys (Prevent traversal/dirty keys)
+    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
+    if (dirtyKeys.length > 0) {
+        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Please uncheck them.`);
+        btn.disabled = false;
+        btn.innerText = "Start Job";
+        return;
+    }
+
     // Extensions
     const extRaw = document.getElementById('extFilter').value.trim();
     const extensions = extRaw ? extRaw.split(',').map(s => s.trim()) : null;
@@ -1001,15 +1010,6 @@ async function startJob(e) {
 
     // JSON Sidecar legacy logic
     const jsonSidecar = checkedExtras.includes('json_sidecar');
-
-    // Security: Validate Repo Keys (Prevent traversal/dirty keys)
-    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
-    if (dirtyKeys.length > 0) {
-        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Please uncheck them.`);
-        btn.disabled = false;
-        btn.innerText = "Start Job";
-        return;
-    }
 
     const commonPayload = {
         hub: document.getElementById('hubPath').value,
