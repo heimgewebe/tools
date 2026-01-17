@@ -1002,6 +1002,15 @@ async function startJob(e) {
     // JSON Sidecar legacy logic
     const jsonSidecar = checkedExtras.includes('json_sidecar');
 
+    // Security: Validate Repo Keys (Prevent traversal/dirty keys)
+    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
+    if (dirtyKeys.length > 0) {
+        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Please uncheck them.`);
+        btn.disabled = false;
+        btn.innerText = "Start Job";
+        return;
+    }
+
     const commonPayload = {
         hub: document.getElementById('hubPath').value,
         merges_dir: document.getElementById('mergesPath').value || null,
