@@ -186,7 +186,14 @@ def test_run_merge_blocks_dirty_keys(page_with_static: Page):
     """)
 
     payloads = []
-    page_with_static.route("**/api/jobs", lambda r: payloads.append(r.post_data) or r.fulfill(json={}))
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            payloads.append(route.request.post_data)
+            route.fulfill(json={})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
 
     # Handle alert
     dialog_message = []
