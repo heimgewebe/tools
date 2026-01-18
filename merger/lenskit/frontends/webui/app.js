@@ -995,6 +995,7 @@ async function startJob(e) {
     const selectedRepos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
 
     // Security: Validate Repo Keys (Strict Regex Allowlist)
+    // MUST remain consistent with backend logic in merger/lenskit/adapters/security.py
     // Allowed: A-Z, a-z, 0-9, ., _, -
     // Blocked: everything else (including /, \, ..)
     // Specific block: "." and ".." strictly, and any sequence containing ".."

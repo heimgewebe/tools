@@ -169,7 +169,7 @@ def validate_repo_name(name: str) -> str:
         raise HTTPException(status_code=400, detail=f"Invalid repo name: {n}")
 
     if "/" in n or "\\" in n or ".." in n:
-        raise HTTPException(status_code=400, detail="Invalid repo name: contains slash or double-dot")
+        raise HTTPException(status_code=400, detail="Invalid repo name: contains slash, backslash, or double-dot")
 
     if not _REPO_RE.match(n):
         raise HTTPException(status_code=400, detail=f"Invalid repo name: {n}")
