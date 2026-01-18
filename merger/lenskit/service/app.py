@@ -619,7 +619,18 @@ def download_artifact(id: str, key: str = "md"):
     sec = get_security_config()
 
     # Determine base directory
-    if art.params.merges_dir:
+    # Priority 1: Effective merges_dir captured at creation time (new field)
+    if getattr(art, "merges_dir", None):
+        merges_dir = Path(art.merges_dir)
+        try:
+            if not merges_dir.is_absolute():
+                 merges_dir = merges_dir.resolve()
+            merges_dir = sec.validate_path(merges_dir)
+        except HTTPException:
+             raise HTTPException(status_code=403, detail="Access denied: Artifact merges directory not allowed")
+
+    # Priority 2: Requested merges_dir (params)
+    elif art.params.merges_dir:
         merges_dir = Path(art.params.merges_dir)
         # Security: Custom merges_dir must be valid/allowlisted itself.
         # This prevents using an unvalidated path as a base.
