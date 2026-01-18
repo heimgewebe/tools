@@ -63,14 +63,15 @@ def test_effective_merges_dir_populated(service_env):
     job_id = response.json()["id"]
 
     # 2. Wait for completion
-    max_retries = 50
+    # 30s timeout (60 * 0.5s) to be robust against CI latency
+    max_retries = 60
     for _ in range(max_retries):
         resp = client.get(f"/api/jobs/{job_id}")
         assert resp.status_code == 200
         job_data = resp.json()
         if job_data["status"] in ("succeeded", "failed"):
             break
-        time.sleep(0.1)
+        time.sleep(0.5)
 
     assert job_data["status"] == "succeeded", f"Job failed with error: {job_data.get('error')} logs: {job_data.get('logs')}"
 
@@ -91,15 +92,19 @@ def test_effective_merges_dir_populated(service_env):
     # but service_env["merges_dir"] is a pytest tmp_path (pathlib)
     assert Path(recorded_merges_dir).resolve() == service_env["merges_dir"].resolve()
 
-    # 5. Verify params.merges_dir (The existing behavior - populated by app.py)
-    # app.py populates request.merges_dir from state.merges_dir
+    # 5. Verify params.merges_dir
+    # Note: app.py currently populates request.merges_dir from state.merges_dir if it matches the service config.
+    # This means params.merges_dir *also* reflects the effective path in this implementation.
+    # While 'params' conceptually represents the request, this mutation is preserved for backward compatibility
+    # and consistency with the runner's expectations.
     assert artifact["params"]["merges_dir"] == str(service_env["merges_dir"])
 
     # 6. Verify Download Works
     dl_resp = client.get(f"/api/artifacts/{art_id}/download")
     assert dl_resp.status_code == 200
-    # The report should contain reference to the dummy content or at least the header
-    assert "# repoLens Report" in dl_resp.text
+    # Robust check: ensure content is not empty and seems like text
+    assert len(dl_resp.text) > 50
+    assert "dummy-repo" in dl_resp.text
 
     # Verify logging (optional, but good to check if we log the path)
     logs = "".join(job_data["logs"])

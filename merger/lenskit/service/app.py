@@ -620,7 +620,7 @@ def download_artifact(id: str, key: str = "md"):
 
     # Determine base directory
     # Priority 1: Effective merges_dir captured at creation time (new field)
-    if getattr(art, "merges_dir", None):
+    if art.merges_dir:
         merges_dir = Path(art.merges_dir)
         try:
             if not merges_dir.is_absolute():
@@ -630,6 +630,7 @@ def download_artifact(id: str, key: str = "md"):
              raise HTTPException(status_code=403, detail="Access denied: Artifact merges directory not allowed")
 
     # Priority 2: Requested merges_dir (params)
+    # Backward compatibility: if merges_dir field is missing (old artifacts) or explicit override requested
     elif art.params.merges_dir:
         merges_dir = Path(art.params.merges_dir)
         # Security: Custom merges_dir must be valid/allowlisted itself.
@@ -642,7 +643,9 @@ def download_artifact(id: str, key: str = "md"):
              # Mask specific validation error as 403 for custom dirs
              raise HTTPException(status_code=403, detail="Access denied: Custom merges directory not allowed")
     else:
-        merges_dir = get_merges_dir(Path(art.hub))
+        # Default: hub/merges
+        # Ensure it is resolved to be robust against symlinks when checking containment later
+        merges_dir = get_merges_dir(Path(art.hub)).resolve()
 
     file_path = merges_dir / filename
 
