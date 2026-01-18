@@ -1112,8 +1112,14 @@ async function startJob(e) {
                     pathMap[repo] = getIncludePaths(repo);
                 });
 
+                // Fix: Clear global filters if pool override is active.
+                // Global filters (path_filter/extensions) applied AFTER explicit include_paths
+                // can silently drop selected files.
+                // If we are using pool selection (include_paths_by_repo), we must nullify them.
                 jobsToStart.push({
                     ...commonPayload,
+                    path_filter: null,
+                    extensions: null,
                     repos: selectedRepos,
                     include_paths_by_repo: pathMap,
                     strict_include_paths_by_repo: true
@@ -1126,6 +1132,14 @@ async function startJob(e) {
 
         // Sequential launch
         for (const payload of jobsToStart) {
+            // Fix: Also apply clearing logic for Pro-Repo mode if explicit paths are set.
+            // But pro-repo payload is already built above.
+            // Let's refactor the pro-repo block slightly to apply this rule.
+            if (mode === 'pro-repo' && payload.include_paths) {
+                payload.path_filter = null;
+                payload.extensions = null;
+            }
+
              const res = await apiFetch(`${API_BASE}/jobs`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},

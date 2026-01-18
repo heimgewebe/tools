@@ -210,3 +210,63 @@ def test_run_merge_blocks_dirty_keys(page_with_static: Page):
     assert len(payloads) == 0
     assert len(dialog_message) > 0
     assert "Security: Invalid repository names detected" in dialog_message[0]
+
+def test_run_merge_clears_global_filters_for_pool(page_with_static: Page):
+    """
+    Regression Test: If pool selection is active, global filters (path_filter, extensions)
+    must be cleared to prevent silent dropping of explicitly selected files.
+    """
+    # 1. Setup Pool with explicit selection
+    pool_state = {
+        "repoA": {"raw": ["foo.txt"], "compressed": ["foo.txt"]}
+    }
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+
+    page_with_static.evaluate(f"""
+        const pool = {json.dumps(pool_state)};
+        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify(pool));
+    """)
+    page_with_static.reload()
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+
+    # 2. Set global filters in UI (the trap)
+    page_with_static.fill("#pathFilter", "src/")
+    page_with_static.fill("#extFilter", ".js")
+
+    # 3. Select Repo
+    page_with_static.evaluate("""
+        const boxes = document.querySelectorAll('input[name="repos"]');
+        boxes.forEach(b => {
+            if (b.value === 'repoA') b.checked = true;
+        });
+    """)
+
+    # 4. Capture Payload
+    payloads = []
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            data = route.request.post_data_json or json.loads(route.request.post_data)
+            payloads.append(data)
+            route.fulfill(json={"id": "job-regr", "status": "queued"})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
+    page_with_static.select_option("#mode", "gesamt")
+    page_with_static.click("#jobForm button[type='submit']")
+
+    # Wait for payload
+    start = time.time()
+    while len(payloads) == 0 and time.time() - start < 5:
+        page_with_static.wait_for_timeout(50)
+
+    assert len(payloads) == 1
+    p = payloads[0]
+
+    # 5. Assert Logic:
+    # - Repo has include_paths_by_repo (pool active)
+    # - path_filter and extensions MUST be null/None
+    assert p["include_paths_by_repo"]["repoA"] == ["foo.txt"]
+    assert p.get("path_filter") is None, "path_filter must be cleared when pool is active"
+    assert p.get("extensions") is None, "extensions must be cleared when pool is active"
