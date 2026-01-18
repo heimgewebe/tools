@@ -984,9 +984,12 @@ async function startJob(e) {
         return; // HARD GUARD
     }
 
-    const btn = e.target.querySelector('button[type="submit"]');
-    btn.disabled = true;
-    btn.innerText = "Starting...";
+    // Robust button selection (submitter or fallback)
+    const btn = (e && e.submitter) || document.querySelector("#jobForm button[type='submit']");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Starting...";
+    }
 
     // Dynamically query selected repos from the DOM
     const selectedRepos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
