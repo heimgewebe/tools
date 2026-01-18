@@ -997,12 +997,16 @@ async function startJob(e) {
     // Security: Validate Repo Keys (Strict Regex Allowlist)
     // Allowed: A-Z, a-z, 0-9, ., _, -
     // Blocked: everything else (including /, \, ..)
-    // Specific block: "." and ".." strictly
-    const isValidKey = (k) => /^[A-Za-z0-9._-]+$/.test(k) && k !== "." && k !== "..";
+    // Specific block: "." and ".." strictly, and any sequence containing ".."
+    const isValidKey = (k) =>
+        /^[A-Za-z0-9._-]+$/.test(k) &&
+        k !== "." &&
+        k !== ".." &&
+        !k.includes("..");
 
     const dirtyKeys = selectedRepos.filter(k => !isValidKey(k));
     if (dirtyKeys.length > 0) {
-        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Only alphanumeric, dot, underscore, and dash are allowed.`);
+        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Only alphanumeric, dot, underscore, and dash are allowed (no '..').`);
         if (btn) {
             btn.disabled = false;
             btn.innerText = "Start Job";
