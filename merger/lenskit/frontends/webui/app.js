@@ -283,6 +283,11 @@ function isPathExpanded(path) {
     return prescanExpandedPaths.has(p);
 }
 
+function clearGlobalFilters(payload) {
+    payload.path_filter = null;
+    payload.extensions = null;
+}
+
 // --- Prescan saved selections persistence ---
 function loadSavedPrescanSelections() {
     try {
@@ -1101,8 +1106,7 @@ async function startJob(e) {
 
                 if (isPartial) {
                     payload.include_paths = paths;
-                    payload.path_filter = null;
-                    payload.extensions = null;
+                    clearGlobalFilters(payload);
                 }
 
                 jobsToStart.push(payload);
@@ -1122,14 +1126,14 @@ async function startJob(e) {
                 // Global filters (path_filter/extensions) applied AFTER explicit include_paths
                 // can silently drop selected files.
                 // If we are using pool selection (include_paths_by_repo), we must nullify them.
-                jobsToStart.push({
+                const payload = {
                     ...commonPayload,
-                    path_filter: null,
-                    extensions: null,
                     repos: selectedRepos,
                     include_paths_by_repo: pathMap,
                     strict_include_paths_by_repo: true
-                });
+                };
+                clearGlobalFilters(payload);
+                jobsToStart.push(payload);
             } else {
                 // Standard Batch (No mapping needed)
                 jobsToStart.push({ ...commonPayload, repos: selectedRepos });
