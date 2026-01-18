@@ -227,7 +227,16 @@ class JobRunner:
             # 4. Write Reports
             log("Generating reports...")
             if req.merges_dir:
-                merges_dir = Path(req.merges_dir)
+                p = Path(req.merges_dir)
+                if not p.is_absolute():
+                    # Resolve relative paths against HUB to ensure visibility in container environments
+                    merges_dir = hub / p
+                    log(f"Resolved relative merges_dir '{p}' to '{merges_dir}'")
+                    # Update request object so Artifact reflects reality (absolute path)
+                    req.merges_dir = str(merges_dir)
+                else:
+                    merges_dir = p
+
                 merges_dir.mkdir(parents=True, exist_ok=True)
                 # Ensure security/validation for custom merges_dir if needed
                 # For now assuming if user can specify it, they have access.
@@ -267,7 +276,7 @@ class JobRunner:
 
             # 5. Register Artifacts
             out_paths = artifacts_obj.get_all_paths()
-            log(f"Generated {len(out_paths)} files.")
+            log(f"Generated {len(out_paths)} files: {[str(p) for p in out_paths]}")
 
             # Map outputs to Artifact record
             path_map = {}
