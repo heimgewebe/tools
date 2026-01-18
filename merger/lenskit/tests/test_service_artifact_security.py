@@ -1,5 +1,4 @@
 import pytest
-import shutil
 from pathlib import Path
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
@@ -18,6 +17,8 @@ def secure_env(tmp_path):
     - hub_dir (allowed)
     - allowed_merges (allowed)
     - forbidden_dir (NOT allowed)
+
+    Teardown ensures global state is reset to prevent test pollution.
     """
     hub = tmp_path / "hub"
     hub.mkdir()
@@ -27,18 +28,29 @@ def secure_env(tmp_path):
 
     forbidden = tmp_path / "forbidden"
     forbidden.mkdir()
-    (forbidden / "secret.md").write_text("SECRET DATA")
+    (forbidden / "secret.md").write_text("SECRET DATA\n")
 
     # Initialize service, allowlisting ONLY hub and allowed_merges
     # forbidden is NOT included
     init_service(hub_path=hub, merges_dir=allowed_merges)
 
-    # Return context
-    return {
+    yield {
         "hub": hub,
         "allowed": allowed_merges,
         "forbidden": forbidden
     }
+
+    # Teardown: Reset global state
+    state.hub = None
+    state.merges_dir = None
+    state.job_store = None
+    state.runner = None
+    state.log_provider = None
+
+    # Reset Security Config allowlist
+    sec = get_security_config()
+    sec.allowlist_roots = []
+    sec.token = None
 
 def test_download_custom_merges_dir_success(secure_env):
     """
@@ -46,7 +58,7 @@ def test_download_custom_merges_dir_success(secure_env):
     """
     # Create file in allowed dir
     target_file = secure_env["allowed"] / "report.md"
-    target_file.write_text("Valid Content")
+    target_file.write_text("Valid Content\n")
 
     # Mock Artifact with custom merges_dir
     req = JobRequest(repos=["r1"], merges_dir=str(secure_env["allowed"]))
@@ -61,23 +73,21 @@ def test_download_custom_merges_dir_success(secure_env):
     )
     state.job_store.add_artifact(art)
 
-    # Act
-    # We call the function directly to test logic, as TestClient might complicate FileResponse handling
-    # (though TestClient handles it, direct call is more unit-test-like for this specific logic)
+    # Act: Direct call
     response = download_artifact(id="art-ok")
 
     # Assert
     assert str(response.path) == str(target_file)
 
-def test_download_custom_merges_dir_forbidden(secure_env):
+def test_download_custom_merges_dir_forbidden_http(secure_env):
     """
-    Test that a custom merges_dir pointing to a forbidden directory raises 403.
+    Integration Test: Verify via HTTP Client that forbidden dir returns 403.
     """
     # Mock Artifact with FORBIDDEN merges_dir
-    # Note: The Artifact itself is just metadata. The attack is setting params.merges_dir to somewhere else.
     req = JobRequest(repos=["r1"], merges_dir=str(secure_env["forbidden"]))
+    art_id = "art-bad-http"
     art = Artifact(
-        id="art-bad",
+        id=art_id,
         job_id="job-bad",
         hub=str(secure_env["hub"]),
         repos=["r1"],
@@ -87,12 +97,13 @@ def test_download_custom_merges_dir_forbidden(secure_env):
     )
     state.job_store.add_artifact(art)
 
-    # Act & Assert
-    with pytest.raises(HTTPException) as exc:
-        download_artifact(id="art-bad")
+    # Act: HTTP Request
+    # Note: `client` uses the app instance which uses the global `state` we initialized
+    response = client.get(f"/api/artifacts/{art_id}/download?key=md")
 
-    assert exc.value.status_code == 403
-    assert "Access denied" in exc.value.detail
+    # Assert
+    assert response.status_code == 403
+    assert "Access denied" in response.json()["detail"]
 
 def test_download_symlink_bypass_blocked(secure_env):
     """
