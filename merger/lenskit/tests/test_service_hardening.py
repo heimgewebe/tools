@@ -12,16 +12,27 @@ def client_and_hub():
     with tempfile.TemporaryDirectory() as tmp:
         hub = Path(tmp) / "hub"
         hub.mkdir()
+        (hub / "repo1").mkdir() # Required for validation
+        (hub / "repo_reuse").mkdir()
+        (hub / "repo3").mkdir()
+        (hub / "repo_rob").mkdir()
+        (hub / "repo_safe").mkdir()
+        (hub / "repoA").mkdir()
+
         init_service(hub, token="test-token")
 
         # Mock runner to avoid real execution
-        original_submit = state.runner.submit_job
-        state.runner.submit_job = lambda jid: None # Do nothing
+        if state.runner:
+            original_submit = state.runner.submit_job
+            state.runner.submit_job = lambda jid: None # Do nothing
+        else:
+            original_submit = None
 
         with TestClient(app) as c:
             yield c, str(hub.resolve())
 
-        state.runner.submit_job = original_submit
+        if state.runner and original_submit:
+            state.runner.submit_job = original_submit
 
 def test_idempotency_and_decoupling(client_and_hub):
     client, hub_path = client_and_hub
@@ -171,3 +182,77 @@ def test_gc_artifacts_physical_safe_join(client_and_hub):
 
     state.job_store.remove_job(job_id)
     assert outside.exists(), "Traversal path must not be deleted"
+
+def test_create_job_blocks_dirty_repo_keys(client_and_hub):
+    """
+    Backend Hardening: Ensure that sending a dirty repo key (e.g. traversal attempt)
+    results in a 400 Bad Request, even if the frontend check is bypassed.
+    Strict Allowlist Check: alphanumeric, dot, underscore, dash.
+    """
+    client, hub_path = client_and_hub
+    headers = {"Authorization": "Bearer test-token"}
+
+    invalid_keys = [
+        "../dirty",       # traversal
+        "repo/sub",       # slash
+        "repo\\sub",      # backslash
+        ".",              # dot strict
+        "..",             # double dot strict
+        "repo$name",      # invalid char
+        "repo name",      # space
+    ]
+
+    for key in invalid_keys:
+        payload = {
+            "repos": ["repoA", key],
+            "hub": hub_path,
+            "level": "max",
+            "mode": "gesamt"
+        }
+
+        response = client.post("/api/jobs", json=payload, headers=headers)
+        assert response.status_code == 400, f"Backend accepted invalid key: {key}"
+        assert "Invalid repo name" in response.json()["detail"], f"Wrong error for key: {key}"
+
+def test_create_job_allows_valid_keys(client_and_hub):
+    """
+    Backend Hardening: Verify that valid keys pass the strict filter.
+    """
+    client, hub_path = client_and_hub
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Mock existence of folders for these valid names
+    for name in ["repo-name", "repo_name", "repo.name", "123"]:
+        (Path(hub_path) / name).mkdir(exist_ok=True)
+
+    valid_keys = ["repo-name", "repo_name", "repo.name", "123"]
+
+    for key in valid_keys:
+        payload = {
+            "repos": [key],
+            "hub": hub_path,
+            "level": "max",
+            "mode": "gesamt"
+        }
+        response = client.post("/api/jobs", json=payload, headers=headers)
+        assert response.status_code == 200, f"Backend rejected valid key: {key}"
+
+def test_create_job_blocks_absolute_path_repo(client_and_hub):
+    """
+    Backend Hardening: Ensure absolute paths are rejected as repo names.
+    """
+    client, hub_path = client_and_hub
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Use a platform-agnostic absolute path
+    abs_path = str(Path.cwd().resolve())
+
+    payload = {
+        "repos": [abs_path],
+        "hub": hub_path,
+        "level": "max",
+        "mode": "gesamt"
+    }
+
+    response = client.post("/api/jobs", json=payload, headers=headers)
+    assert response.status_code == 400
