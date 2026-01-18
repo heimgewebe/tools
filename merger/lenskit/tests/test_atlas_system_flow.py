@@ -69,7 +69,7 @@ def test_atlas_missing_root_400(mock_state):
 
     response = client.post("/api/atlas", json=payload)
     assert response.status_code == 400
-    assert "Missing Atlas root" in response.json()["detail"]
+    assert "Missing root directory" in response.json()["detail"]
 
 def test_atlas_invalid_root_id(mock_state):
     """
@@ -82,4 +82,4 @@ def test_atlas_invalid_root_id(mock_state):
 
     response = client.post("/api/atlas", json=payload)
     assert response.status_code == 400
-    assert "Invalid Atlas root_id" in response.json()["detail"]
+    assert "Invalid root directory identifier" in response.json()["detail"]

@@ -616,14 +616,41 @@ def download_artifact(id: str, key: str = "md"):
         else:
              raise HTTPException(status_code=404, detail=f"File key '{key}' not found in artifact")
 
-    merges_dir = get_merges_dir(Path(art.hub))
+    sec = get_security_config()
+
+    # Determine base directory
+    if art.params.merges_dir:
+        merges_dir = Path(art.params.merges_dir)
+        # Security: Custom merges_dir must be valid/allowlisted itself.
+        # This prevents using an unvalidated path as a base.
+        try:
+            if not merges_dir.is_absolute():
+                 merges_dir = merges_dir.resolve()
+            merges_dir = sec.validate_path(merges_dir)
+        except HTTPException:
+             # Mask specific validation error as 403 for custom dirs
+             raise HTTPException(status_code=403, detail="Access denied: Custom merges directory not allowed")
+    else:
+        merges_dir = get_merges_dir(Path(art.hub))
+
     file_path = merges_dir / filename
 
-    # Explicitly check if file is inside merges_dir (Directory Traversal Protection)
+    # Security: Validate final file path against allowlist
+    # Double-check: even if merges_dir is valid, the file_path must also be valid
     try:
-        file_path.resolve().relative_to(merges_dir.resolve())
+        if not file_path.is_absolute():
+            file_path = file_path.resolve()
+        file_path = sec.validate_path(file_path)
+    except HTTPException:
+        raise HTTPException(status_code=403, detail="Access denied: File path not allowed by security policy")
+
+    # Consistency: Explicitly check if file is inside the *intended* validated merges_dir
+    # Both paths are now resolved/validated by sec.validate_path
+    try:
+        # We use resolved paths for comparison to be robust against symlinks/..
+        file_path.relative_to(merges_dir)
     except ValueError:
-         raise HTTPException(status_code=403, detail="Access denied: File outside of merges directory")
+         raise HTTPException(status_code=403, detail="Access denied: File outside of expected merges directory")
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File on disk missing")
