@@ -623,11 +623,28 @@ def download_artifact(id: str, key: str = "md"):
 
     file_path = merges_dir / filename
 
-    # Explicitly check if file is inside merges_dir (Directory Traversal Protection)
+    # Security: Validate path against allowlist (prevents access to arbitrary system files)
+    # This also handles normalization/traversal checks.
+    sec = get_security_config()
     try:
-        file_path.resolve().relative_to(merges_dir.resolve())
+        # Ensure absolute path for validation (validate_path requires absolute paths)
+        # If relative, it's relative to CWD (service root)
+        if not file_path.is_absolute():
+            file_path = file_path.resolve()
+
+        # 1. Ensure path is within allowed roots (Hub, configured Merges Dir, or System if enabled)
+        file_path = sec.validate_path(file_path)
+    except HTTPException:
+        # Re-raise with context or let bubble
+        # We explicitly want to block custom merges_dir if it's not allowlisted.
+        raise HTTPException(status_code=403, detail="Access denied: Path not allowed by security policy")
+
+    # 2. Explicitly check if file is inside the *intended* merges_dir (Logic Consistency)
+    # validate_path ensures it's in *some* allowed root; this ensures it's in the *right* one.
+    try:
+        file_path.relative_to(merges_dir.resolve())
     except ValueError:
-         raise HTTPException(status_code=403, detail="Access denied: File outside of merges directory")
+         raise HTTPException(status_code=403, detail="Access denied: File outside of expected merges directory")
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File on disk missing")
