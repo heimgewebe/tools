@@ -27,12 +27,22 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
-def verify_ui(args):
+def verify_ui(args) -> int:
     """
     Verifies that the redundant 'Run Merge from Pool' button is gone
     and the main 'Start Job' button is present.
+    Returns: 0 for success/skip, 1 for failure.
     """
     print(f"Starting UI verification against {UI_DIR}...")
+
+    # Pre-check: Ensure UI assets exist
+    if not os.path.exists(UI_DIR) or not os.path.exists(os.path.join(UI_DIR, "index.html")):
+        if args.strict:
+            print(f"FAILURE: UI directory or index.html not found at {UI_DIR}")
+            return 1
+        else:
+            print(f"SKIP: UI directory or index.html not found at {UI_DIR}")
+            return 0
 
     with sync_playwright() as p:
         try:
@@ -41,11 +51,11 @@ def verify_ui(args):
         except Exception as e:
             if args.strict:
                 print(f"FAILURE: Could not launch browser (Strict Mode): {e}")
-                sys.exit(1)
+                return 1
             else:
                 print(f"SKIP: Could not launch browser: {e}")
                 print("Tip: Run 'playwright install --with-deps chromium'")
-                sys.exit(0)
+                return 0
 
         try:
             page = browser.new_page()
@@ -150,17 +160,18 @@ def verify_ui(args):
                     failed = True
 
                 if failed:
-                    sys.exit(1)
+                    return 1
 
                 print("Verification passed.")
+                return 0
 
             except Exception as e:
                 print(f"Verification logic crashed: {e}")
-                sys.exit(1)
+                return 1
 
         except Exception as e:
              print(f"Browser/Page crashed: {e}")
-             sys.exit(1)
+             return 1
         finally:
             browser.close()
 
@@ -179,7 +190,8 @@ def main():
             print("SKIP: Playwright not installed.")
             sys.exit(0)
 
-    verify_ui(args)
+    # Run verification and exit with returned code
+    sys.exit(verify_ui(args))
 
 if __name__ == "__main__":
     main()
