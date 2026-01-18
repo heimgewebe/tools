@@ -616,7 +616,11 @@ def download_artifact(id: str, key: str = "md"):
         else:
              raise HTTPException(status_code=404, detail=f"File key '{key}' not found in artifact")
 
-    merges_dir = get_merges_dir(Path(art.hub))
+    if art.params.merges_dir:
+        merges_dir = Path(art.params.merges_dir)
+    else:
+        merges_dir = get_merges_dir(Path(art.hub))
+
     file_path = merges_dir / filename
 
     # Explicitly check if file is inside merges_dir (Directory Traversal Protection)
