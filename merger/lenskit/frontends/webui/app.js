@@ -1088,15 +1088,21 @@ async function startJob(e) {
             // Explicit Split Mode: Submit separate jobs per repo
             selectedRepos.forEach(repo => {
                 const paths = getIncludePaths(repo);
+
+                // Base payload: inherit common properties
+                // If explicit paths are set (partial selection), we MUST clear global filters
+                // to prevent silent drops. Explicit selection supersedes global filters.
+                const isPartial = Array.isArray(paths);
+
                 const payload = {
                     ...commonPayload,
                     repos: [repo]
                 };
-                // Only set include_paths if it is a partial selection (array)
-                // If it is null (ALL or global default), we omit it to keep payload clean
-                // and rely on backend default (which is ALL).
-                if (Array.isArray(paths)) {
+
+                if (isPartial) {
                     payload.include_paths = paths;
+                    payload.path_filter = null;
+                    payload.extensions = null;
                 }
 
                 jobsToStart.push(payload);
@@ -1132,14 +1138,6 @@ async function startJob(e) {
 
         // Sequential launch
         for (const payload of jobsToStart) {
-            // Fix: Also apply clearing logic for Pro-Repo mode if explicit paths are set.
-            // But pro-repo payload is already built above.
-            // Let's refactor the pro-repo block slightly to apply this rule.
-            if (mode === 'pro-repo' && payload.include_paths) {
-                payload.path_filter = null;
-                payload.extensions = null;
-            }
-
              const res = await apiFetch(`${API_BASE}/jobs`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},

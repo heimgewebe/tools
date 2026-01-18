@@ -111,6 +111,10 @@ def test_run_merge_picks_up_pool_selections(page_with_static: Page):
     assert p.get("strict_include_paths_by_repo") is True
     assert "include_paths" not in p or p["include_paths"] is None
 
+    # Ensure global filters are cleared when pool is active (even partially)
+    assert p.get("path_filter") is None
+    assert p.get("extensions") is None
+
 
 def test_run_merge_mixed_pool_and_non_pool(page_with_static: Page):
     """
