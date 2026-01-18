@@ -995,8 +995,10 @@ async function startJob(e) {
     const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
     if (dirtyKeys.length > 0) {
         alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Please uncheck them.`);
-        btn.disabled = false;
-        btn.innerText = "Start Job";
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "Start Job";
+        }
         return;
     }
 
