@@ -163,10 +163,17 @@ def validate_repo_name(name: str) -> str:
     n = (name or "").strip()
     if not n:
         raise HTTPException(status_code=400, detail="Invalid repo name: empty")
-    if "/" in n or "\\" in n or ".." in n:
-        raise HTTPException(status_code=400, detail="Invalid repo name")
+
+    # Specific block for "." and ".." strictly
+    if n == "." or n == "..":
+        raise HTTPException(status_code=400, detail=f"Invalid repo name: {n}")
+
+    if "/" in n or "\\" in n:
+        raise HTTPException(status_code=400, detail="Invalid repo name: contains slash")
+
     if not _REPO_RE.match(n):
-        raise HTTPException(status_code=400, detail="Invalid repo name")
+        raise HTTPException(status_code=400, detail=f"Invalid repo name: {n}")
+
     return n
 
 def resolve_any_path(root: Path, requested: Optional[str]) -> Path:

@@ -994,10 +994,15 @@ async function startJob(e) {
     // Dynamically query selected repos from the DOM
     const selectedRepos = Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value);
 
-    // Security: Validate Repo Keys (Prevent traversal/dirty keys)
-    const dirtyKeys = selectedRepos.filter(k => k.includes('/') || k.includes('\\') || k.startsWith('./'));
+    // Security: Validate Repo Keys (Strict Regex Allowlist)
+    // Allowed: A-Z, a-z, 0-9, ., _, -
+    // Blocked: everything else (including /, \, ..)
+    // Specific block: "." and ".." strictly
+    const isValidKey = (k) => /^[A-Za-z0-9._-]+$/.test(k) && k !== "." && k !== "..";
+
+    const dirtyKeys = selectedRepos.filter(k => !isValidKey(k));
     if (dirtyKeys.length > 0) {
-        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Please uncheck them.`);
+        alert(`Security: Invalid repository names detected: ${dirtyKeys.join(", ")}. Only alphanumeric, dot, underscore, and dash are allowed.`);
         if (btn) {
             btn.disabled = false;
             btn.innerText = "Start Job";

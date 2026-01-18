@@ -18,19 +18,17 @@ def verify_ui():
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        # Robust Request Handler (Option B: Full Interception)
+        # Robust Request Handler (Strict Mode)
         def handle_request(route):
             url = route.request.url
-            # Simple parsing for flat directory structure
-            # In a real app with subdirs, this would need better logic or a real server.
             path = url.split("/")[-1].split("?")[0]
 
             # Root / Index
-            if url.endswith(":8000/") or path == "index.html" or path == "":
+            # Matches http://verify.local/ or index.html
+            if url == "http://verify.local/" or path == "index.html" or path == "":
                 try:
                     with open(os.path.join(UI_DIR, "index.html"), "r") as f:
                         content = f.read()
-                    # Inject test build info
                     content = content.replace("__RLENS_ASSET_BASE__", "./")
                     content = content.replace("__RLENS_BUILD__", "verify-tool-v1")
                     route.fulfill(body=content, content_type="text/html")
@@ -50,31 +48,44 @@ def verify_ui():
                 with open(file_path, "rb") as f:
                     route.fulfill(body=f.read(), content_type=content_type)
             else:
-                # API Mocks (intercept specific API calls here if not handled by glob routes below)
-                if "/api/" in url:
-                    # Let the specific API routes handle it, or fallback to 404 if missed
-                    route.fallback()
-                else:
-                    # STRICT 404 for unknown static files
-                    # This prevents 'route.continue_()' from hitting the void
-                    route.fulfill(status=404, body="Not Found")
+                # STRICT 404 for everything else.
+                # No fallback to network.
+                route.fulfill(status=404, body="Not Found")
 
-        # Set up routing
-        # Note: We use a broad pattern but will fallback for API routes
-        # Playwright routing priority: First matching handler wins?
-        # Actually, Playwright matches in order of registration (last registered wins?) or first?
-        # Docs say: "Routes are matched in the order they are registered."
-        # So we register specific API routes FIRST, then the catch-all.
+        # 0. Global Route Interception (Prevent DNS/Network for fake domain)
+        # This is critical: We must intercept EVERYTHING for http://verify.local/
+        # BEFORE any other specific mocks if we want to be safe, OR rely on the fact that
+        # specific mocks match first. But to prevent "ERR_NAME_NOT_RESOLVED", we must ensure
+        # the network layer never actually tries to resolve "verify.local".
+        # Playwright's `route("**/*", ...)` intercepts all requests.
 
-        # 1. API Mocks
-        page.route("**/api/version", lambda route: route.fulfill(json={"version": "verify-tool", "build_id": "v1"}))
-        page.route("**/api/health", lambda route: route.fulfill(json={"status": "ok", "hub": "/mock/hub", "merges_dir": "/mock/merges"}))
-        page.route("**/api/artifacts", lambda route: route.fulfill(json=[]))
-        page.route("**/api/repos*", lambda route: route.fulfill(json=["repoA", "repoB"]))
-        page.route("**/api/jobs", lambda route: route.fulfill(json={"id": "job-tool-1", "status": "queued"}))
+        # We need a unified handler that delegates to either API mocks or Static/Index.
+        # This avoids ordering ambiguity and ensures total interception.
 
-        # 2. Static / Catch-all
-        page.route("**/*", handle_request)
+        def master_handler(route):
+            url = route.request.url
+
+            # API Routing
+            if "/api/version" in url:
+                route.fulfill(json={"version": "verify-tool", "build_id": "v1"})
+                return
+            if "/api/health" in url:
+                route.fulfill(json={"status": "ok", "hub": "/mock/hub", "merges_dir": "/mock/merges"})
+                return
+            if "/api/artifacts" in url:
+                route.fulfill(json=[])
+                return
+            if "/api/repos" in url:
+                route.fulfill(json=["repoA", "repoB"])
+                return
+            if "/api/jobs" in url:
+                route.fulfill(json={"id": "job-tool-1", "status": "queued"})
+                return
+
+            # Static/Index Routing
+            handle_request(route)
+
+        page.route("**/*", master_handler)
 
         # Inject pool state
         pool_state = {
@@ -83,7 +94,8 @@ def verify_ui():
         }
 
         try:
-            page.goto("http://localhost:8000/")
+            # Use fictitious domain to avoid localhost networking issues
+            page.goto("http://verify.local/")
 
             # Set local storage and reload
             page.evaluate(f"""

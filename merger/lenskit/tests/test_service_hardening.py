@@ -187,21 +187,55 @@ def test_create_job_blocks_dirty_repo_keys(client_and_hub):
     """
     Backend Hardening: Ensure that sending a dirty repo key (e.g. traversal attempt)
     results in a 400 Bad Request, even if the frontend check is bypassed.
+    Strict Allowlist Check: alphanumeric, dot, underscore, dash.
     """
     client, hub_path = client_and_hub
     headers = {"Authorization": "Bearer test-token"}
-    payload = {
-        "repos": ["repoA", "../dirty"],
-        "hub": hub_path,
-        "level": "max",
-        "mode": "gesamt"
-    }
 
-    response = client.post("/api/jobs", json=payload, headers=headers)
+    invalid_keys = [
+        "../dirty",       # traversal
+        "repo/sub",       # slash
+        "repo\\sub",      # backslash
+        ".",              # dot strict
+        "..",             # double dot strict
+        "repo$name",      # invalid char
+        "repo name",      # space
+    ]
 
-    assert response.status_code == 400
-    # The validation happens in `validate_repo_name` called early in `create_job`
-    assert "Invalid repo name" in response.json()["detail"]
+    for key in invalid_keys:
+        payload = {
+            "repos": ["repoA", key],
+            "hub": hub_path,
+            "level": "max",
+            "mode": "gesamt"
+        }
+
+        response = client.post("/api/jobs", json=payload, headers=headers)
+        assert response.status_code == 400, f"Backend accepted invalid key: {key}"
+        assert "Invalid repo name" in response.json()["detail"], f"Wrong error for key: {key}"
+
+def test_create_job_allows_valid_keys(client_and_hub):
+    """
+    Backend Hardening: Verify that valid keys pass the strict filter.
+    """
+    client, hub_path = client_and_hub
+    headers = {"Authorization": "Bearer test-token"}
+
+    # Mock existence of folders for these valid names
+    for name in ["repo-name", "repo_name", "repo.name", "123"]:
+        (Path(hub_path) / name).mkdir(exist_ok=True)
+
+    valid_keys = ["repo-name", "repo_name", "repo.name", "123"]
+
+    for key in valid_keys:
+        payload = {
+            "repos": [key],
+            "hub": hub_path,
+            "level": "max",
+            "mode": "gesamt"
+        }
+        response = client.post("/api/jobs", json=payload, headers=headers)
+        assert response.status_code == 200, f"Backend rejected valid key: {key}"
 
 def test_create_job_blocks_absolute_path_repo(client_and_hub):
     """
