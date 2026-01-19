@@ -232,15 +232,16 @@ class JobRunner:
                     # Resolve relative paths against HUB to ensure visibility in container environments
                     merges_dir = (hub / p).resolve()
                     log(f"Resolved relative merges_dir '{p}' to '{merges_dir}'")
-                    # Update request object so Artifact reflects reality (absolute path)
-                    req.merges_dir = str(merges_dir)
                 else:
-                    merges_dir = p
+                    merges_dir = p.resolve()
 
                 merges_dir.mkdir(parents=True, exist_ok=True)
                 # Ensure security/validation for custom merges_dir if needed
                 try:
-                    get_security_config().validate_path(merges_dir)
+                    # Use the validated, canonical path
+                    merges_dir = get_security_config().validate_path(merges_dir)
+                    # Update request object so Artifact reflects reality (absolute canonical path)
+                    req.merges_dir = str(merges_dir)
                 except Exception as e:
                     log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e}")
                     raise ValueError(f"Security violation: merges_dir not allowed: {e}")

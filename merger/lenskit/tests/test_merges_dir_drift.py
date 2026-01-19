@@ -172,3 +172,33 @@ def test_download_artifact_resolves_legacy_relative_path(temp_hub):
         # It should have resolved rel_path against temp_hub
         expected_path = abs_merges_dir / "legacy.md"
         assert str(response.path) == str(expected_path)
+
+def test_runner_blocks_path_traversal(temp_hub):
+    """
+    Test that relative paths trying to escape the Hub are blocked.
+    """
+    store = JobStore(temp_hub)
+    runner = JobRunner(store)
+
+    # Try to write outside temp_hub using traversal
+    rel_path = "../escaped_dir"
+
+    req = JobRequest(
+        hub=str(temp_hub),
+        repos=["repoA"],
+        merges_dir=rel_path
+    )
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    store.add_job(job)
+
+    with patch("merger.lenskit.service.runner.write_reports_v2"), \
+         patch("merger.lenskit.service.runner.scan_repo") as mock_scan:
+
+        mock_scan.return_value = {}
+
+        runner._run_job(job.id)
+
+    updated_job = store.get_job(job.id)
+    assert updated_job.status == "failed"
+    assert "Security violation" in updated_job.error or "Access denied" in updated_job.error
