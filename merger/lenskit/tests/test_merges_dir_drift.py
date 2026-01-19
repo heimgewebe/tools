@@ -2,10 +2,16 @@ import pytest
 from unittest.mock import MagicMock, patch
 from merger.lenskit.service.runner import JobRunner
 from merger.lenskit.service.jobstore import JobStore
-from merger.lenskit.service.models import JobRequest, Job
+from merger.lenskit.service.models import JobRequest, Job, Artifact
+from merger.lenskit.service.app import download_artifact
+from fastapi import HTTPException
 from pathlib import Path
 import tempfile
-import os
+
+# Backward Compatibility Note:
+# Artifacts created before the 'merges_dir' field was added (or where it is None)
+# are handled by the 'else' branch in download_artifact, which defaults to
+# get_merges_dir(hub). This ensures legacy artifacts remain accessible.
 
 @pytest.fixture
 def mock_job_store():
@@ -14,6 +20,7 @@ def mock_job_store():
     store.update_job = MagicMock()
     store.append_log_line = MagicMock()
     store.add_artifact = MagicMock()
+    store.get_artifact = MagicMock()
     return store
 
 @pytest.fixture
@@ -107,3 +114,64 @@ def test_runner_logs_output_paths(mock_job_store, temp_hub):
         found_paths = any("/tmp/foo.md" in msg and "/tmp/bar.json" in msg for msg in log_messages)
 
         assert found_paths, f"Log messages did not contain output paths. Logs: {log_messages}"
+
+def test_download_resolves_relative_paths(mock_job_store, temp_hub):
+    """
+    Test that download_artifact resolves relative merges_dir against the Hub.
+    """
+    # Create an artifact with a relative merges_dir
+    rel_path = "custom_out"
+    abs_path = temp_hub / rel_path
+    abs_path.mkdir()
+
+    # Create the file
+    (abs_path / "test.md").write_text("content")
+
+    art = Artifact(
+        id="art1",
+        job_id="job1",
+        hub=str(temp_hub),
+        repos=["repoA"],
+        created_at="2024-01-01T00:00:00",
+        paths={"md": "test.md"},
+        params=JobRequest(
+            hub=str(temp_hub),
+            repos=["repoA"],
+            merges_dir=rel_path # Relative!
+        )
+    )
+
+    mock_job_store.get_artifact.return_value = art
+
+    # We need to mock 'state' in app.py or 'get_security_config'
+    # app.py uses global state. We must patch it.
+
+    with patch("merger.lenskit.service.app.state") as mock_state, \
+         patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
+
+        mock_state.job_store = mock_job_store
+
+        # Mock security to allow everything for this test (focus on path logic)
+        mock_sec = MagicMock()
+        # validate_path just returns the path if valid
+        mock_sec.validate_path.side_effect = lambda p: p
+        mock_get_sec.return_value = mock_sec
+
+        # Call download_artifact
+        response = download_artifact("art1", "md")
+
+        # Verify the file path used in response
+        assert str(response.path) == str(abs_path / "test.md")
+
+        # Verify that validate_path was called with the absolute path
+        # (It should resolve rel_path to temp_hub / rel_path)
+        # We expect validate_path to be called for merges_dir
+        # Check call args
+        calls = mock_sec.validate_path.call_args_list
+
+        # There should be at least one call with the absolute directory
+        # The implementation first resolves/validates merges_dir, then file_path
+
+        # Verify that at least one call matches expected_dir
+        resolved_dir_calls = [c[0][0] for c in calls if c[0][0] == abs_path]
+        assert len(resolved_dir_calls) > 0, f"Security config not called with resolved absolute path {abs_path}"
