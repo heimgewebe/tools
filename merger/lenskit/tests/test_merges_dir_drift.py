@@ -1,110 +1,176 @@
 import pytest
+from unittest.mock import MagicMock, patch
+from merger.lenskit.service.runner import JobRunner
+from merger.lenskit.service.jobstore import JobStore
+from merger.lenskit.service.models import JobRequest, Job, Artifact
+from merger.lenskit.service.app import download_artifact
 from pathlib import Path
-from fastapi.testclient import TestClient
-import time
+import tempfile
 
-# Import app logic
-from merger.lenskit.service.app import app, init_service, state
-from merger.lenskit.adapters.security import get_security_config
-
-client = TestClient(app)
+# Backward Compatibility Note:
+# Artifacts created before the 'merges_dir' field was added (or where it is None)
+# are handled by the 'else' branch in download_artifact, which defaults to
+# get_merges_dir(hub). This ensures legacy artifacts remain accessible.
 
 @pytest.fixture
-def service_env(tmp_path):
-    hub = tmp_path / "hub"
-    hub.mkdir()
+def mock_job_store():
+    store = MagicMock(spec=JobStore)
+    store.get_job = MagicMock()
+    store.update_job = MagicMock()
+    store.append_log_line = MagicMock()
+    store.add_artifact = MagicMock()
+    store.get_artifact = MagicMock()
+    return store
 
-    # Create a dummy repo
-    repo = hub / "dummy-repo"
-    repo.mkdir()
-    (repo / "README.md").write_text("dummy content")
-    (repo / "src").mkdir()
-    (repo / "src" / "main.py").write_text("print('hello')")
+@pytest.fixture
+def temp_hub():
+    with tempfile.TemporaryDirectory() as tmp:
+        hub = Path(tmp)
+        (hub / "repoA").mkdir()
+        yield hub
 
-    custom_merges = tmp_path / "custom_merges"
-    custom_merges.mkdir()
-
-    # Initialize service with custom merges dir
-    init_service(hub_path=hub, merges_dir=custom_merges)
-
-    yield {
-        "hub": hub,
-        "repo": repo,
-        "merges_dir": custom_merges
-    }
-
-    # Teardown
-    state.hub = None
-    state.merges_dir = None
-    state.job_store = None
-    state.runner = None
-    state.log_provider = None
-    sec = get_security_config()
-    sec.allowlist_roots = []
-    sec.token = None
-
-def test_effective_merges_dir_populated(service_env):
+def test_runner_resolves_relative_merges_dir(mock_job_store, temp_hub):
     """
-    Test that when the service is configured with a custom merges_dir,
-    jobs submitted without explicit merges_dir result in artifacts
-    that record the effective merges_dir, and downloads work.
+    Test that relative merges_dir in request is resolved relative to HUB, not CWD.
     """
-    # 1. Submit Job (via API to ensure default population logic runs)
-    payload = {
-        "repos": ["dummy-repo"],
-        "merges_dir": None, # Explicitly None to trigger default
-        "level": "max",
-        "plan_only": False
-    }
+    runner = JobRunner(mock_job_store)
 
-    response = client.post("/api/jobs", json=payload)
-    assert response.status_code == 200, f"Job creation failed: {response.text}"
-    job_id = response.json()["id"]
+    # Setup: relative path
+    rel_path = "my_merges"
+    req = JobRequest(
+        hub=str(temp_hub),
+        repos=["repoA"],
+        merges_dir=rel_path
+    )
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    mock_job_store.get_job.return_value = job
 
-    # 2. Wait for completion
-    # 30s timeout (60 * 0.5s) to be robust against CI latency
-    max_retries = 60
-    for _ in range(max_retries):
-        resp = client.get(f"/api/jobs/{job_id}")
-        assert resp.status_code == 200
-        job_data = resp.json()
-        if job_data["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.5)
+    # Expected absolute path
+    expected_merges_dir = temp_hub / rel_path
 
-    assert job_data["status"] == "succeeded", f"Job failed with error: {job_data.get('error')} logs: {job_data.get('logs')}"
+    with patch("merger.lenskit.service.runner.scan_repo") as mock_scan, \
+         patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
+         patch("merger.lenskit.service.runner.validate_source_dir"):
 
-    # 3. Get Artifact
-    artifact_ids = job_data.get("artifact_ids", [])
-    assert len(artifact_ids) > 0
-    art_id = artifact_ids[0]
+        # Mock artifacts to return some paths
+        mock_artifacts = MagicMock()
+        mock_artifacts.get_all_paths.return_value = [expected_merges_dir / "report.md"]
+        mock_artifacts.index_json = None
+        mock_artifacts.canonical_md = None
+        mock_artifacts.md_parts = []
 
-    resp = client.get(f"/api/artifacts/{art_id}")
-    assert resp.status_code == 200
-    artifact = resp.json()
+        mock_write.return_value = mock_artifacts
 
-    # 4. Verify merges_dir field (The fix)
-    assert "merges_dir" in artifact
-    recorded_merges_dir = artifact["merges_dir"]
-    assert recorded_merges_dir is not None
-    # Use resolve() to handle potential symlinks/abs path differences,
-    # but service_env["merges_dir"] is a pytest tmp_path (pathlib)
-    assert Path(recorded_merges_dir).resolve() == service_env["merges_dir"].resolve()
+        runner._run_job(job.id)
 
-    # 5. Verify params.merges_dir
-    # Note: app.py currently populates request.merges_dir from state.merges_dir if it matches the service config.
-    # This means params.merges_dir *also* reflects the effective path in this implementation.
-    # While 'params' conceptually represents the request, this mutation is preserved for backward compatibility
-    # and consistency with the runner's expectations.
-    assert artifact["params"]["merges_dir"] == str(service_env["merges_dir"])
+        # check that write_reports_v2 was called with absolute path
+        assert mock_write.call_count == 1
+        args, _ = mock_write.call_args
+        merges_dir_arg = args[0]
 
-    # 6. Verify Download Works
-    dl_resp = client.get(f"/api/artifacts/{art_id}/download")
-    assert dl_resp.status_code == 200
-    # Robust check: ensure content is not empty and seems like text
-    assert len(dl_resp.text) > 50
-    assert "dummy-repo" in dl_resp.text
+        assert merges_dir_arg == expected_merges_dir
+        assert merges_dir_arg.is_absolute()
 
-    # Verify logging (optional, but good to check if we log the path)
-    logs = "".join(job_data["logs"])
-    assert f"Writing reports to: {service_env['merges_dir'].resolve()}" in logs
+        # check that Artifact record contains absolute path (updated in req)
+        assert mock_job_store.add_artifact.call_count == 1
+        art = mock_job_store.add_artifact.call_args[0][0]
+
+        # The runner should update req.merges_dir to absolute path
+        assert art.params.merges_dir == str(expected_merges_dir)
+
+def test_runner_logs_output_paths(mock_job_store, temp_hub):
+    """
+    Test that the runner logs the generated file paths.
+    """
+    runner = JobRunner(mock_job_store)
+
+    req = JobRequest(hub=str(temp_hub), repos=["repoA"])
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    mock_job_store.get_job.return_value = job
+
+    with patch("merger.lenskit.service.runner.scan_repo"), \
+         patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
+         patch("merger.lenskit.service.runner.validate_source_dir"):
+
+        mock_artifacts = MagicMock()
+        # Set attributes to None to avoid 'Mock' being truthy and accessing .name
+        mock_artifacts.index_json = None
+        mock_artifacts.canonical_md = None
+        mock_artifacts.md_parts = []
+
+        mock_artifacts.get_all_paths.return_value = [Path("/tmp/foo.md"), Path("/tmp/bar.json")]
+        mock_write.return_value = mock_artifacts
+
+        runner._run_job(job.id)
+
+        # Check logs
+        logs = mock_job_store.append_log_line.call_args_list
+        log_messages = [call[0][1] for call in logs]
+
+        # Should contain list of paths
+        found_paths = any("/tmp/foo.md" in msg and "/tmp/bar.json" in msg for msg in log_messages)
+
+        assert found_paths, f"Log messages did not contain output paths. Logs: {log_messages}"
+
+def test_download_resolves_relative_paths(mock_job_store, temp_hub):
+    """
+    Test that download_artifact resolves relative merges_dir against the Hub.
+    """
+    # Create an artifact with a relative merges_dir
+    rel_path = "custom_out"
+    abs_path = temp_hub / rel_path
+    abs_path.mkdir()
+
+    # Create the file
+    (abs_path / "test.md").write_text("content")
+
+    art = Artifact(
+        id="art1",
+        job_id="job1",
+        hub=str(temp_hub),
+        repos=["repoA"],
+        created_at="2024-01-01T00:00:00",
+        paths={"md": "test.md"},
+        params=JobRequest(
+            hub=str(temp_hub),
+            repos=["repoA"],
+            merges_dir=rel_path # Relative!
+        )
+    )
+
+    mock_job_store.get_artifact.return_value = art
+
+    # We need to mock 'state' in app.py or 'get_security_config'
+    # app.py uses global state. We must patch it.
+
+    with patch("merger.lenskit.service.app.state") as mock_state, \
+         patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
+
+        mock_state.job_store = mock_job_store
+
+        # Mock security to allow everything for this test (focus on path logic)
+        mock_sec = MagicMock()
+        # validate_path just returns the path if valid
+        mock_sec.validate_path.side_effect = lambda p: p
+        mock_get_sec.return_value = mock_sec
+
+        # Call download_artifact
+        response = download_artifact("art1", "md")
+
+        # Verify the file path used in response
+        assert str(response.path) == str(abs_path / "test.md")
+
+        # Verify that validate_path was called with the absolute path
+        # (It should resolve rel_path to temp_hub / rel_path)
+        # We expect validate_path to be called for merges_dir
+        # Check call args
+        calls = mock_sec.validate_path.call_args_list
+
+        # There should be at least one call with the absolute directory
+        # The implementation first resolves/validates merges_dir, then file_path
+
+        # Verify that at least one call matches expected_dir
+        resolved_dir_calls = [c[0][0] for c in calls if c[0][0] == abs_path]
+        assert len(resolved_dir_calls) > 0, f"Security config not called with resolved absolute path {abs_path}"
