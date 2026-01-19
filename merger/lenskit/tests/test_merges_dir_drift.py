@@ -4,7 +4,6 @@ from merger.lenskit.service.runner import JobRunner
 from merger.lenskit.service.jobstore import JobStore
 from merger.lenskit.service.models import JobRequest, Job, Artifact
 from merger.lenskit.service.app import download_artifact
-from fastapi import HTTPException
 from pathlib import Path
 import tempfile
 

@@ -633,7 +633,10 @@ def download_artifact(id: str, key: str = "md"):
             merges_dir = sec.validate_path(merges_dir)
         except HTTPException:
             # Mask specific validation error as 403 for custom dirs
-            raise HTTPException(status_code=403, detail="Access denied: Custom merges directory not allowed")
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Custom merges directory not allowed",
+            )
     else:
         merges_dir = get_merges_dir(Path(art.hub))
 
