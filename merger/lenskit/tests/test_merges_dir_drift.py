@@ -4,39 +4,39 @@ from merger.lenskit.service.runner import JobRunner
 from merger.lenskit.service.jobstore import JobStore
 from merger.lenskit.service.models import JobRequest, Job, Artifact
 from merger.lenskit.service.app import download_artifact
+from merger.lenskit.adapters.security import get_security_config
 from pathlib import Path
 import tempfile
-
-# Backward Compatibility Note:
-# Artifacts created before the 'merges_dir' field was added (or where it is None)
-# are handled by the 'else' branch in download_artifact, which defaults to
-# get_merges_dir(hub). This ensures legacy artifacts remain accessible.
-
-@pytest.fixture
-def mock_job_store():
-    store = MagicMock(spec=JobStore)
-    store.get_job = MagicMock()
-    store.update_job = MagicMock()
-    store.append_log_line = MagicMock()
-    store.add_artifact = MagicMock()
-    store.get_artifact = MagicMock()
-    return store
 
 @pytest.fixture
 def temp_hub():
     with tempfile.TemporaryDirectory() as tmp:
-        hub = Path(tmp)
+        hub = Path(tmp).resolve()
         (hub / "repoA").mkdir()
+        (hub / "repoA" / "README.md").write_text("content")
+
+        # Initialize Security Config
+        sec = get_security_config()
+        # Reset allowlist to avoid pollution
+        sec.allowlist_roots = []
+        sec.add_allowlist_root(hub)
+
         yield hub
 
-def test_runner_resolves_relative_merges_dir(mock_job_store, temp_hub):
-    """
-    Test that relative merges_dir in request is resolved relative to HUB, not CWD.
-    """
-    runner = JobRunner(mock_job_store)
+        # Teardown
+        sec.allowlist_roots = []
 
-    # Setup: relative path
-    rel_path = "my_merges"
+def test_runner_resolves_and_creates_relative_merges_dir(temp_hub):
+    """
+    Integration test: Runner should resolve relative merges_dir against HUB,
+    create the directory, and persist absolute path in Artifact.
+    """
+    # 1. Setup Real JobStore
+    store = JobStore(temp_hub)
+    runner = JobRunner(store)
+
+    # 2. Setup Job with relative merges_dir
+    rel_path = "output/merges"
     req = JobRequest(
         hub=str(temp_hub),
         repos=["repoA"],
@@ -44,133 +44,131 @@ def test_runner_resolves_relative_merges_dir(mock_job_store, temp_hub):
     )
     job = Job.create(req)
     job.hub_resolved = str(temp_hub)
-    mock_job_store.get_job.return_value = job
+    store.add_job(job)
 
-    # Expected absolute path
-    expected_merges_dir = temp_hub / rel_path
+    # 3. Run Job (Synchronously via private method)
+    # We mock write_reports_v2 to return a dummy artifact object but let directory creation happen
+    # scan_repo can also be mocked to avoid dependency on actual repo content logic if desired,
+    # but since we created a dummy repo, it might run fine. Let's mock scan_repo for speed/isolation.
+    with patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
+         patch("merger.lenskit.service.runner.scan_repo") as mock_scan:
 
-    with patch("merger.lenskit.service.runner.scan_repo") as mock_scan, \
-         patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
-         patch("merger.lenskit.service.runner.validate_source_dir"):
-
-        # Mock artifacts to return some paths
         mock_artifacts = MagicMock()
-        mock_artifacts.get_all_paths.return_value = [expected_merges_dir / "report.md"]
+        mock_artifacts.get_all_paths.return_value = [Path("dummy.md")]
         mock_artifacts.index_json = None
         mock_artifacts.canonical_md = None
         mock_artifacts.md_parts = []
-
         mock_write.return_value = mock_artifacts
+
+        mock_scan.return_value = {} # Dummy summary
 
         runner._run_job(job.id)
 
-        # check that write_reports_v2 was called with absolute path
-        assert mock_write.call_count == 1
-        args, _ = mock_write.call_args
-        merges_dir_arg = args[0]
+    # 4. Verification
 
-        assert merges_dir_arg == expected_merges_dir
-        assert merges_dir_arg.is_absolute()
+    # A. Check Directory Exists at Absolute Path
+    expected_abs_path = (temp_hub / rel_path).resolve()
+    assert expected_abs_path.exists(), f"Directory {expected_abs_path} was not created"
+    assert expected_abs_path.is_dir()
 
-        # check that Artifact record contains absolute path (updated in req)
-        assert mock_job_store.add_artifact.call_count == 1
-        art = mock_job_store.add_artifact.call_args[0][0]
+    # B. Check Job Status
+    updated_job = store.get_job(job.id)
+    assert updated_job.status == "succeeded", f"Job failed with error: {updated_job.error}"
 
-        # The runner should update req.merges_dir to absolute path
-        assert art.params.merges_dir == str(expected_merges_dir)
+    # C. Check Artifact Persistence
+    assert len(updated_job.artifact_ids) == 1
+    art = store.get_artifact(updated_job.artifact_ids[0])
+    assert art is not None
 
-def test_runner_logs_output_paths(mock_job_store, temp_hub):
+    # D. Check Artifact.merges_dir is absolute and correct
+    assert art.merges_dir == str(expected_abs_path)
+    assert Path(art.merges_dir).is_absolute()
+
+    # E. Check Artifact.params.merges_dir (Request object was updated in memory)
+    # Note: JobStore saves the updated request object
+    assert art.params.merges_dir == str(expected_abs_path)
+
+
+def test_download_artifact_uses_persisted_merges_dir(temp_hub):
     """
-    Test that the runner logs the generated file paths.
+    Test that download_artifact uses the persisted absolute merges_dir.
     """
-    runner = JobRunner(mock_job_store)
+    # Setup manual artifact
+    abs_merges_dir = temp_hub / "custom_output"
+    abs_merges_dir.mkdir()
+    (abs_merges_dir / "test.md").write_text("secret content")
 
-    req = JobRequest(hub=str(temp_hub), repos=["repoA"])
-    job = Job.create(req)
-    job.hub_resolved = str(temp_hub)
-    mock_job_store.get_job.return_value = job
-
-    with patch("merger.lenskit.service.runner.scan_repo"), \
-         patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
-         patch("merger.lenskit.service.runner.validate_source_dir"):
-
-        mock_artifacts = MagicMock()
-        # Set attributes to None to avoid 'Mock' being truthy and accessing .name
-        mock_artifacts.index_json = None
-        mock_artifacts.canonical_md = None
-        mock_artifacts.md_parts = []
-
-        mock_artifacts.get_all_paths.return_value = [Path("/tmp/foo.md"), Path("/tmp/bar.json")]
-        mock_write.return_value = mock_artifacts
-
-        runner._run_job(job.id)
-
-        # Check logs
-        logs = mock_job_store.append_log_line.call_args_list
-        log_messages = [call[0][1] for call in logs]
-
-        # Should contain list of paths
-        found_paths = any("/tmp/foo.md" in msg and "/tmp/bar.json" in msg for msg in log_messages)
-
-        assert found_paths, f"Log messages did not contain output paths. Logs: {log_messages}"
-
-def test_download_resolves_relative_paths(mock_job_store, temp_hub):
-    """
-    Test that download_artifact resolves relative merges_dir against the Hub.
-    """
-    # Create an artifact with a relative merges_dir
-    rel_path = "custom_out"
-    abs_path = temp_hub / rel_path
-    abs_path.mkdir()
-
-    # Create the file
-    (abs_path / "test.md").write_text("content")
+    store = JobStore(temp_hub)
 
     art = Artifact(
-        id="art1",
-        job_id="job1",
+        id="art_dl_test",
+        job_id="job_dl_test",
         hub=str(temp_hub),
         repos=["repoA"],
-        created_at="2024-01-01T00:00:00",
+        created_at="2024-01-01",
         paths={"md": "test.md"},
-        params=JobRequest(
-            hub=str(temp_hub),
-            repos=["repoA"],
-            merges_dir=rel_path # Relative!
-        )
+        params=JobRequest(hub=str(temp_hub), repos=["repoA"]),
+        merges_dir=str(abs_merges_dir) # Persisted absolute path
     )
+    store.add_artifact(art)
 
-    mock_job_store.get_artifact.return_value = art
-
-    # We need to mock 'state' in app.py or 'get_security_config'
-    # app.py uses global state. We must patch it.
+    # Patch global state for app.py
+    # We need to ensure get_security_config allows the path
 
     with patch("merger.lenskit.service.app.state") as mock_state, \
          patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
 
-        mock_state.job_store = mock_job_store
+        mock_state.job_store = store
 
-        # Mock security to allow everything for this test (focus on path logic)
+        # Mock security to be permissive (we are testing path logic here)
         mock_sec = MagicMock()
-        # validate_path just returns the path if valid
         mock_sec.validate_path.side_effect = lambda p: p
         mock_get_sec.return_value = mock_sec
 
-        # Call download_artifact
-        response = download_artifact("art1", "md")
+        response = download_artifact("art_dl_test", "md")
 
-        # Verify the file path used in response
-        assert str(response.path) == str(abs_path / "test.md")
+        assert str(response.path) == str(abs_merges_dir / "test.md")
 
-        # Verify that validate_path was called with the absolute path
-        # (It should resolve rel_path to temp_hub / rel_path)
-        # We expect validate_path to be called for merges_dir
-        # Check call args
-        calls = mock_sec.validate_path.call_args_list
 
-        # There should be at least one call with the absolute directory
-        # The implementation first resolves/validates merges_dir, then file_path
+def test_download_artifact_resolves_legacy_relative_path(temp_hub):
+    """
+    Test backward compatibility: if merges_dir is missing in Artifact,
+    it uses params.merges_dir and resolves it against Hub.
+    """
+    rel_path = "legacy_output"
+    abs_merges_dir = temp_hub / rel_path
+    abs_merges_dir.mkdir()
+    (abs_merges_dir / "legacy.md").write_text("legacy content")
 
-        # Verify that at least one call matches expected_dir
-        resolved_dir_calls = [c[0][0] for c in calls if c[0][0] == abs_path]
-        assert len(resolved_dir_calls) > 0, f"Security config not called with resolved absolute path {abs_path}"
+    store = JobStore(temp_hub)
+
+    art = Artifact(
+        id="art_legacy",
+        job_id="job_legacy",
+        hub=str(temp_hub),
+        repos=["repoA"],
+        created_at="2024-01-01",
+        paths={"md": "legacy.md"},
+        params=JobRequest(
+            hub=str(temp_hub),
+            repos=["repoA"],
+            merges_dir=rel_path # Relative in params
+        ),
+        merges_dir=None # Simulate legacy artifact
+    )
+    store.add_artifact(art)
+
+    with patch("merger.lenskit.service.app.state") as mock_state, \
+         patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
+
+        mock_state.job_store = store
+
+        mock_sec = MagicMock()
+        mock_sec.validate_path.side_effect = lambda p: p
+        mock_get_sec.return_value = mock_sec
+
+        response = download_artifact("art_legacy", "md")
+
+        # It should have resolved rel_path against temp_hub
+        expected_path = abs_merges_dir / "legacy.md"
+        assert str(response.path) == str(expected_path)

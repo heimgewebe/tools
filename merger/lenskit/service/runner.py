@@ -7,7 +7,7 @@ from typing import List
 
 from .models import Artifact
 from .jobstore import JobStore
-from ..adapters.security import validate_source_dir
+from ..adapters.security import validate_source_dir, get_security_config
 
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
@@ -230,7 +230,7 @@ class JobRunner:
                 p = Path(req.merges_dir)
                 if not p.is_absolute():
                     # Resolve relative paths against HUB to ensure visibility in container environments
-                    merges_dir = hub / p
+                    merges_dir = (hub / p).resolve()
                     log(f"Resolved relative merges_dir '{p}' to '{merges_dir}'")
                     # Update request object so Artifact reflects reality (absolute path)
                     req.merges_dir = str(merges_dir)
@@ -239,7 +239,11 @@ class JobRunner:
 
                 merges_dir.mkdir(parents=True, exist_ok=True)
                 # Ensure security/validation for custom merges_dir if needed
-                # For now assuming if user can specify it, they have access.
+                try:
+                    get_security_config().validate_path(merges_dir)
+                except Exception as e:
+                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e}")
+                    raise ValueError(f"Security violation: merges_dir not allowed: {e}")
             else:
                 merges_dir = get_merges_dir(hub)
 
@@ -279,7 +283,7 @@ class JobRunner:
 
             # 5. Register Artifacts
             out_paths = artifacts_obj.get_all_paths()
-            log(f"Generated {len(out_paths)} files: {[str(p) for p in out_paths]}")
+            log(f"Generated {len(out_paths)} files.")
 
             # Map outputs to Artifact record
             path_map = {}
