@@ -234,6 +234,9 @@ class JobRunner:
             else:
                 merges_dir = get_merges_dir(hub)
 
+            # Log the effective output directory
+            log(f"Writing reports to: {merges_dir.resolve()}")
+
             # Re-check cancel status before write (expensive operation)
             job = self.job_store.get_job(job_id)
             if job.status in ("canceled", "canceling"):
@@ -289,6 +292,7 @@ class JobRunner:
                 repos=repo_names,
                 created_at=datetime.utcnow().isoformat(),
                 paths=path_map,
+                merges_dir=str(merges_dir.resolve()),
                 params=req
             )
 
