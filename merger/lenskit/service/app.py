@@ -624,10 +624,10 @@ def download_artifact(id: str, key: str = "md"):
         merges_dir = Path(art.merges_dir)
         try:
             if not merges_dir.is_absolute():
-                 merges_dir = merges_dir.resolve()
+                merges_dir = merges_dir.resolve()
             merges_dir = sec.validate_path(merges_dir)
         except HTTPException:
-             raise HTTPException(status_code=403, detail="Access denied: Artifact merges directory not allowed")
+            raise HTTPException(status_code=403, detail="Access denied: Artifact merges directory not allowed")
 
     # Priority 2: Requested merges_dir (params)
     # Backward compatibility: if art.merges_dir is None (legacy artifacts)
@@ -637,12 +637,12 @@ def download_artifact(id: str, key: str = "md"):
         # This prevents using an unvalidated path as a base.
         try:
             if not merges_dir.is_absolute():
-                 merges_dir = merges_dir.resolve()
+                merges_dir = merges_dir.resolve()
             # sec.validate_path returns the resolved, canonical path
             merges_dir = sec.validate_path(merges_dir)
         except HTTPException:
-             # Mask specific validation error as 403 for custom dirs
-             raise HTTPException(status_code=403, detail="Access denied: Custom merges directory not allowed")
+            # Mask specific validation error as 403 for custom dirs
+            raise HTTPException(status_code=403, detail="Access denied: Custom merges directory not allowed")
     else:
         # Default: hub/merges
         # Ensure it is resolved to be robust against symlinks when checking containment later

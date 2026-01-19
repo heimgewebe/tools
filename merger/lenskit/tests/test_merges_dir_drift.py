@@ -2,7 +2,6 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 import time
-import json
 
 # Import app logic
 from merger.lenskit.service.app import app, init_service, state
