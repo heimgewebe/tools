@@ -630,7 +630,7 @@ def download_artifact(id: str, key: str = "md"):
              raise HTTPException(status_code=403, detail="Access denied: Artifact merges directory not allowed")
 
     # Priority 2: Requested merges_dir (params)
-    # Backward compatibility: if merges_dir field is missing (old artifacts) or explicit override requested
+    # Backward compatibility: if art.merges_dir is None (legacy artifacts)
     elif art.params.merges_dir:
         merges_dir = Path(art.params.merges_dir)
         # Security: Custom merges_dir must be valid/allowlisted itself.
@@ -638,6 +638,7 @@ def download_artifact(id: str, key: str = "md"):
         try:
             if not merges_dir.is_absolute():
                  merges_dir = merges_dir.resolve()
+            # sec.validate_path returns the resolved, canonical path
             merges_dir = sec.validate_path(merges_dir)
         except HTTPException:
              # Mask specific validation error as 403 for custom dirs
