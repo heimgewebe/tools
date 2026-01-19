@@ -122,6 +122,7 @@ class Artifact(BaseModel):
     created_at: str
     paths: Dict[str, str]  # e.g. {"md": "...", "json": "...", "part2": "..."}
     params: JobRequest
+    merges_dir: Optional[str] = None # Effective absolute path to output directory
 
 class Job(BaseModel):
     id: str

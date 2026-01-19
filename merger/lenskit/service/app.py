@@ -619,20 +619,26 @@ def download_artifact(id: str, key: str = "md"):
     sec = get_security_config()
 
     # Determine base directory
-    if art.params.merges_dir:
+    if art.merges_dir:
+        merges_dir = Path(art.merges_dir)
+        try:
+            if not merges_dir.is_absolute():
+                merges_dir = merges_dir.resolve()
+            merges_dir = sec.validate_path(merges_dir)
+        except HTTPException:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Artifact merges directory not allowed",
+            )
+    elif art.params.merges_dir:
         p = Path(art.params.merges_dir)
-        # Security: Custom merges_dir must be valid/allowlisted itself.
-        # This prevents using an unvalidated path as a base.
         try:
             if not p.is_absolute():
-                # Robustness: Resolve relative paths against the Hub (context), not CWD.
                 merges_dir = (Path(art.hub) / p).resolve()
             else:
                 merges_dir = p.resolve()
-
             merges_dir = sec.validate_path(merges_dir)
         except HTTPException:
-            # Mask specific validation error as 403 for custom dirs
             raise HTTPException(
                 status_code=403,
                 detail="Access denied: Custom merges directory not allowed",

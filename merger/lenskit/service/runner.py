@@ -298,7 +298,8 @@ class JobRunner:
                 repos=repo_names,
                 created_at=datetime.utcnow().isoformat(),
                 paths=path_map,
-                params=req
+                params=req,
+                merges_dir=str(merges_dir)
             )
 
             self.job_store.add_artifact(art)
