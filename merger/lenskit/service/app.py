@@ -654,11 +654,6 @@ def download_artifact(id: str, key: str = "md"):
                 status_code=400,
                 detail="Invalid path: Artifact merges directory invalid",
             )
-        except HTTPException:
-            raise HTTPException(
-                status_code=403,
-                detail="Access denied: Artifact merges directory not allowed",
-            )
 
     # Priority 2: Requested merges_dir (params)
     # Backward compatibility: if art.merges_dir is None (legacy artifacts)
@@ -680,11 +675,6 @@ def download_artifact(id: str, key: str = "md"):
                 status_code=400,
                 detail="Invalid path: Custom merges directory invalid",
             )
-        except HTTPException:
-            raise HTTPException(
-                status_code=403,
-                detail="Access denied: Custom merges directory not allowed",
-            )
     else:
         # Default: hub/merges
         # Ensure it is resolved to be robust against symlinks when checking containment later
@@ -702,8 +692,6 @@ def download_artifact(id: str, key: str = "md"):
         raise HTTPException(status_code=403, detail="Access denied: File path not allowed by security policy")
     except InvalidPathError:
         raise HTTPException(status_code=400, detail="Invalid path: File path invalid")
-    except HTTPException:
-        raise HTTPException(status_code=403, detail="Access denied: File path not allowed by security policy")
 
     # Consistency: Explicitly check if file is inside the *intended* validated merges_dir
     # Both paths are now resolved/validated by sec.validate_path
