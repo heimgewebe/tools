@@ -644,7 +644,7 @@ def download_artifact(id: str, key: str = "md"):
             else:
                 merges_dir = p.resolve()
             merges_dir = sec.validate_path(merges_dir)
-        except HTTPException:
+        except (HTTPException, AccessDeniedError, InvalidPathError):
             raise HTTPException(
                 status_code=403,
                 detail="Access denied: Artifact merges directory not allowed",
@@ -660,7 +660,7 @@ def download_artifact(id: str, key: str = "md"):
             else:
                 merges_dir = p.resolve()
             merges_dir = sec.validate_path(merges_dir)
-        except HTTPException:
+        except (HTTPException, AccessDeniedError, InvalidPathError):
             raise HTTPException(
                 status_code=403,
                 detail="Access denied: Custom merges directory not allowed",
@@ -678,7 +678,7 @@ def download_artifact(id: str, key: str = "md"):
         if not file_path.is_absolute():
             file_path = file_path.resolve()
         file_path = sec.validate_path(file_path)
-    except HTTPException:
+    except (HTTPException, AccessDeniedError, InvalidPathError):
         raise HTTPException(status_code=403, detail="Access denied: File path not allowed by security policy")
 
     # Consistency: Explicitly check if file is inside the *intended* validated merges_dir
