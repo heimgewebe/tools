@@ -308,6 +308,7 @@ def test_runner_logs_output_paths(temp_hub):
         mock_artifacts.index_json = None
         mock_artifacts.canonical_md = None
         mock_artifacts.md_parts = []
+        mock_artifacts.other = []
 
         # Create dummy paths (more than 10 to test truncation)
         paths = [Path(f"/tmp/output_{i}.md") for i in range(15)]
