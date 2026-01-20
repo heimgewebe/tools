@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List
 
+from fastapi import HTTPException
 from .models import Artifact
 from .jobstore import JobStore
 from ..adapters.security import validate_source_dir, get_security_config
@@ -242,9 +243,9 @@ class JobRunner:
                     merges_dir = get_security_config().validate_path(merges_dir)
                     # Update request object so Artifact reflects reality (absolute canonical path)
                     req.merges_dir = str(merges_dir)
-                except Exception as e:
-                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e}")
-                    raise ValueError(f"Security violation: merges_dir not allowed: {e}")
+                except HTTPException as e:
+                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e.detail}")
+                    raise ValueError(f"Security violation: merges_dir not allowed: {e.detail}")
             else:
                 merges_dir = get_merges_dir(hub)
 
