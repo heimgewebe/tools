@@ -7,7 +7,7 @@ from typing import List
 
 from .models import Artifact
 from .jobstore import JobStore
-from ..adapters.security import validate_source_dir, get_security_config
+from ..adapters.security import validate_source_dir, get_security_config, SecurityViolationError
 
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
@@ -242,11 +242,9 @@ class JobRunner:
                     merges_dir = get_security_config().validate_path(merges_dir)
                     # Update request object so Artifact reflects reality (absolute canonical path)
                     req.merges_dir = str(merges_dir.resolve())
-                except Exception as e:
-                    # Inspect exception for details (decoupling from FastAPI)
-                    msg = getattr(e, "detail", str(e))
-                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {msg}")
-                    raise ValueError(f"Security violation: merges_dir not allowed: {msg}")
+                except SecurityViolationError as e:
+                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e}")
+                    raise ValueError(f"SECURITY: merges_dir not allowed: {e}")
             else:
                 merges_dir = get_merges_dir(hub)
 
