@@ -313,7 +313,7 @@ class JobRunner:
                 created_at=datetime.utcnow().isoformat(),
                 paths=path_map,
                 params=req,
-                merges_dir=str(merges_dir)
+                merges_dir=str(merges_dir.resolve())
             )
 
             self.job_store.add_artifact(art)
