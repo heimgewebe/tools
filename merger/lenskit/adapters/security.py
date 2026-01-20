@@ -11,6 +11,18 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 security_scheme = HTTPBearer(auto_error=False)
 
+class SecurityViolationError(Exception):
+    """Base class for security and path validation errors."""
+    pass
+
+class InvalidPathError(SecurityViolationError):
+    """Raised when a path is malformed or invalid (400)."""
+    pass
+
+class AccessDeniedError(SecurityViolationError):
+    """Raised when access to a path is denied (403)."""
+    pass
+
 @dataclass
 class SecurityConfig:
     # Absolute, normalized roots only. Anything else is rejected at registration.
@@ -53,14 +65,13 @@ class SecurityConfig:
         """
         raw = str(path)
         if not raw.strip():
-            raise HTTPException(status_code=400, detail="Invalid path (empty)")
+            raise InvalidPathError("Invalid path (empty)")
         if "\0" in raw:
-            raise HTTPException(status_code=400, detail="Invalid path (NUL byte)")
+            raise InvalidPathError("Invalid path (NUL byte)")
 
         if not self.allowlist_roots:
-            raise HTTPException(
-                status_code=403,
-                detail="No allowed roots configured (SecurityConfig not initialized)",
+            raise AccessDeniedError(
+                "No allowed roots configured (SecurityConfig not initialized)",
             )
 
         # --- Stage 1: pre-check without resolve() ---
@@ -69,7 +80,7 @@ class SecurityConfig:
         normalized = os.path.normpath(expanded)
 
         if not os.path.isabs(normalized):
-            raise HTTPException(status_code=400, detail="Invalid path (not absolute)")
+            raise InvalidPathError("Invalid path (not absolute)")
 
         allowed_by_prefix = False
         for root in self.allowlist_roots:
@@ -86,14 +97,14 @@ class SecurityConfig:
 
         if not allowed_by_prefix:
             # This early exit helps CodeQL see the barrier before resolve()
-            raise HTTPException(status_code=403, detail="Access denied: Path is not allowed (prefix check)")
+            raise AccessDeniedError("Access denied: Path is not allowed (prefix check)")
 
         # --- Stage 2: canonicalize + enforce with Path semantics ---
         try:
             # Now safe to resolve (canonicalize symlinks etc)
             resolved = Path(normalized).resolve()
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid path resolution")
+            raise InvalidPathError("Invalid path resolution")
 
         # Post-check: resolved path must still lie within allowlist roots.
         # This prevents symlink escapes that passed string check.
@@ -106,7 +117,7 @@ class SecurityConfig:
             except ValueError:
                 continue
 
-        raise HTTPException(status_code=403, detail="Access denied: Path is not allowed (canonical check)")
+        raise AccessDeniedError("Access denied: Path is not allowed (canonical check)")
 
 
 _security_config = SecurityConfig()
@@ -138,16 +149,16 @@ def validate_hub_path(path_str: str) -> Path:
     Returns a canonical Path that is safe to use for filesystem operations.
     """
     if "\0" in path_str:
-        raise HTTPException(status_code=400, detail="Invalid path (NUL byte)")
+        raise InvalidPathError("Invalid path (NUL byte)")
 
     p = Path(path_str)
     # Use resolved path for checks
     resolved = get_security_config().validate_path(p)
 
     if not resolved.exists():
-        raise HTTPException(status_code=400, detail="Hub does not exist")
+        raise InvalidPathError("Hub does not exist")
     if not resolved.is_dir():
-        raise HTTPException(status_code=400, detail="Hub is not a directory")
+        raise InvalidPathError("Hub is not a directory")
     return resolved
 
 
@@ -155,24 +166,24 @@ def validate_source_dir(path: Path) -> Path:
     # Ensure source is within allowlist roots (hub) and use ONLY the validated path.
     resolved = get_security_config().validate_path(path)
     if not resolved.exists() or not resolved.is_dir():
-        raise HTTPException(status_code=400, detail="Invalid repo path")
+        raise InvalidPathError("Invalid repo path")
     return resolved
 
 def validate_repo_name(name: str) -> str:
     _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
     n = (name or "").strip()
     if not n:
-        raise HTTPException(status_code=400, detail="Invalid repo name: empty")
+        raise InvalidPathError("Invalid repo name: empty")
 
     # Specific block for "." and ".." strictly
     if n == "." or n == "..":
-        raise HTTPException(status_code=400, detail=f"Invalid repo name: {n}")
+        raise InvalidPathError(f"Invalid repo name: {n}")
 
     if "/" in n or "\\" in n or ".." in n:
-        raise HTTPException(status_code=400, detail="Invalid repo name: contains slash, backslash, or double-dot")
+        raise InvalidPathError("Invalid repo name: contains slash, backslash, or double-dot")
 
     if not _REPO_RE.match(n):
-        raise HTTPException(status_code=400, detail=f"Invalid repo name: {n}")
+        raise InvalidPathError(f"Invalid repo name: {n}")
 
     return n
 

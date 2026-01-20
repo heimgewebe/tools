@@ -4,7 +4,8 @@ from merger.lenskit.service.runner import JobRunner
 from merger.lenskit.service.jobstore import JobStore
 from merger.lenskit.service.models import JobRequest, Job, Artifact
 from merger.lenskit.service.app import download_artifact
-from merger.lenskit.adapters.security import get_security_config
+from merger.lenskit.adapters import security
+from merger.lenskit.adapters.security import SecurityConfig
 from pathlib import Path
 import tempfile
 
@@ -15,16 +16,12 @@ def temp_hub():
         (hub / "repoA").mkdir()
         (hub / "repoA" / "README.md").write_text("content")
 
-        # Initialize Security Config
-        sec = get_security_config()
-        # Reset allowlist to avoid pollution
-        sec.allowlist_roots = []
-        sec.add_allowlist_root(hub)
+        # Use a fresh SecurityConfig for this test, replacing the global singleton
+        new_config = SecurityConfig()
+        new_config.add_allowlist_root(hub)
 
-        yield hub
-
-        # Teardown
-        sec.allowlist_roots = []
+        with patch.object(security, "_security_config", new_config):
+            yield hub
 
 def test_runner_resolves_and_creates_relative_merges_dir(temp_hub):
     """
@@ -201,7 +198,7 @@ def test_runner_blocks_path_traversal(temp_hub):
 
     updated_job = store.get_job(job.id)
     assert updated_job.status == "failed"
-    assert "Security violation" in updated_job.error or "Access denied" in updated_job.error
+    assert "SECURITY:" in updated_job.error
 
 def test_download_artifact_resolves_drifted_persisted_relative_path(temp_hub):
     """

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends, Body, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from typing import List, Optional, Dict, Any
@@ -18,7 +18,14 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, Atla
 from .jobstore import JobStore
 from .runner import JobRunner
 from .logging_provider import LogProvider, FileLogProvider
-from ..adapters.security import verify_token, get_security_config, validate_hub_path, validate_repo_name
+from ..adapters.security import (
+    verify_token,
+    get_security_config,
+    validate_hub_path,
+    validate_repo_name,
+    InvalidPathError,
+    AccessDeniedError,
+)
 from ..adapters.filesystem import resolve_fs_path, list_allowed_roots, issue_fs_token
 from ..adapters.atlas import AtlasScanner, render_atlas_md
 from ..adapters.metarepo import sync_from_metarepo
@@ -82,6 +89,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="rLens", version=SERVER_VERSION)
+
+@app.exception_handler(InvalidPathError)
+async def invalid_path_handler(request: Request, exc: InvalidPathError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+@app.exception_handler(AccessDeniedError)
+async def access_denied_handler(request: Request, exc: AccessDeniedError):
+    return JSONResponse(status_code=403, content={"detail": str(exc)})
 
 # GC Configuration
 GC_MAX_JOBS = int(os.getenv("RLENS_GC_MAX_JOBS", "100"))
