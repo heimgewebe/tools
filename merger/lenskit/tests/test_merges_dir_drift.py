@@ -283,3 +283,61 @@ def test_download_artifact_uses_default_merges_dir(temp_hub):
 
         expected_path = default_dir / "default.md"
         assert str(response.path) == str(expected_path)
+
+def test_runner_logs_output_paths(temp_hub):
+    """
+    Test that the runner logs the generated file paths (at least the first 10).
+    """
+    store = JobStore(temp_hub)
+    runner = JobRunner(store)
+
+    req = JobRequest(hub=str(temp_hub), repos=["repoA"])
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    store.add_job(job)
+
+    # Mock dependencies
+    with patch("merger.lenskit.service.runner.scan_repo") as mock_scan, \
+         patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
+         patch("merger.lenskit.service.runner.validate_source_dir"):
+
+        mock_scan.return_value = {}
+
+        # Setup mock artifacts with some paths
+        mock_artifacts = MagicMock()
+        mock_artifacts.index_json = None
+        mock_artifacts.canonical_md = None
+        mock_artifacts.md_parts = []
+        mock_artifacts.other = []
+
+        # Create dummy paths (more than 10 to test truncation)
+        # Use temp_hub to be semantically consistent, though specific path doesn't matter for this test
+        paths = [temp_hub / f"output_{i}.md" for i in range(15)]
+        mock_artifacts.get_all_paths.return_value = paths
+
+        mock_write.return_value = mock_artifacts
+
+        runner._run_job(job.id)
+
+    # Verify logs
+    logs = store.read_log_lines(job.id)
+
+    # We expect a log message containing the paths
+    # The current implementation limits to 10.
+    # "Generated 15 files: ['.../output_0.md', ...]"
+
+    found_msg = False
+    for line in logs:
+        # Match the log line for generated files
+        if "Generated 15 files:" in line:
+            found_msg = True
+            # Check for first few paths using dynamic string representation
+            assert str(paths[0]) in line
+            assert str(paths[9]) in line
+            # Check that 11th path is NOT in line (truncation)
+            assert str(paths[10]) not in line
+            # Check for "more" count
+            assert "(+5 more)" in line
+            break
+
+    assert found_msg, f"Log message about generated files not found. Logs: {logs}"
