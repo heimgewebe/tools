@@ -242,7 +242,7 @@ class JobRunner:
                     # Use the validated, canonical path
                     merges_dir = get_security_config().validate_path(merges_dir)
                     # Update request object so Artifact reflects reality (absolute canonical path)
-                    req.merges_dir = str(merges_dir)
+                    req.merges_dir = str(merges_dir.resolve())
                 except HTTPException as e:
                     log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e.detail}")
                     raise ValueError(f"Security violation: merges_dir not allowed: {e.detail}")
