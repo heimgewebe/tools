@@ -621,10 +621,13 @@ def download_artifact(id: str, key: str = "md"):
     # Determine base directory
     # Priority 1: Effective merges_dir captured at creation time (new field)
     if art.merges_dir:
-        merges_dir = Path(art.merges_dir)
+        p = Path(art.merges_dir)
         try:
-            if not merges_dir.is_absolute():
-                merges_dir = merges_dir.resolve()
+            if not p.is_absolute():
+                # Resolve relative paths against HUB (defense in depth for drifted persistence)
+                merges_dir = (Path(art.hub) / p).resolve()
+            else:
+                merges_dir = p.resolve()
             merges_dir = sec.validate_path(merges_dir)
         except HTTPException:
             raise HTTPException(

@@ -202,3 +202,87 @@ def test_runner_blocks_path_traversal(temp_hub):
     updated_job = store.get_job(job.id)
     assert updated_job.status == "failed"
     assert "Security violation" in updated_job.error or "Access denied" in updated_job.error
+
+def test_download_artifact_resolves_drifted_persisted_relative_path(temp_hub):
+    """
+    Test Priority 1 defense-in-depth: if art.merges_dir is somehow relative
+    (drifted persistence), it should be resolved against hub.
+    """
+    rel_path = "drifted_out"
+    abs_merges_dir = temp_hub / rel_path
+    abs_merges_dir.mkdir()
+    (abs_merges_dir / "drift.md").write_text("content")
+
+    store = JobStore(temp_hub)
+
+    art = Artifact(
+        id="art_drift",
+        job_id="job_drift",
+        hub=str(temp_hub),
+        repos=["repoA"],
+        created_at="2024-01-01",
+        paths={"md": "drift.md"},
+        params=JobRequest(hub=str(temp_hub), repos=["repoA"]),
+        merges_dir=rel_path # Relative persisted path (simulating bad state)
+    )
+    store.add_artifact(art)
+
+    with patch("merger.lenskit.service.app.state") as mock_state, \
+         patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
+
+        mock_state.job_store = store
+
+        mock_sec = MagicMock()
+        mock_sec.validate_path.side_effect = lambda p: p
+        mock_get_sec.return_value = mock_sec
+
+        response = download_artifact("art_drift", "md")
+
+        expected_path = abs_merges_dir / "drift.md"
+        assert str(response.path) == str(expected_path)
+
+def test_download_artifact_uses_default_merges_dir(temp_hub):
+    """
+    Test Priority 3: No merges_dir in artifact or params -> use default.
+    """
+    # Need to import MERGES_DIR_NAME.
+    # It is usually 'merges' but better to import if possible,
+    # or hardcode if test needs to be standalone.
+    # merger.lenskit.core.merge import MERGES_DIR_NAME might fail if dependencies missing?
+    # We already imported app, models etc. so core should be available.
+    try:
+        from merger.lenskit.core.merge import MERGES_DIR_NAME
+    except ImportError:
+        MERGES_DIR_NAME = "merges"
+
+    default_dir = temp_hub / MERGES_DIR_NAME
+    default_dir.mkdir(exist_ok=True)
+    (default_dir / "default.md").write_text("content")
+
+    store = JobStore(temp_hub)
+
+    art = Artifact(
+        id="art_default",
+        job_id="job_default",
+        hub=str(temp_hub),
+        repos=["repoA"],
+        created_at="2024-01-01",
+        paths={"md": "default.md"},
+        params=JobRequest(hub=str(temp_hub), repos=["repoA"]),
+        merges_dir=None
+    )
+    store.add_artifact(art)
+
+    with patch("merger.lenskit.service.app.state") as mock_state, \
+         patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
+
+        mock_state.job_store = store
+
+        mock_sec = MagicMock()
+        mock_sec.validate_path.side_effect = lambda p: p
+        mock_get_sec.return_value = mock_sec
+
+        response = download_artifact("art_default", "md")
+
+        expected_path = default_dir / "default.md"
+        assert str(response.path) == str(expected_path)

@@ -284,7 +284,13 @@ class JobRunner:
 
             # 5. Register Artifacts
             out_paths = artifacts_obj.get_all_paths()
-            log(f"Generated {len(out_paths)} files.")
+            display_limit = 10
+            truncated_paths = [str(p) for p in out_paths[:display_limit]]
+            more_count = len(out_paths) - display_limit
+            msg = f"Generated {len(out_paths)} files: {truncated_paths}"
+            if more_count > 0:
+                msg += f" (+{more_count} more)"
+            log(msg)
 
             # Map outputs to Artifact record
             path_map = {}
