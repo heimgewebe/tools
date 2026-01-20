@@ -283,3 +283,34 @@ def test_download_artifact_uses_default_merges_dir(temp_hub):
 
         expected_path = default_dir / "default.md"
         assert str(response.path) == str(expected_path)
+
+def test_runner_logs_output_paths(temp_hub):
+    """
+    Test that the runner logs the generated file paths.
+    """
+    store = JobStore(temp_hub)
+    runner = JobRunner(store)
+
+    req = JobRequest(hub=str(temp_hub), repos=["repoA"])
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    store.add_job(job)
+
+    with patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
+         patch("merger.lenskit.service.runner.scan_repo"):
+
+        mock_artifacts = MagicMock()
+        mock_artifacts.get_all_paths.return_value = [Path("/tmp/foo.md"), Path("/tmp/bar.json")]
+        mock_artifacts.index_json = None
+        mock_artifacts.canonical_md = None
+        mock_artifacts.md_parts = []
+        mock_write.return_value = mock_artifacts
+
+        runner._run_job(job.id)
+
+        # Check logs
+        updated_job = store.get_job(job.id)
+        log_messages = updated_job.logs
+        found_paths = any("/tmp/foo.md" in msg and "/tmp/bar.json" in msg for msg in log_messages)
+
+        assert found_paths, f"Log messages did not contain output paths. Logs: {log_messages}"
