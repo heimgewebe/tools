@@ -18,8 +18,8 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, Atla
 from .jobstore import JobStore
 from .runner import JobRunner
 from .logging_provider import LogProvider, FileLogProvider
+from .auth import verify_token
 from ..adapters.security import (
-    verify_token,
     get_security_config,
     validate_hub_path,
     validate_repo_name,

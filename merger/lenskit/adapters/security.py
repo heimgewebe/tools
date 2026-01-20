@@ -6,11 +6,6 @@ from typing import List, Optional
 import os
 import re
 
-from fastapi import HTTPException, Depends, Query
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
-security_scheme = HTTPBearer(auto_error=False)
-
 class SecurityViolationError(Exception):
     """Base class for security and path validation errors."""
     pass
@@ -124,23 +119,6 @@ _security_config = SecurityConfig()
 
 def get_security_config() -> SecurityConfig:
     return _security_config
-
-
-def verify_token(
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
-    token: Optional[str] = Query(None)
-):
-    config = get_security_config()
-    if not config.token:
-        return
-
-    if creds and creds.credentials == config.token:
-        return
-
-    if token and token == config.token:
-        return
-
-    raise HTTPException(status_code=401, detail="Missing or invalid authentication token")
 
 
 def validate_hub_path(path_str: str) -> Path:
