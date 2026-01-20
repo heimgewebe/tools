@@ -7,7 +7,7 @@ from typing import List
 
 from .models import Artifact
 from .jobstore import JobStore
-from ..adapters.security import validate_source_dir
+from ..adapters.security import validate_source_dir, get_security_config
 
 # Import core logic.
 # Since this file is in merger/repoLens/service/runner.py,
@@ -227,10 +227,26 @@ class JobRunner:
             # 4. Write Reports
             log("Generating reports...")
             if req.merges_dir:
-                merges_dir = Path(req.merges_dir)
+                p = Path(req.merges_dir)
+                if not p.is_absolute():
+                    # Resolve relative paths against HUB to ensure visibility in container environments
+                    merges_dir = (hub / p).resolve()
+                    log(f"Resolved relative merges_dir '{p}' to '{merges_dir}'")
+                else:
+                    merges_dir = p.resolve()
+
                 merges_dir.mkdir(parents=True, exist_ok=True)
                 # Ensure security/validation for custom merges_dir if needed
-                # For now assuming if user can specify it, they have access.
+                try:
+                    # Use the validated, canonical path
+                    merges_dir = get_security_config().validate_path(merges_dir)
+                    # Update request object so Artifact reflects reality (absolute canonical path)
+                    req.merges_dir = str(merges_dir.resolve())
+                except Exception as e:
+                    # Inspect exception for details (decoupling from FastAPI)
+                    msg = getattr(e, "detail", str(e))
+                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {msg}")
+                    raise ValueError(f"Security violation: merges_dir not allowed: {msg}")
             else:
                 merges_dir = get_merges_dir(hub)
 
@@ -270,7 +286,13 @@ class JobRunner:
 
             # 5. Register Artifacts
             out_paths = artifacts_obj.get_all_paths()
-            log(f"Generated {len(out_paths)} files.")
+            display_limit = 10
+            truncated_paths = [str(p) for p in out_paths[:display_limit]]
+            more_count = len(out_paths) - display_limit
+            msg = f"Generated {len(out_paths)} files: {truncated_paths}"
+            if more_count > 0:
+                msg += f" (+{more_count} more)"
+            log(msg)
 
             # Map outputs to Artifact record
             path_map = {}
@@ -292,8 +314,8 @@ class JobRunner:
                 repos=repo_names,
                 created_at=datetime.utcnow().isoformat(),
                 paths=path_map,
-                merges_dir=str(merges_dir.resolve()),
-                params=req
+                params=req,
+                merges_dir=str(merges_dir.resolve())
             )
 
             self.job_store.add_artifact(art)
