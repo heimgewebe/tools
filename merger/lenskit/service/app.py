@@ -12,7 +12,7 @@ import time
 import ipaddress
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, AtlasEffective, calculate_job_hash, PrescanRequest, PrescanResponse, FSRoot, FSRootsResponse
 from .jobstore import JobStore
@@ -38,7 +38,7 @@ except ImportError:
     from merger.lenskit.core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
 
 # Global Version Info
-SERVER_START_TIME = datetime.utcnow().isoformat()
+SERVER_START_TIME = datetime.now(timezone.utc).isoformat()
 
 def _get_server_version():
     # 1. Env Var (Canonical for builds)
@@ -851,7 +851,7 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
 
     return AtlasArtifact(
         id=scan_id,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         hub=str(hub),
         root_scanned=str(scan_root),
         paths=paths,
@@ -945,7 +945,7 @@ def get_latest_atlas():
 
     return AtlasArtifact(
         id=scan_id,
-        created_at=datetime.fromtimestamp(latest_file.stat().st_mtime).isoformat(),
+        created_at=datetime.fromtimestamp(latest_file.stat().st_mtime, timezone.utc).isoformat(),
         hub=str(state.hub),
         root_scanned=scan_root,
         paths=paths,

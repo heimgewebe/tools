@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 from merger.lenskit.service.app import app, init_service, state
 from merger.lenskit.service.models import JobRequest, Artifact
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 @pytest.fixture
@@ -136,7 +136,7 @@ def test_gc_artifacts_physical(client_and_hub):
     req_obj = JobRequest(**req)
     art = Artifact(
         id=art_id, job_id=job_id, hub=hub_path, repos=["repo1"],
-        created_at=datetime.utcnow().isoformat(), paths={"md": "test_artifact.md"}, params=req_obj
+        created_at=datetime.now(timezone.utc).isoformat(), paths={"md": "test_artifact.md"}, params=req_obj
     )
     state.job_store.add_artifact(art)
 
@@ -171,7 +171,7 @@ def test_gc_artifacts_physical_safe_join(client_and_hub):
     req_obj = JobRequest(**req)
     art = Artifact(
         id=art_id, job_id=job_id, hub=hub_path, repos=["repo_safe"],
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         paths={"md": "../DO_NOT_DELETE.txt"},
         params=req_obj
     )
