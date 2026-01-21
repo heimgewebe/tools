@@ -10,6 +10,7 @@ import hashlib
 import datetime
 import shutil
 import logging
+from datetime import timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -157,7 +158,7 @@ def sync_repo(
         "source": "metarepo",
         "mode": mode,
         "status": "ok", # Optimistic, set to error on failures
-        "generated_at": datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "generated_at": datetime.datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         "metarepo_path": str(metarepo_root),
         "manifest_path": str(metarepo_root / MANIFEST_REL_PATH),
         "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0},
@@ -347,7 +348,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
         "status": "ok",
         "mode": mode,
         "manifest_version": manifest.get("version"),
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
         "aggregate_summary": aggregated_summary,
         "repos": results
     }

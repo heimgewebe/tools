@@ -2,7 +2,7 @@ import concurrent.futures
 import sys
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from .models import Artifact
@@ -99,17 +99,17 @@ class JobRunner:
 
         if job.status in ("canceled", "canceling"):
             job.status = "canceled"
-            job.finished_at = datetime.utcnow().isoformat()
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             self.job_store.update_job(job)
             return
 
         # Update status to running
         job.status = "running"
-        job.started_at = datetime.utcnow().isoformat()
+        job.started_at = datetime.now(timezone.utc).isoformat()
         self.job_store.update_job(job)
 
         def log(msg: str):
-            ts = datetime.utcnow().strftime("%H:%M:%S")
+            ts = datetime.now(timezone.utc).strftime("%H:%M:%SZ")
             line = f"[{ts}] {msg}"
             self.job_store.append_log_line(job.id, line)
             # Keep a small in-memory tail for API convenience (optional)
@@ -169,7 +169,7 @@ class JobRunner:
                 if current_job and current_job.status in ("canceled", "canceling"):
                     log("Job canceled by user during scan.")
                     current_job.status = "canceled"
-                    current_job.finished_at = datetime.utcnow().isoformat()
+                    current_job.finished_at = datetime.now(timezone.utc).isoformat()
                     self.job_store.update_job(current_job)
                     return
 
@@ -256,7 +256,7 @@ class JobRunner:
             if job.status in ("canceled", "canceling"):
                 log("Job canceled by user before write.")
                 job.status = "canceled"
-                job.finished_at = datetime.utcnow().isoformat()
+                job.finished_at = datetime.now(timezone.utc).isoformat()
                 self.job_store.update_job(job)
                 return
 
@@ -310,7 +310,7 @@ class JobRunner:
                 job_id=job_id,
                 hub=str(hub),
                 repos=repo_names,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now(timezone.utc).isoformat(),
                 paths=path_map,
                 params=req,
                 merges_dir=str(merges_dir.resolve())
@@ -320,14 +320,14 @@ class JobRunner:
             job.artifact_ids.append(artifact_id)
 
             job.status = "succeeded"
-            job.finished_at = datetime.utcnow().isoformat()
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             log("Job completed successfully.")
             self.job_store.update_job(job)
 
         except Exception as e:
             job.status = "failed"
             job.error = str(e)
-            job.finished_at = datetime.utcnow().isoformat()
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             log(f"Error: {e}")
             import traceback
             traceback.print_exc() # Print to server console too

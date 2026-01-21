@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import uuid
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> str:
     """
@@ -142,7 +142,7 @@ class Job(BaseModel):
 
     @classmethod
     def create(cls, request: JobRequest, content_hash: Optional[str] = None) -> "Job":
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         return cls(
             id=str(uuid.uuid4()),
             status="queued",
@@ -166,11 +166,11 @@ class PrescanNode(BaseModel):
     children: Optional[List["PrescanNode"]] = None
 
 try:
-    PrescanNode.update_forward_refs()
+    PrescanNode.model_rebuild()
 except AttributeError:
-    # Pydantic v2 usually handles this automatically or via model_rebuild
+    # Fallback for Pydantic v1
     try:
-        PrescanNode.model_rebuild()
+        PrescanNode.update_forward_refs()
     except AttributeError:
         pass
 

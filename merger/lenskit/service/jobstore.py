@@ -1,6 +1,6 @@
 import json
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 from typing import List, Optional, Dict
@@ -179,7 +179,7 @@ class JobStore:
             return sorted(candidates, key=lambda x: x.created_at, reverse=True)[0]
 
     def cleanup_jobs(self, max_jobs: int = 100, max_age_hours: int = 24):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         limit_time = now - timedelta(hours=max_age_hours)
 
         with self._lock:
@@ -189,10 +189,17 @@ class JobStore:
             # 1. Age check
             for job in all_jobs:
                 try:
-                    dt = datetime.fromisoformat(job.created_at)
+                    s = job.created_at
+                    if s.endswith("Z"):
+                        s = s[:-1] + "+00:00"
+                    dt = datetime.fromisoformat(s)
+                    # Handle backward compatibility for naive timestamps from old persisted jobs
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+
                     if dt < limit_time:
                         if job.status not in ("queued", "running", "canceling"):
-                             to_remove.add(job.id)
+                            to_remove.add(job.id)
                 except Exception:
                     pass
 
