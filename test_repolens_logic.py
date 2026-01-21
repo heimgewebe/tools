@@ -119,7 +119,6 @@ def test_serialization_structured():
 
 def test_deserialization_legacy():
     """Test deserialization handles legacy formats"""
-    ui = TestUI()
     
     # Legacy formats
     legacy_pool = {
@@ -127,7 +126,7 @@ def test_deserialization_legacy():
         'repo2': ['src/main.py', 'src/utils.py']  # List in legacy
     }
     
-    deserialized = ui._deserialize_prescan_pool(legacy_pool)
+    deserialized = repolens.deserialize_prescan_pool(legacy_pool)
     
     # Should convert to structured
     assert deserialized['repo1'] == {"raw": None, "compressed": None}, "Legacy None -> structured ALL"
@@ -138,7 +137,6 @@ def test_deserialization_legacy():
 
 def test_deserialization_preserves_both_fields():
     """Test deserialization preserves both raw and compressed"""
-    ui = TestUI()
     
     structured_pool = {
         'repo1': {
@@ -147,7 +145,7 @@ def test_deserialization_preserves_both_fields():
         }
     }
     
-    deserialized = ui._deserialize_prescan_pool(structured_pool)
+    deserialized = repolens.deserialize_prescan_pool(structured_pool)
     
     # Should preserve both fields
     assert len(deserialized['repo1']['raw']) == 3, "Raw should have 3 paths"
@@ -158,7 +156,6 @@ def test_deserialization_preserves_both_fields():
 
 def test_deserialization_handles_empty_lists():
     """Test deserialization keeps empty lists and filters non-strings"""
-    ui = TestUI()
 
     structured_pool = {
         'repo1': {
@@ -171,7 +168,7 @@ def test_deserialization_handles_empty_lists():
         }
     }
 
-    deserialized = ui._deserialize_prescan_pool(structured_pool)
+    deserialized = repolens.deserialize_prescan_pool(structured_pool)
 
     assert deserialized['repo1']['raw'] == [], "Empty raw list should stay empty"
     assert deserialized['repo1']['compressed'] == [], "Empty compressed list should stay empty"
@@ -182,7 +179,7 @@ def test_deserialization_handles_empty_lists():
         'repo3': []
     }
 
-    deserialized_legacy = ui._deserialize_prescan_pool(legacy_pool)
+    deserialized_legacy = repolens.deserialize_prescan_pool(legacy_pool)
     assert deserialized_legacy['repo3']['raw'] == [], "Legacy empty list should stay empty"
     assert deserialized_legacy['repo3']['compressed'] == [], "Legacy empty list should stay empty"
 
