@@ -199,7 +199,7 @@ class JobStore:
 
                     if dt < limit_time:
                         if job.status not in ("queued", "running", "canceling"):
-                             to_remove.add(job.id)
+                            to_remove.add(job.id)
                 except Exception:
                     pass
 
