@@ -109,7 +109,7 @@ class JobRunner:
         self.job_store.update_job(job)
 
         def log(msg: str):
-            ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+            ts = datetime.now(timezone.utc).strftime("%H:%M:%SZ")
             line = f"[{ts}] {msg}"
             self.job_store.append_log_line(job.id, line)
             # Keep a small in-memory tail for API convenience (optional)

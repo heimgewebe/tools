@@ -189,7 +189,10 @@ class JobStore:
             # 1. Age check
             for job in all_jobs:
                 try:
-                    dt = datetime.fromisoformat(job.created_at)
+                    s = job.created_at
+                    if s.endswith("Z"):
+                        s = s[:-1] + "+00:00"
+                    dt = datetime.fromisoformat(s)
                     # Handle backward compatibility for naive timestamps from old persisted jobs
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
