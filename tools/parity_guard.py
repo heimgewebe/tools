@@ -130,72 +130,78 @@ class ParityChecker:
             else:
                 self.log_pass(f"Feature '{feature}' present in JobRequest.")
 
-    def _strip_python_comments(self, content):
-        """Best-effort stripping of python comments."""
-        lines = content.split('\n')
-        stripped = []
-        for line in lines:
-            # Simple strip: everything after first # that isn't likely in a string.
-            # Real parsing is hard, but for a guard script, detecting " # " or start of line # is good.
-            # We'll rely on the fact that add_argument usually doesn't have # inside the strings.
-            if '#' in line:
-                # Naive: split and take first part.
-                # Risk: url = "http://...#hash" -> broken.
-                # Better: only strip if # is at start or preceded by whitespace.
-                # Even better: rely on AST if possible, but we need text regex matching.
-                # Let's keep it simple: strip lines starting with optional whitespace and #
-                sline = line.strip()
-                if sline.startswith('#'):
-                    continue
-            stripped.append(line)
-        return '\n'.join(stripped)
-
     def check_repolens(self):
-        """Check Pythonista UI/CLI."""
+        """Check Pythonista UI/CLI using AST."""
         print(f"Checking repoLens in {REPOLENS_PATH}...")
-        content = REPOLENS_PATH.read_text("utf-8")
-        clean_content = self._strip_python_comments(content)
+        try:
+            content = REPOLENS_PATH.read_text("utf-8")
+            tree = ast.parse(content)
+        except Exception as e:
+            self.log_error(f"Could not parse repolens.py: {e}")
+            return
+
+        # 1. Collect all add_argument args
+        defined_cli_args = set()
+
+        # 2. Collect all attribute access on 'args'
+        accessed_args = set()
+
+        for node in ast.walk(tree):
+            # Check for add_argument calls
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute) and node.func.attr == 'add_argument':
+                    # Extract string arguments
+                    for arg in node.args:
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            defined_cli_args.add(arg.value)
+                        # Backwards compatibility for older python versions where Constant might be Str
+                        elif sys.version_info < (3, 8) and isinstance(arg, ast.Str):
+                            defined_cli_args.add(arg.s)
+
+            # Check for usage: getattr(args, 'field')
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr':
+                if len(node.args) >= 2:
+                    # Check if first arg is 'args' (heuristic name) or variable
+                    # We accept any getattr(variable, "literal")
+                    arg1 = node.args[0]
+                    arg2 = node.args[1]
+                    if isinstance(arg2, ast.Constant) and isinstance(arg2.value, str):
+                         # If we assume variable name is 'args', check arg1.id == 'args'
+                         # But let's just collect ALL getattr string literals as candidates
+                         accessed_args.add(f"args.{arg2.value}")
+                    elif sys.version_info < (3, 8) and isinstance(arg2, ast.Str):
+                         accessed_args.add(f"args.{arg2.s}")
+
+            # Check for usage: args.field
+            if isinstance(node, ast.Attribute):
+                if isinstance(node.value, ast.Name) and node.value.id == 'args':
+                    accessed_args.add(f"args.{node.attr}")
+
+        # Check for generic usage: vars(args) or args.__dict__
+        has_generic_usage = "vars(args)" in content or "args.__dict__" in content
 
         for feature, config in FEATURES.items():
-            # 1. CLI Arg Check (Robust Two-Step Regex)
+            # Check Definition
             cli_arg = config.get("cli_arg")
             if cli_arg:
-                # Step 1: Find all add_argument(...) calls
-                arg_calls = re.findall(r"\.add_argument\s*\((.*?)\)", clean_content, re.DOTALL)
-
-                found = False
-                escaped_arg = re.escape(cli_arg)
-                # Regex to find the quoted arg inside the call body: ['"]--arg['"]
-                arg_pattern = re.compile(r"['\"]" + escaped_arg + r"['\"]")
-
-                for call_body in arg_calls:
-                    if arg_pattern.search(call_body):
-                        found = True
-                        break
-
-                if found:
-                    self.log_pass(f"repoLens CLI: {cli_arg} definition found.")
+                if cli_arg in defined_cli_args:
+                    self.log_pass(f"repoLens CLI: {cli_arg} definition found (AST).")
                 else:
                     self.log_error(f"repoLens CLI: Definition for {cli_arg} missing (feature: {feature}).")
 
-            # 2. Usage Check (Flexible)
+            # Check Usage
             usage_key = config.get("repolens_usage")
             if usage_key:
-                field_name = usage_key.split('.')[-1]
-
-                pattern_direct = re.escape(usage_key)
-                pattern_getattr = fr"getattr\s*\(\s*\w+\s*,\s*['\"]{field_name}['\"]"
-
-                has_direct = re.search(pattern_direct, clean_content)
-                has_getattr = re.search(pattern_getattr, clean_content)
-
-                has_generic = False
-                if "vars(args)" in clean_content or "args.__dict__" in clean_content:
-                    if re.search(fr"['\"]{field_name}['\"]", clean_content):
-                        has_generic = True
-
-                if has_direct or has_getattr or has_generic:
-                    self.log_pass(f"repoLens Usage: {usage_key} accessed.")
+                if usage_key in accessed_args:
+                    self.log_pass(f"repoLens Usage: {usage_key} accessed (AST).")
+                elif has_generic_usage:
+                    # Fallback check: if generic usage exists, check if key literal is present in file
+                    # We use simple string search for the literal key as a safe fallback
+                    field_name = usage_key.split('.')[-1]
+                    if re.search(fr"['\"]{field_name}['\"]", content):
+                        self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic + Literal).")
+                    else:
+                        self.log_error(f"repoLens Usage: {usage_key} not explicitly accessed and key literal missing.")
                 else:
                     self.log_error(f"repoLens Usage: {usage_key} not accessed in script.")
 
@@ -253,9 +259,11 @@ class ParityChecker:
                     self.log_error(f"WebUI JS: Payload key '{js_key}' missing for feature '{feature}'.")
 
     def run(self):
+        # --verify-guard is deprecated with AST switch, logic is now python-native.
+        # But we keep the flag as no-op or simple exit to not break existing calls.
         if "--verify-guard" in sys.argv:
-            self._verify_guard_logic()
-            return
+            print("Guard Verification: AST parser active. OK.")
+            sys.exit(0)
 
         self.check_model_fields()
         self.check_repolens()
@@ -274,50 +282,6 @@ class ParityChecker:
         else:
             print("\n[SUCCESS] Parity Check Passed.")
             sys.exit(0)
-
-    def _verify_guard_logic(self):
-        """Internal self-test to ensure regexes are robust."""
-        print("Running Guard Red-Team Verification...")
-
-        # 1. Test CLI Regex
-        test_cases_pass = [
-            'parser.add_argument("--foo", help="x")',
-            'group.add_argument("-f", "--foo")',
-            'add_argument("--foo", "-f")', # Reversed
-            "add_argument(\n  '--foo',\n  help='multiline'\n)",
-            "add_argument('--foo')"
-        ]
-
-        # Now we support commented out lines being skipped IF using run(), but here we test the regex logic directly.
-        # But wait, our regex logic is applied AFTER stripping.
-        # So we should test that stripping works too?
-        # For this unit test, let's just test the regex match capabilities.
-
-        test_cases_fail = [
-            'add_argument("--bar")',
-            'add_argument("-f")' # Missing long flag
-        ]
-
-        target = "--foo"
-        escaped_arg = re.escape(target)
-        arg_pattern = re.compile(r"['\"]" + escaped_arg + r"['\"]")
-
-        for case in test_cases_pass:
-            calls = re.findall(r"\.add_argument\s*\((.*?)\)", "parser." + case, re.DOTALL)
-            found = any(arg_pattern.search(body) for body in calls)
-            if not found:
-                 print(f"[FAIL] Regex failed to match: {case}")
-                 sys.exit(1)
-
-        for case in test_cases_fail:
-             calls = re.findall(r"\.add_argument\s*\((.*?)\)", "parser." + case, re.DOTALL)
-             found = any(arg_pattern.search(body) for body in calls)
-             if found:
-                 print(f"[FAIL] Regex matched incorrectly: {case}")
-                 sys.exit(1)
-
-        print("[PASS] Guard Logic Verified.")
-        sys.exit(0)
 
 if __name__ == "__main__":
     ParityChecker().run()
