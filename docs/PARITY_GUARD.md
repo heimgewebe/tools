@@ -6,13 +6,22 @@ To prevent feature divergence between the WebUI (`rLens`) and Pythonista UI (`re
 ## The Guard Script
 The script is located at `tools/parity_guard.py`.
 
-It performs strict heuristic checks:
-1.  **Backend Model**: Ensures features exist in `JobRequest` (sanity check).
+It performs strict heuristic checks using Python AST and Regex:
+1.  **Backend Model**: Ensures features exist in `JobRequest` (AST check).
 2.  **Pythonista CLI (`repolens.py`)**:
-    *   Verifies that `argparse` definitions exist for the feature. It uses a robust regex that handles any argument order (e.g., `add_argument("-f", "--flag")` vs `add_argument("--flag")`) and quoting styles.
-    *   Verifies that the argument is actually accessed in the script logic (e.g., `args.my_feature`). It accepts direct access, `getattr`, or dictionary lookups.
+    *   **Definition:** Verifies that `argparse` definitions exist for the feature. It walks the Python AST to find `add_argument` calls and their string literal arguments.
+    *   **Usage:** Verifies that the argument is accessed in the script logic.
+        *   Checks for explicit access: `args.my_feature`.
+        *   Checks for dynamic access: `getattr(args, 'my_feature')`.
+        *   Checks for generic serialization: `vars(args)` or `args.__dict__` combined with the presence of the key literal.
 3.  **Web UI HTML (`index.html`)**: Checks for input elements with specific IDs matching the feature.
-4.  **Web UI JS (`app.js`)**: Checks for payload construction logic. It specifically isolates the `commonPayload` object definition (ignoring comments) to prevent false positives from unused keys elsewhere in the file.
+4.  **Web UI JS (`app.js`)**: Checks for payload construction logic. It specifically isolates the `commonPayload` or `JSON.stringify` object definitions (ignoring comments) to prevent false positives from unused keys.
+
+## Code Conventions
+To ensure the guard works correctly, please adhere to these conventions:
+*   **CLI Flags:** Must be defined as string literals in `add_argument(...)` calls. Dynamic flag construction is not supported.
+*   **Argument Access:** Must act on the `args` object (e.g., `args.field` or `getattr(args, ...)`). `getattr` on other objects will not count as usage.
+*   **JS Payload:** Should be defined in a `const commonPayload = { ... }` block or directly inside `JSON.stringify({ ... })`.
 
 ## Feature Definitions
 The guard uses a `FEATURES` dictionary to map backend fields to frontend implementation details.

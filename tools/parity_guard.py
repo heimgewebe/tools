@@ -146,6 +146,9 @@ class ParityChecker:
         # 2. Collect all attribute access on 'args'
         accessed_args = set()
 
+        # 3. Detect generic usage: vars(args) or args.__dict__
+        has_generic_usage_ast = False
+
         for node in ast.walk(tree):
             # Check for add_argument calls
             if isinstance(node, ast.Call):
@@ -154,31 +157,31 @@ class ParityChecker:
                     for arg in node.args:
                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                             defined_cli_args.add(arg.value)
-                        # Backwards compatibility for older python versions where Constant might be Str
-                        elif sys.version_info < (3, 8) and isinstance(arg, ast.Str):
-                            defined_cli_args.add(arg.s)
 
             # Check for usage: getattr(args, 'field')
+            # Strict check: first arg must be Name(id='args')
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr':
                 if len(node.args) >= 2:
-                    # Check if first arg is 'args' (heuristic name) or variable
-                    # We accept any getattr(variable, "literal")
                     arg1 = node.args[0]
                     arg2 = node.args[1]
-                    if isinstance(arg2, ast.Constant) and isinstance(arg2.value, str):
-                         # If we assume variable name is 'args', check arg1.id == 'args'
-                         # But let's just collect ALL getattr string literals as candidates
-                         accessed_args.add(f"args.{arg2.value}")
-                    elif sys.version_info < (3, 8) and isinstance(arg2, ast.Str):
-                         accessed_args.add(f"args.{arg2.s}")
+                    if isinstance(arg1, ast.Name) and arg1.id == 'args':
+                        if isinstance(arg2, ast.Constant) and isinstance(arg2.value, str):
+                             accessed_args.add(f"args.{arg2.value}")
 
             # Check for usage: args.field
             if isinstance(node, ast.Attribute):
                 if isinstance(node.value, ast.Name) and node.value.id == 'args':
                     accessed_args.add(f"args.{node.attr}")
 
-        # Check for generic usage: vars(args) or args.__dict__
-        has_generic_usage = "vars(args)" in content or "args.__dict__" in content
+            # Check for generic usage: vars(args)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'vars':
+                if len(node.args) == 1 and isinstance(node.args[0], ast.Name) and node.args[0].id == 'args':
+                    has_generic_usage_ast = True
+
+            # Check for generic usage: args.__dict__
+            if isinstance(node, ast.Attribute) and node.attr == '__dict__':
+                if isinstance(node.value, ast.Name) and node.value.id == 'args':
+                    has_generic_usage_ast = True
 
         for feature, config in FEATURES.items():
             # Check Definition
@@ -194,12 +197,12 @@ class ParityChecker:
             if usage_key:
                 if usage_key in accessed_args:
                     self.log_pass(f"repoLens Usage: {usage_key} accessed (AST).")
-                elif has_generic_usage:
+                elif has_generic_usage_ast:
                     # Fallback check: if generic usage exists, check if key literal is present in file
-                    # We use simple string search for the literal key as a safe fallback
+                    # We still use string search for the key literal as a safe fallback for dynamic dict usage
                     field_name = usage_key.split('.')[-1]
                     if re.search(fr"['\"]{field_name}['\"]", content):
-                        self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic + Literal).")
+                        self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic AST + Literal).")
                     else:
                         self.log_error(f"repoLens Usage: {usage_key} not explicitly accessed and key literal missing.")
                 else:
@@ -259,8 +262,6 @@ class ParityChecker:
                     self.log_error(f"WebUI JS: Payload key '{js_key}' missing for feature '{feature}'.")
 
     def run(self):
-        # --verify-guard is deprecated with AST switch, logic is now python-native.
-        # But we keep the flag as no-op or simple exit to not break existing calls.
         if "--verify-guard" in sys.argv:
             print("Guard Verification: AST parser active. OK.")
             sys.exit(0)
