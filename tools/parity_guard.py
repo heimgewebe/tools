@@ -149,6 +149,11 @@ class ParityChecker:
         # 3. Detect generic usage: vars(args) or args.__dict__
         has_generic_usage_ast = False
 
+        # 4. Collect ALL string literals in the code (for generic fallback fallback)
+        # But we want to be strict. Let's start with strict AST.
+        # Strict Generic: literal string used as Subscript slice.
+        accessed_keys = set()
+
         for node in ast.walk(tree):
             # Check for add_argument calls
             if isinstance(node, ast.Call):
@@ -183,6 +188,20 @@ class ParityChecker:
                 if isinstance(node.value, ast.Name) and node.value.id == 'args':
                     has_generic_usage_ast = True
 
+            # Check for Subscript keys (e.g. d['key']) - assuming 'd' comes from vars(args)
+            # Since tracking 'd' is hard, we'll just accept ANY string literal used as a subscript key
+            # IF generic usage is detected. This eliminates help strings (usually args to calls, not slices).
+            if isinstance(node, ast.Subscript):
+                # node.slice is the index.
+                # In Python < 3.9, it might be Index(value=...)
+                slice_node = node.slice
+                # Handle Index wrapper for older python
+                if sys.version_info < (3, 9) and isinstance(slice_node, ast.Index):
+                    slice_node = slice_node.value
+
+                if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str):
+                    accessed_keys.add(slice_node.value)
+
         for feature, config in FEATURES.items():
             # Check Definition
             cli_arg = config.get("cli_arg")
@@ -195,18 +214,15 @@ class ParityChecker:
             # Check Usage
             usage_key = config.get("repolens_usage")
             if usage_key:
+                field_name = usage_key.split('.')[-1]
+
                 if usage_key in accessed_args:
                     self.log_pass(f"repoLens Usage: {usage_key} accessed (AST).")
-                elif has_generic_usage_ast:
-                    # Fallback check: if generic usage exists, check if key literal is present in file
-                    # We still use string search for the key literal as a safe fallback for dynamic dict usage
-                    field_name = usage_key.split('.')[-1]
-                    if re.search(fr"['\"]{field_name}['\"]", content):
-                        self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic AST + Literal).")
-                    else:
-                        self.log_error(f"repoLens Usage: {usage_key} not explicitly accessed and key literal missing.")
+                elif has_generic_usage_ast and field_name in accessed_keys:
+                    # Strict Generic: requires vars(args) AND usage as a subscript key anywhere
+                    self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic AST + Key Usage).")
                 else:
-                    self.log_error(f"repoLens Usage: {usage_key} not accessed in script.")
+                    self.log_error(f"repoLens Usage: {usage_key} not explicitly accessed and key literal not used as subscript.")
 
     def check_webui_html(self):
         """Check index.html for IDs."""
