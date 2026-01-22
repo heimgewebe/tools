@@ -39,7 +39,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install Test Dependencies
-        run: pip install pytest
+        run: pip install "pytest<9"
 
       - name: Verify Guard Logic (Self-Test)
         run: pytest tests/test_parity_guard.py

@@ -29,10 +29,7 @@ print(args.level)
             "level": {"cli_arg": "--level", "repolens_usage": "args.level"}
         }):
             checker.check_repolens()
-            # Assert no errors
-            assert not checker.errors, f"Errors found: {checker.errors}"
-            # Verify pass message in stdout (captured by pytest if we didn't use capsys?
-            # actually checking errors is enough for logic verification)
+            assert not checker.errors
 
 def test_ast_valid_getattr_usage(checker):
     """Test getattr usage: getattr(args, 'field')"""
@@ -61,7 +58,9 @@ val = getattr(other, 'level')
         }):
             checker.check_repolens()
             assert len(checker.errors) == 1
-            assert "not accessed" in checker.errors[0]
+            # Check for failure message (robust against specific failure path)
+            err = checker.errors[0]
+            assert "[FAIL]" in err and ("not accessed" in err or "not explicitly accessed" in err)
 
 def test_ast_generic_usage_valid(checker):
     """Test generic usage: vars(args) + literal key usage"""
@@ -93,8 +92,9 @@ print("Configure the level of detail")
             "level": {"cli_arg": None, "repolens_usage": "args.level"}
         }):
             checker.check_repolens()
-            # This should FAIL because 'level' is not used as a key/access
             assert len(checker.errors) == 1, "Should fail if 'level' is only in a string description"
+            # AST logic falls back to generic check (vars(args) is present) -> finds no subscript -> failure
+            assert "not explicitly accessed" in checker.errors[0]
 
 def test_ast_generic_usage_invalid_quoted_in_help(checker):
     """Harder case: The word is quoted in a string but not used."""
@@ -110,3 +110,4 @@ print("Use the 'level' flag to set...")
         }):
             checker.check_repolens()
             assert len(checker.errors) == 1
+            assert "not explicitly accessed" in checker.errors[0]
