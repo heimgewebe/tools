@@ -17,7 +17,7 @@ The script runs as a static analysis tool:
 1.  **Source of Truth**: It parses `merger/lenskit/service/models.py` (using Python AST) to extract all fields from the `JobRequest` Pydantic model.
 2.  **WebUI Check**: It scans `app.js` using Regex to ensure every field is present as a key in the payload construction (e.g., `json_sidecar: ...`). It heuristically ignores comments to reduce false positives.
 3.  **Pythonista Check**: It scans `repolens.py` to ensure:
-    *   **CLI Exposure**: `add_argument(...)` exists for the field (checking for robust argument definition variations).
+    *   **CLI Exposure**: `add_argument(...)` exists for the field (checking for robust argument definition variations including quotes and whitespace).
     *   **Logic Usage**: The field variable is actively referenced in the code body (e.g., `args.field` or passing it to core functions), ensuring the flag is not just defined but implemented.
 
 ## Rules & Policies
