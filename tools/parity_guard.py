@@ -7,8 +7,8 @@ Pythonista UI (repoLens), and Web UI (rLens).
 
 Checks:
 1. JobRequest model fields (Source of Truth).
-2. repolens.py (CLI args and UI widgets).
-3. Web UI (index.html inputs and app.js payload).
+2. repolens.py (CLI args, usage, and UI logic).
+3. Web UI (index.html inputs and app.js payload construction).
 """
 
 import sys
@@ -24,57 +24,65 @@ from typing import List, Dict, Set
 FEATURES = {
     "level": {
         "cli_arg": "--level",
-        "html_id": "profile", # Mismatch allowed if mapped
-        "js_key": "level"
+        "html_id": "profile",
+        "js_key": "level",
+        "repolens_usage": "args.level"
     },
     "mode": {
         "cli_arg": "--mode",
         "html_id": "mode",
-        "js_key": "mode"
+        "js_key": "mode",
+        "repolens_usage": "args.mode"
     },
     "max_bytes": {
         "cli_arg": "--max-bytes",
         "html_id": "maxBytes",
-        "js_key": "max_bytes"
+        "js_key": "max_bytes",
+        "repolens_usage": "args.max_bytes" # ArgumentParser automatically converts - to _
     },
     "split_size": {
         "cli_arg": "--split-size",
         "html_id": "splitSize",
-        "js_key": "split_size"
+        "js_key": "split_size",
+        "repolens_usage": "args.split_size"
     },
     "plan_only": {
         "cli_arg": "--plan-only",
         "html_id": "planOnly",
-        "js_key": "plan_only"
+        "js_key": "plan_only",
+        "repolens_usage": "args.plan_only"
     },
     "code_only": {
         "cli_arg": "--code-only",
         "html_id": "codeOnly",
-        "js_key": "code_only"
+        "js_key": "code_only",
+        "repolens_usage": "args.code_only"
     },
     "meta_density": {
         "cli_arg": "--meta-density",
         "html_id": "metaDensity",
-        "js_key": "meta_density"
+        "js_key": "meta_density",
+        "repolens_usage": "args.meta_density"
     },
     "json_sidecar": {
         "cli_arg": "--json-sidecar",
-        # Checkbox often hidden or part of extras, but let's check explicit logic
-        # In app.js it is derived from extras 'json_sidecar' usually, or explicit field.
-        # JobRequest has it as bool.
-        # repolens has --json-sidecar flag.
-        "js_payload_logic": "json_sidecar"
+        # Explicit decision: Treat as a payload key in JS (even if logic is derived).
+        # In JobRequest it is a field.
+        "js_key": "json_sidecar",
+        "repolens_usage": "args.json_sidecar"
     },
     # Filters
     "extensions": {
         "cli_arg": "--extensions",
         "html_id": "extFilter",
-        "js_key": "extensions"
+        "js_key": "extensions",
+        "repolens_usage": "args.extensions"
     },
     "path_filter": {
         "cli_arg": "--path-filter",
         "html_id": "pathFilter",
-        "js_key": "path_filter"
+        "js_key": "path_filter",
+        "repolens_usage": "args.path_filter"
     }
 }
 
@@ -128,23 +136,35 @@ class ParityChecker:
         content = REPOLENS_PATH.read_text("utf-8")
 
         for feature, config in FEATURES.items():
-            # 1. CLI Arg Check
+            # 1. CLI Arg Check (Robust Regex)
             cli_arg = config.get("cli_arg")
             if cli_arg:
-                if f'add_argument("{cli_arg}"' in content or f"add_argument('{cli_arg}'" in content:
-                    self.log_pass(f"repoLens CLI: {cli_arg} found.")
+                # Matches: add_argument(..., "--flag", ...) or add_argument("--flag", ...)
+                # Allows single/double quotes, whitespace, and newlines.
+                # Pattern: add_argument \s* \( ... (quote)cli_arg(quote)
+                # We simply check if the string appears inside an add_argument call.
+
+                # Simplified robust check: Look for the argument string quoted, near add_argument
+                # A full parser is overkill, but a targeted regex works.
+                # Regex: add_argument \s* \( .*? ['"]--flag['"]
+                # Note: dotall is needed for multiline.
+
+                regex = r"add_argument\s*\(\s*(?:['\"]-[a-zA-Z]['\"]\s*,\s*)?['\"]" + re.escape(cli_arg) + r"['\"]"
+                if re.search(regex, content, re.MULTILINE | re.DOTALL):
+                    self.log_pass(f"repoLens CLI: {cli_arg} definition found.")
                 else:
-                    self.log_error(f"repoLens CLI: Argument {cli_arg} missing for feature '{feature}'.")
+                    self.log_error(f"repoLens CLI: Definition for {cli_arg} missing (feature: {feature}).")
 
-            # 2. UI Check (Heuristic)
-            # We look for usage of the feature name in a UI context or logic assignment
-            # e.g. "seg_detail" for level, or direct usage.
-            # Simpler: check if it's passed to write_reports_v2 or similar.
-
-            # This is harder to generalize via regex.
-            # We assume if CLI arg exists, logic exists.
-            # But we can check for specific known UI mappings if we want to be strict.
-            pass
+            # 2. Usage Check
+            # Verify that the parsed argument is actually accessed/used.
+            usage_key = config.get("repolens_usage")
+            if usage_key:
+                if usage_key in content:
+                    self.log_pass(f"repoLens Usage: {usage_key} accessed.")
+                else:
+                    # Fallback check: sometimes passed as **vars(args) or dict?
+                    # But repolens.py usually does explicit args.field access.
+                    self.log_error(f"repoLens Usage: {usage_key} not accessed in script.")
 
     def check_webui_html(self):
         """Check index.html for IDs."""
@@ -154,36 +174,36 @@ class ParityChecker:
         for feature, config in FEATURES.items():
             html_id = config.get("html_id")
             if html_id:
-                # Regex for id="value"
+                # Regex for id="value" or id='value'
                 if re.search(f'id=["\']{html_id}["\']', content):
                     self.log_pass(f"WebUI HTML: Element #{html_id} found for '{feature}'.")
                 else:
                     self.log_error(f"WebUI HTML: Element #{html_id} missing for feature '{feature}'.")
 
+    def _strip_js_comments(self, js_content):
+        """Remove single line // and multi-line /* */ comments."""
+        # Multi-line
+        js_content = re.sub(r'/\*.*?\*/', '', js_content, flags=re.DOTALL)
+        # Single line
+        js_content = re.sub(r'//.*', '', js_content)
+        return js_content
+
     def check_webui_js(self):
         """Check app.js for payload construction."""
         print(f"Checking WebUI JS in {WEBUI_JS_PATH}...")
         content = WEBUI_JS_PATH.read_text("utf-8")
+        clean_content = self._strip_js_comments(content)
 
         for feature, config in FEATURES.items():
             js_key = config.get("js_key")
-            logic_key = config.get("js_payload_logic")
 
-            target = js_key or logic_key
-            if target:
-                # Look for payload key assignment: "key: " or "key ="
-                # In the app.js provided:
-                # const commonPayload = {
-                #    level: ...,
-                #    mode: ...
-                # }
-                # So we look for "key:" inside the object definition.
-
-                # Regex to find key followed by colon, allowing for whitespace
-                if re.search(rf'\b{target}\s*:', content):
-                    self.log_pass(f"WebUI JS: Payload key '{target}' found.")
+            if js_key:
+                # Look for payload key assignment: "key:"
+                # Strict check: key followed by optional whitespace and a colon.
+                if re.search(rf'\b{js_key}\s*:', clean_content):
+                    self.log_pass(f"WebUI JS: Payload key '{js_key}' found.")
                 else:
-                    self.log_error(f"WebUI JS: Payload key '{target}' missing for feature '{feature}'.")
+                    self.log_error(f"WebUI JS: Payload key '{js_key}' missing for feature '{feature}'.")
 
     def run(self):
         self.check_model_fields()
