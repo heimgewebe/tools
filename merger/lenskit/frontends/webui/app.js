@@ -1044,6 +1044,7 @@ async function startJob(e) {
         json_sidecar: jsonSidecar,
         path_filter: document.getElementById('pathFilter').value.trim() || null,
         extensions: extensions,
+        include_paths: null, // Placeholder for pro-repo override
         extras: extrasCsv
     };
 
