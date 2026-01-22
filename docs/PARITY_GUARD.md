@@ -6,13 +6,13 @@ To prevent feature divergence between the WebUI (`rLens`) and Pythonista UI (`re
 ## The Guard Script
 The script is located at `tools/parity_guard.py`.
 
-It checks:
+It performs strict heuristic checks:
 1.  **Backend Model**: Ensures features exist in `JobRequest` (sanity check).
 2.  **Pythonista CLI (`repolens.py`)**:
-    *   Verifies that `argparse` definitions exist for the feature (using robust regex).
-    *   Verifies that the argument is actually accessed in the script logic (e.g., `args.my_feature`).
+    *   Verifies that `argparse` definitions exist for the feature. It uses a robust regex that handles any argument order (e.g., `add_argument("-f", "--flag")` vs `add_argument("--flag")`) and quoting styles.
+    *   Verifies that the argument is actually accessed in the script logic (e.g., `args.my_feature`). It accepts direct access, `getattr`, or dictionary lookups.
 3.  **Web UI HTML (`index.html`)**: Checks for input elements with specific IDs matching the feature.
-4.  **Web UI JS (`app.js`)**: Checks for payload construction logic (key assignment) while ignoring comments.
+4.  **Web UI JS (`app.js`)**: Checks for payload construction logic. It specifically isolates the `commonPayload` object definition (ignoring comments) to prevent false positives from unused keys elsewhere in the file.
 
 ## Feature Definitions
 The guard uses a `FEATURES` dictionary to map backend fields to frontend implementation details.
@@ -29,6 +29,13 @@ Run the script from the repository root:
 
 ```bash
 python3 tools/parity_guard.py
+```
+
+### Self-Verification
+To verify the guard's own internal logic against tricky patterns (Red-Team test), run:
+
+```bash
+python3 tools/parity_guard.py --verify-guard
 ```
 
 ## Adding New Features

@@ -136,34 +136,58 @@ class ParityChecker:
         content = REPOLENS_PATH.read_text("utf-8")
 
         for feature, config in FEATURES.items():
-            # 1. CLI Arg Check (Robust Regex)
+            # 1. CLI Arg Check (Robust Two-Step Regex)
             cli_arg = config.get("cli_arg")
             if cli_arg:
-                # Matches: add_argument(..., "--flag", ...) or add_argument("--flag", ...)
-                # Allows single/double quotes, whitespace, and newlines.
-                # Pattern: add_argument \s* \( ... (quote)cli_arg(quote)
-                # We simply check if the string appears inside an add_argument call.
+                # Step 1: Find all add_argument(...) calls
+                # This regex captures the content inside parentheses.
+                # It handles simple balanced parens but might struggle with nested parens inside strings.
+                # Given typical usage in repolens.py, this is sufficient.
+                # Pattern: .add_argument ( ... )
+                arg_calls = re.findall(r"\.add_argument\s*\((.*?)\)", content, re.DOTALL)
 
-                # Simplified robust check: Look for the argument string quoted, near add_argument
-                # A full parser is overkill, but a targeted regex works.
-                # Regex: add_argument \s* \( .*? ['"]--flag['"]
-                # Note: dotall is needed for multiline.
+                found = False
+                escaped_arg = re.escape(cli_arg)
+                # Regex to find the quoted arg inside the call body: ['"]--arg['"]
+                arg_pattern = re.compile(r"['\"]" + escaped_arg + r"['\"]")
 
-                regex = r"add_argument\s*\(\s*(?:['\"]-[a-zA-Z]['\"]\s*,\s*)?['\"]" + re.escape(cli_arg) + r"['\"]"
-                if re.search(regex, content, re.MULTILINE | re.DOTALL):
+                for call_body in arg_calls:
+                    if arg_pattern.search(call_body):
+                        found = True
+                        break
+
+                if found:
                     self.log_pass(f"repoLens CLI: {cli_arg} definition found.")
                 else:
                     self.log_error(f"repoLens CLI: Definition for {cli_arg} missing (feature: {feature}).")
 
-            # 2. Usage Check
-            # Verify that the parsed argument is actually accessed/used.
+            # 2. Usage Check (Flexible)
             usage_key = config.get("repolens_usage")
             if usage_key:
-                if usage_key in content:
+                # Extract field name from usage_key (assuming args.field format)
+                field_name = usage_key.split('.')[-1]
+
+                # Patterns to check:
+                # 1. args.field
+                # 2. getattr(args, "field") or getattr(args, 'field')
+                # 3. vars(args) combined with "field" literal presence nearby?
+                #    Simpler: just check if "field" literal exists in the file if vars(args) or args.__dict__ is used.
+
+                pattern_direct = re.escape(usage_key)
+                pattern_getattr = fr"getattr\s*\(\s*\w+\s*,\s*['\"]{field_name}['\"]"
+
+                has_direct = re.search(pattern_direct, content)
+                has_getattr = re.search(pattern_getattr, content)
+
+                # Heuristic for generic access
+                has_generic = False
+                if "vars(args)" in content or "args.__dict__" in content:
+                    if re.search(fr"['\"]{field_name}['\"]", content):
+                        has_generic = True
+
+                if has_direct or has_getattr or has_generic:
                     self.log_pass(f"repoLens Usage: {usage_key} accessed.")
                 else:
-                    # Fallback check: sometimes passed as **vars(args) or dict?
-                    # But repolens.py usually does explicit args.field access.
                     self.log_error(f"repoLens Usage: {usage_key} not accessed in script.")
 
     def check_webui_html(self):
@@ -194,18 +218,35 @@ class ParityChecker:
         content = WEBUI_JS_PATH.read_text("utf-8")
         clean_content = self._strip_js_comments(content)
 
+        # Heuristic: Locate the payload object construction block.
+        # We look for "const commonPayload = {" and extraction the block.
+        # If not found, fall back to global search but warn.
+
+        payload_block = clean_content
+        match = re.search(r"const\s+commonPayload\s*=\s*(\{.*?\};)", clean_content, re.DOTALL)
+        if match:
+            payload_block = match.group(1)
+            # print("Restricted check to commonPayload block.")
+        else:
+            self.log_warn("Could not isolate 'commonPayload' block in JS. Running global check (risk of false positives).")
+
         for feature, config in FEATURES.items():
             js_key = config.get("js_key")
 
             if js_key:
                 # Look for payload key assignment: "key:"
                 # Strict check: key followed by optional whitespace and a colon.
-                if re.search(rf'\b{js_key}\s*:', clean_content):
+                if re.search(rf'\b{js_key}\s*:', payload_block):
                     self.log_pass(f"WebUI JS: Payload key '{js_key}' found.")
                 else:
                     self.log_error(f"WebUI JS: Payload key '{js_key}' missing for feature '{feature}'.")
 
     def run(self):
+        # Optional: Run Red-Team Verification if requested (e.g. via --verify-guard arg)
+        if "--verify-guard" in sys.argv:
+            self._verify_guard_logic()
+            return
+
         self.check_model_fields()
         self.check_repolens()
         self.check_webui_html()
@@ -223,6 +264,47 @@ class ParityChecker:
         else:
             print("\n[SUCCESS] Parity Check Passed.")
             sys.exit(0)
+
+    def _verify_guard_logic(self):
+        """Internal self-test to ensure regexes are robust."""
+        print("Running Guard Red-Team Verification...")
+
+        # 1. Test CLI Regex
+        test_cases_pass = [
+            'parser.add_argument("--foo", help="x")',
+            'group.add_argument("-f", "--foo")',
+            'add_argument("--foo", "-f")', # Reversed
+            "add_argument(\n  '--foo',\n  help='multiline'\n)",
+            "add_argument('--foo')"
+        ]
+        test_cases_fail = [
+            'add_argument("--bar")',
+            '# add_argument("--foo")', # Commented out (regex captures comments if simplistic, but we rely on execution not crashing)
+                                       # Actually our current regex does NOT strip comments in python.
+                                       # That's an acceptable known limitation for a lightweight guard.
+            'add_argument("-f")' # Missing long flag
+        ]
+
+        target = "--foo"
+        escaped_arg = re.escape(target)
+        arg_pattern = re.compile(r"['\"]" + escaped_arg + r"['\"]")
+
+        for case in test_cases_pass:
+            calls = re.findall(r"\.add_argument\s*\((.*?)\)", "parser." + case, re.DOTALL)
+            found = any(arg_pattern.search(body) for body in calls)
+            if not found:
+                 print(f"[FAIL] Regex failed to match: {case}")
+                 sys.exit(1)
+
+        for case in test_cases_fail:
+             calls = re.findall(r"\.add_argument\s*\((.*?)\)", "parser." + case, re.DOTALL)
+             found = any(arg_pattern.search(body) for body in calls)
+             if found:
+                 print(f"[FAIL] Regex matched incorrectly: {case}")
+                 sys.exit(1)
+
+        print("[PASS] Guard Logic Verified.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     ParityChecker().run()
