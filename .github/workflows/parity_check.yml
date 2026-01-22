@@ -3,8 +3,27 @@ name: Frontend Parity Guard
 on:
   push:
     branches: [ "main", "master" ]
+    paths:
+      - "merger/lenskit/service/models.py"
+      - "merger/lenskit/frontends/pythonista/repolens.py"
+      - "merger/lenskit/frontends/webui/index.html"
+      - "merger/lenskit/frontends/webui/app.js"
+      - "tools/parity_guard.py"
+      - "docs/PARITY_GUARD.md"
+      - "AGENTS.md"
   pull_request:
     branches: [ "main", "master" ]
+    paths:
+      - "merger/lenskit/service/models.py"
+      - "merger/lenskit/frontends/pythonista/repolens.py"
+      - "merger/lenskit/frontends/webui/index.html"
+      - "merger/lenskit/frontends/webui/app.js"
+      - "tools/parity_guard.py"
+      - "docs/PARITY_GUARD.md"
+      - "AGENTS.md"
+
+permissions:
+  contents: read
 
 jobs:
   parity-check:
