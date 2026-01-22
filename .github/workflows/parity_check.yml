@@ -9,6 +9,7 @@ on:
       - "merger/lenskit/frontends/webui/index.html"
       - "merger/lenskit/frontends/webui/app.js"
       - "tools/parity_guard.py"
+      - "tests/test_parity_guard.py"
       - "docs/PARITY_GUARD.md"
       - "AGENTS.md"
   pull_request:
@@ -19,6 +20,7 @@ on:
       - "merger/lenskit/frontends/webui/index.html"
       - "merger/lenskit/frontends/webui/app.js"
       - "tools/parity_guard.py"
+      - "tests/test_parity_guard.py"
       - "docs/PARITY_GUARD.md"
       - "AGENTS.md"
 
@@ -35,6 +37,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+
+      - name: Install Test Dependencies
+        run: pip install pytest
+
+      - name: Verify Guard Logic (Self-Test)
+        run: pytest tests/test_parity_guard.py
 
       - name: Run Parity Guard
         run: python3 tools/parity_guard.py
