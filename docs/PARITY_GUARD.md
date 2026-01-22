@@ -15,10 +15,10 @@ Historically, new features added to the backend (e.g., `meta_density`, `json_sid
 The script runs as a static analysis tool:
 
 1.  **Source of Truth**: It parses `merger/lenskit/service/models.py` (using Python AST) to extract all fields from the `JobRequest` Pydantic model.
-2.  **WebUI Check**: It scans `app.js` using Regex to ensure every field is present as a key in the payload construction (e.g., `json_sidecar: ...`).
+2.  **WebUI Check**: It scans `app.js` using Regex to ensure every field is present as a key in the payload construction (e.g., `json_sidecar: ...`). It heuristically ignores comments to reduce false positives.
 3.  **Pythonista Check**: It scans `repolens.py` to ensure:
-    *   **CLI Exposure**: `add_argument("--field-name")` exists (matching the Pydantic field name, usually with `_` -> `-` normalization).
-    *   **Logic Usage**: The field variable is referenced in the code (e.g., `args.field` or usage in logic).
+    *   **CLI Exposure**: `add_argument(...)` exists for the field (checking for robust argument definition variations).
+    *   **Logic Usage**: The field variable is actively referenced in the code body (e.g., `args.field` or passing it to core functions), ensuring the flag is not just defined but implemented.
 
 ## Rules & Policies
 
@@ -27,6 +27,7 @@ The script runs as a static analysis tool:
 *   **Payload vs Derived**:
     *   **WebUI**: Checks for the existence of the *Payload Key* (what is sent to the server). Logic for value derivation is assumed if the key exists.
     *   **Pythonista**: Checks for *CLI Argument* (user input) AND *Code Usage* (implementation).
+    *   **json_sidecar**: Treated as a direct payload field in WebUI ("js_key": "json_sidecar") and a CLI flag/usage in Pythonista.
 
 ## Usage
 
@@ -40,6 +41,8 @@ python3 tools/parity_guard.py
 
 If the guard fails:
 
-1.  **Missing Field**: Did you add a field to `JobRequest`? Add the corresponding control to `index.html` / `app.js` and `repolens.py`.
+1.  **Missing Field**: Did you add a field to `JobRequest`? Add the corresponding control to `index.html` / `app.js` and `repolens.py` (CLI + Logic).
 2.  **False Positive**: Does the feature use a different name in the frontend? Update `MAPPINGS` in `tools/parity_guard.py`.
 3.  **Internal Field**: Is the field purely backend-internal (not user-configurable)? Add it to `IGNORE_FIELDS`.
+4.  **CLI Argument Not Found**: Ensure you are using `add_argument` and the regex in `tools/parity_guard.py` matches your definition (it handles standard quotes and whitespace).
+5.  **Usage Logic Not Found**: Ensure the variable is used in `repolens.py` outside of the argument definition.

@@ -8,7 +8,7 @@ in both the WebUI (`app.js`) and the Pythonista UI/CLI (`repolens.py`).
 Policy:
 1. Every field in `JobRequest` must be present in `app.js` payload construction.
 2. Every field in `JobRequest` must be present in `repolens.py` as a CLI argument OR explicitly mapped.
-3. Every field in `JobRequest` must be used/referenced in `repolens.py` logic.
+3. Every field in `JobRequest` must be used/referenced in `repolens.py` logic (e.g. passed to core logic).
 
 Exit Code:
 0: Success (Parity verified)
@@ -37,43 +37,37 @@ IGNORE_FIELDS = {
 # Mapping for fields that have different names/mechanisms
 # key: JobRequest field name
 # value: dict with overrides
-#   - cli_flag: exact string for CLI check (e.g. "paths" or "--custom-flag")
-#   - py_usage: regex string to check usage in pythonista code
-#   - js_key: regex string for JS payload key
+#   - cli_flag: exact flag string (without quotes) or "SKIP"
+#   - py_usage: regex string to check usage in pythonista code, or "SKIP"
+#   - js_key: regex string for JS payload key, or "SKIP"
 MAPPINGS: Dict[str, Dict[str, Any]] = {
     "repos": {
-        "cli_flag": "paths", # positional arg
+        "cli_flag": "paths", # positional arg name in argparse
         "py_usage": r"(selected_repos|sources)",
     },
     "merges_dir": {
-        # --merges-dir not exposed in Pythonista CLI (implicitly uses hub/merges)
-        "cli_flag": "SKIP",
+        "cli_flag": "SKIP", # Not exposed in Pythonista CLI (implicit)
         "py_usage": r"(merges_dir|mergesPath)",
     },
     "include_paths_by_repo": {
-        "cli_flag": "SKIP", # Not exposed in CLI
-        "py_usage": r"(pool_norm|resolve_pool_include_paths)", # Handled via pool logic
+        "cli_flag": "SKIP", # Handled via complex logic, not direct arg
+        "py_usage": r"(pool_norm|resolve_pool_include_paths)",
         "js_key": r"include_paths_by_repo",
     },
     "strict_include_paths_by_repo": {
         "cli_flag": "SKIP",
-        "py_usage": "SKIP", # Implicit in pool logic?
+        "py_usage": "SKIP", # Implicit in pool logic (if pool exists, strict is assumed/enforced by core if passed? actually core doesn't enforce strict unless flag passed. In Pythonista, we split jobs manually so we don't use this flag.)
         "js_key": r"strict_include_paths_by_repo",
     },
     "include_paths": {
-        "cli_flag": "SKIP", # Not top-level CLI? actually path-filter/extensions are top level. include_paths is internal?
-        # Wait, scan_repo takes include_paths.
-        # JobRequest has include_paths.
-        # CLI has --path-filter, but not --include-paths?
-        # WebUI uses include_paths for pool logic.
-        # So this might be "SKIP" for CLI or mapped?
-        # Let's see models.py: include_paths: Optional[List[str]] = None
-        # It IS in JobRequest.
-        # Is it in CLI? No. CLI uses path_filter (substring) or extensions.
-        # But include_paths is whitelist.
-        # WebUI sets it for pro-repo mode.
-        "cli_flag": "SKIP",
-        "py_usage": r"include_paths",
+        "cli_flag": "SKIP", # Derived/Implicit
+        "py_usage": r"include_paths", # scan_repo arg
+    },
+    "json_sidecar": {
+        # Explicitly checking for the flag and usage
+        "cli_flag": "--json-sidecar",
+        "py_usage": r"(json_sidecar|extras_config\.json_sidecar)",
+        "js_key": r"json_sidecar",
     }
 }
 
@@ -105,6 +99,12 @@ def check_webui(path: Path, fields: Set[str]) -> bool:
     success = True
     print("\n--- Checking WebUI (app.js) ---")
 
+    # Simple heuristic to strip comments to avoid false positives
+    # Remove single line comments //...
+    content_no_comments = re.sub(r'//.*', '', content)
+    # Remove multi line comments /* ... */
+    content_no_comments = re.sub(r'/\*.*?\*/', '', content_no_comments, flags=re.DOTALL)
+
     for field in sorted(fields):
         # Determine expected JS key
         mapping = MAPPINGS.get(field, {})
@@ -113,7 +113,7 @@ def check_webui(path: Path, fields: Set[str]) -> bool:
         if js_key_pattern == "SKIP":
             continue
 
-        if not re.search(js_key_pattern, content):
+        if not re.search(js_key_pattern, content_no_comments):
             print(f"❌ Missing payload key: '{field}' (regex: /{js_key_pattern}/)")
             success = False
         else:
@@ -146,24 +146,38 @@ def check_pythonista(path: Path, fields: Set[str]) -> bool:
                 cli_flag = "--" + field.replace("_", "-")
 
             # Robust Regex for add_argument
-            # Matches: add_argument(..."--flag"...) or add_argument(..., '--flag', ...)
-            # Quote variants: ' or "
-            cli_regex = rf'add_argument\s*\(\s*.*[\'"]{re.escape(cli_flag)}[\'"]'
+            # Support variations:
+            # parser.add_argument("paths") -> positional
+            # parser.add_argument("--flag")
+            # parser.add_argument('-f', '--flag')
+            # Quotes can be single or double
+
+            # If it's a positional arg (no dashes), logic differs slightly
+            if cli_flag.startswith("-"):
+                # Flag
+                escaped_flag = re.escape(cli_flag)
+                cli_regex = rf"add_argument\s*\(\s*.*['\"]{escaped_flag}['\"]"
+            else:
+                # Positional
+                escaped_flag = re.escape(cli_flag)
+                cli_regex = rf"add_argument\s*\(\s*['\"]{escaped_flag}['\"]"
 
             if not re.search(cli_regex, content):
                 print(f"❌ Missing CLI argument: '{field}' (expected flag: {cli_flag})")
                 success = False
 
         # 2. Logic/Usage Check
-        # Heuristic: verify the variable name appears in the code (args.field, config.field, etc)
+        # Ensure the variable is actually used/passed somewhere
         py_usage = mapping.get("py_usage")
         if py_usage == "SKIP":
             pass
         else:
             if not py_usage:
-                # Default: field name itself (word boundary)
+                # Default: look for usage of the field name
+                # Common patterns: args.field, config.field, field=...
                 py_usage = rf"\b{field}\b"
 
+            # Check if usage exists (simple check)
             if not re.search(py_usage, content):
                 print(f"❌ Missing usage logic: '{field}' (regex: /{py_usage}/)")
                 success = False
@@ -172,6 +186,7 @@ def check_pythonista(path: Path, fields: Set[str]) -> bool:
 
 def main():
     print(f"🔍 Parity Guard running...")
+    print(f"Source: {MODELS_PATH}")
 
     # 1. Extract Source of Truth
     fields = extract_model_fields(MODELS_PATH)
