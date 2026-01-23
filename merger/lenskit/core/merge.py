@@ -13,6 +13,7 @@ import hashlib
 import datetime
 import re
 import unicodedata
+import concurrent.futures
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass
@@ -2011,6 +2012,11 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     root_guard = root_str if root_str.endswith(os.sep) else root_str + os.sep
     root_len = len(root_str)
 
+    # Files awaiting MD5 calculation: list of (FileInfo, abs_path, effective_limit)
+    files_to_hash: List[Tuple[FileInfo, Path, Optional[int]]] = []
+    # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
+    limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
+
     for dirpath, dirnames, filenames in os.walk(root_str):
         # Filter directories
         keep_dirs = []
@@ -2090,20 +2096,22 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             is_text = is_probably_text(abs_path, size)
             category, tags = classify_file_v2(rel_path, ext)
 
-            # MD5 calculation:
-            # - Textdateien: immer kompletter MD5
+            # MD5 calculation logic (deferred):
+            # - Textdateien: immer kompletter MD5 (effective_limit = None)
             # - Binärdateien:
             #   a) wenn kein Limit gesetzt ist (unlimited) -> hashen
             #   b) wenn Limit gesetzt ist -> nur hashen, wenn size <= Limit
-            md5 = ""
-            # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
-            limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
+            should_hash = False
+            effective_limit: Optional[int] = limit_bytes
+
             if is_text:
-                md5 = compute_md5(abs_path, limit_bytes)
+                should_hash = True
+                effective_limit = None  # Force full hash for text
             else:
                 # Fix v2.4: Allow binary hashing if unlimited (limit_bytes is None)
                 if limit_bytes is None or size <= limit_bytes:
-                    md5 = compute_md5(abs_path, limit_bytes)
+                    should_hash = True
+                    # effective_limit remains limit_bytes
 
             fi = FileInfo(
                 root_label=root_label,
@@ -2111,7 +2119,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 rel_path=rel_path,
                 size=size,
                 is_text=is_text,
-                md5=md5,
+                md5="",  # Placeholder, computed in parallel below
                 category=category,
                 tags=tags,
                 ext=ext,
@@ -2119,6 +2127,22 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             )
             fi.lens = lenses.infer_lens(rel_path)
             files.append(fi)
+            if should_hash:
+                files_to_hash.append((fi, abs_path, effective_limit))
+
+    # Parallel MD5 computation
+    if files_to_hash:
+        # Use a reasonable number of workers (CPU count + 4 usually handles I/O mixed loads well)
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            paths = [p for _, p, _ in files_to_hash]
+            limits = [l for _, _, l in files_to_hash]
+
+            # Note: compute_md5 captures exceptions and returns "ERROR", so this is safe
+            results = executor.map(compute_md5, paths, limits)
+
+            for (fi, _, _), result_md5 in zip(files_to_hash, results):
+                fi.md5 = result_md5
 
     # Sort files: first by repo order (if multi-repo context handled outside,
     # but here root_label is constant per scan_repo call unless we merge lists later),
