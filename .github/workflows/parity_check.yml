@@ -36,10 +36,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.12'
+
+      - name: Log Python Version
+        run: python --version
 
       - name: Install Test Dependencies
-        run: pip install "pytest<9"
+        run: pip install -r requirements-dev.txt
 
       - name: Verify Guard Logic (Self-Test)
         run: pytest tests/test_parity_guard.py
