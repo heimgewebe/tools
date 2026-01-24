@@ -228,7 +228,23 @@ class TestMergeCore(unittest.TestCase):
             code_only=True,
             timestamp="TS"
         )
-        self.assertIn("code-only", p3.name)
+        self.assertEqual(p3.name, "myrepo-code-only-max-TS_merge.md")
+
+        # Case 4: Meta-None mode -> MUST contain 'none'
+        # Note: meta_none overrides plan_only/code_only
+        p4 = make_output_filename(
+            merges_dir=merges_dir,
+            repo_names=["myrepo"],
+            detail="max",
+            part_suffix="",
+            path_filter=None,
+            ext_filter=None,
+            plan_only=False,
+            code_only=False,
+            timestamp="TS",
+            meta_none=True
+        )
+        self.assertEqual(p4.name, "myrepo-none-max-TS_merge.md")
 
     def test_link_integrity_and_anchors(self):
         """
