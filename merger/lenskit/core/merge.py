@@ -1950,7 +1950,7 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
         "total_bytes": total_bytes
     }
 
-def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None) -> Dict[str, Any]:
+def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None, calculate_md5: bool = True) -> Dict[str, Any]:
     repo_root = repo_root.resolve()
     root_label = repo_root.name
     files = []
@@ -2104,14 +2104,15 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             should_hash = False
             effective_limit: Optional[int] = limit_bytes
 
-            if is_text:
-                should_hash = True
-                effective_limit = None  # Force full hash for text
-            else:
-                # Fix v2.4: Allow binary hashing if unlimited (limit_bytes is None)
-                if limit_bytes is None or size <= limit_bytes:
+            if calculate_md5:
+                if is_text:
                     should_hash = True
-                    # effective_limit remains limit_bytes
+                    effective_limit = None  # Force full hash for text
+                else:
+                    # Fix v2.4: Allow binary hashing if unlimited (limit_bytes is None)
+                    if limit_bytes is None or size <= limit_bytes:
+                        should_hash = True
+                        # effective_limit remains limit_bytes
 
             fi = FileInfo(
                 root_label=root_label,
