@@ -14,6 +14,7 @@ from lenskit.core.merge import (
     _slug_token,
     classify_file_v2,
     _generate_run_id,
+    make_output_filename,
     determine_inclusion_status,
     iter_report_blocks,
     FileInfo,
@@ -171,6 +172,59 @@ class TestMergeCore(unittest.TestCase):
             self.assertRegex(full_output, r"content_present:\s*(true|True)")
             self.assertRegex(full_output, r"manifest_present:\s*(true|True)")
             self.assertRegex(full_output, r"structure_present:\s*(true|True)")
+
+    def test_make_output_filename_optimization(self):
+        """
+        Verify that make_output_filename omits default 'full' mode block
+        to produce cleaner filenames.
+        """
+        merges_dir = Path("/tmp/merges")
+
+        # Case 1: Default mode (full) -> should NOT contain 'full'
+        p1 = make_output_filename(
+            merges_dir=merges_dir,
+            repo_names=["myrepo"],
+            detail="max",
+            part_suffix="",
+            path_filter=None,
+            ext_filter=None,
+            plan_only=False,
+            code_only=False,
+            timestamp="TS"
+        )
+        # Expected: myrepo-max-TS_merge.md (no 'full')
+        self.assertEqual(p1.name, "myrepo-max-TS_merge.md")
+        self.assertNotIn("full", p1.name)
+
+        # Case 2: Plan-only mode -> MUST contain 'plan-only'
+        p2 = make_output_filename(
+            merges_dir=merges_dir,
+            repo_names=["myrepo"],
+            detail="dev",
+            part_suffix="",
+            path_filter=None,
+            ext_filter=None,
+            plan_only=True,
+            code_only=False,
+            timestamp="TS"
+        )
+        self.assertIn("plan-only", p2.name)
+        # Expected: myrepo-plan-only-dev-TS_merge.md
+        self.assertEqual(p2.name, "myrepo-plan-only-dev-TS_merge.md")
+
+        # Case 3: Explicit Code-only -> MUST contain 'code-only'
+        p3 = make_output_filename(
+            merges_dir=merges_dir,
+            repo_names=["myrepo"],
+            detail="max",
+            part_suffix="",
+            path_filter=None,
+            ext_filter=None,
+            plan_only=False,
+            code_only=True,
+            timestamp="TS"
+        )
+        self.assertIn("code-only", p3.name)
 
     def test_link_integrity_and_anchors(self):
         """
