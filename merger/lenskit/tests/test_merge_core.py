@@ -194,7 +194,11 @@ class TestMergeCore(unittest.TestCase):
         )
         # Expected: myrepo-max-TS_merge.md (no 'full')
         self.assertEqual(p1.name, "myrepo-max-TS_merge.md")
-        self.assertNotIn("full", p1.name)
+
+        # Robust check: split by hyphen to ensure "full" is not present as a standalone token
+        # This protects against false negatives if repo name was "fullstack"
+        tokens = p1.stem.replace("_merge", "").split("-")
+        self.assertNotIn("full", tokens)
 
         # Case 2: Plan-only mode -> MUST contain 'plan-only'
         p2 = make_output_filename(
