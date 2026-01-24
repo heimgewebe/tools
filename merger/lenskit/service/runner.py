@@ -218,7 +218,8 @@ class JobRunner:
 
                 log(f"Scanning {i}/{total_sources}: {src.name} ...")
                 # Note: scan_repo can be slow.
-                # Optimization: Skip MD5 for plan_only jobs to reduce scan cost; hashes are only required for manifest/integrity features.
+                # Optimization: Skip MD5 for plan_only jobs to reduce scan cost.
+                # plan_only is currently the proxy for "no hashes needed" (content/manifest skipped).
                 should_hash = not req.plan_only
                 summary = scan_repo(src, ext_list, path_filter, max_bytes, include_paths=current_include_paths, calculate_md5=should_hash)
                 summaries.append(summary)

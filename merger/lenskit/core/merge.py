@@ -1951,6 +1951,13 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
     }
 
 def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None, calculate_md5: bool = True) -> Dict[str, Any]:
+    """
+    Scans a repository and returns a summary dict with file info.
+
+    calculate_md5:
+        If False, skips all MD5 computation. Intended for plan-only / non-manifest
+        operations where file integrity hashes are not required.
+    """
     repo_root = repo_root.resolve()
     root_label = repo_root.name
     files = []
@@ -2188,7 +2195,7 @@ def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
     """
     snapshot: Dict[str, Tuple[int, str, str]] = {}
     summary = scan_repo(
-        repo_root, extensions=None, path_contains=None, max_bytes=100_000_000
+        repo_root, extensions=None, path_contains=None, max_bytes=100_000_000, calculate_md5=True
     )  # großes Limit, damit wir verlässliche MD5s haben
     for fi in summary["files"]:
         snapshot[fi.rel_path.as_posix()] = (fi.size, fi.md5, fi.category or "other")
