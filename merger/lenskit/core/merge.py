@@ -2494,7 +2494,8 @@ def make_output_filename(
             path_block = slug.replace("/", "-")
 
     # 5. Mode-Block (Kollisionen vermeiden)
-    mode_block = render_mode
+    # Optimization: Omit default 'full' mode to shorten filename
+    mode_block = None if render_mode == "full" else render_mode
 
     # 6. Optional: Extension-Filter-Block (nur, wenn bewusst gesetzt)
     ext_block = None
@@ -2520,7 +2521,8 @@ def make_output_filename(
         parts.append(path_block)
 
     parts.append(repo_block)
-    parts.append(mode_block)
+    if mode_block:
+        parts.append(mode_block)
     parts.append(detail_block)
 
     if ext_block:
