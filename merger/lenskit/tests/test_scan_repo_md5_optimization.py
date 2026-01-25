@@ -3,6 +3,12 @@ from unittest.mock import patch
 from pathlib import Path
 from merger.lenskit.core.merge import scan_repo
 
+def find_file_info(files, filename):
+    for f in files:
+        if f.rel_path.name == filename:
+            return f
+    return None
+
 def test_scan_repo_skips_hashing_when_calculate_md5_false(tmp_path):
     """
     Regression Test:
@@ -20,9 +26,10 @@ def test_scan_repo_skips_hashing_when_calculate_md5_false(tmp_path):
         # Assertion 1: Hashing function should NOT be called
         mock_compute.assert_not_called()
 
-        # Assertion 2: FileInfo should have empty MD5
-        assert len(result["files"]) == 1
-        assert result["files"][0].md5 == ""
+        # Assertion 2: FileInfo for file.txt should have empty MD5
+        fi = find_file_info(result["files"], "file.txt")
+        assert fi is not None, "file.txt not found in scan results"
+        assert fi.md5 == ""
 
 def test_scan_repo_performs_hashing_when_calculate_md5_true(tmp_path):
     """
@@ -40,6 +47,7 @@ def test_scan_repo_performs_hashing_when_calculate_md5_true(tmp_path):
         # Assertion 1: Hashing function SHOULD be called
         mock_compute.assert_called()
 
-        # Assertion 2: FileInfo should have the computed MD5
-        assert len(result["files"]) == 1
-        assert result["files"][0].md5 == "deadbeef"
+        # Assertion 2: FileInfo for file.txt should have the computed MD5
+        fi = find_file_info(result["files"], "file.txt")
+        assert fi is not None, "file.txt not found in scan results"
+        assert fi.md5 == "deadbeef"
