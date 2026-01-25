@@ -2034,7 +2034,7 @@ class MergerUI(object):
             # 2. Filter file list based on delta_meta (changed + added)
             # 3. Use profile 'max' to ensure full content is included for these files
 
-            summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=0)
+            summary = scan_repo(repo_root, extensions=None, path_contains=None, max_bytes=0, calculate_md5=True)
 
             # Filter files to include only changed/added
             # Helper to collect paths from delta_meta
@@ -3070,7 +3070,7 @@ class MergerUI(object):
                 # it uses global defaults (None). If it HAS an entry, it uses that.
                 # scan_repo handles include_paths=None as "scan all".
 
-                summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths)
+                summary = scan_repo(root, extensions or None, path_contains, max_bytes, include_paths=use_include_paths, calculate_md5=True)
                 summaries.append(summary)
 
             if not summaries:
@@ -3277,7 +3277,7 @@ def main_cli():
     summaries = []
     for src in sources:
         print(f"Scanning {src.name}...")
-        summary = scan_repo(src, ext_list, path_filter, max_bytes)
+        summary = scan_repo(src, ext_list, path_filter, max_bytes, calculate_md5=True)
         summaries.append(summary)
 
     # Default: ab 25 MB wird gesplittet, aber kein Gesamtlimit – es werden
