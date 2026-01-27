@@ -1,6 +1,7 @@
 import yaml
 from pathlib import Path
-from merger.lenskit.adapters.metarepo import sync_from_metarepo, MANIFEST_REL_PATH
+from unittest import mock
+from merger.lenskit.adapters.metarepo import sync_from_metarepo, sync_repo, MANIFEST_REL_PATH
 
 def test_metarepo_sync_parallel(tmp_path: Path):
     """
@@ -114,8 +115,6 @@ def test_metarepo_sync_error_handling(tmp_path: Path):
     """
     Test that errors during parallel sync are properly handled and aggregated.
     """
-    import unittest.mock as mock
-    
     hub_path = tmp_path / "hub"
     hub_path.mkdir()
 
@@ -152,8 +151,6 @@ def test_metarepo_sync_error_handling(tmp_path: Path):
     (repo2_path / ".git").mkdir()
 
     # Mock sync_repo to raise an exception for repo2
-    from merger.lenskit.adapters.metarepo import sync_repo
-    
     original_sync_repo = sync_repo
     
     def mock_sync_repo(repo_root, *args, **kwargs):

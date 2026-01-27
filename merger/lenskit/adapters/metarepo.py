@@ -366,7 +366,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                     source_hashes[entry_id] = hash_val
         except Exception as e:
             logger.warning(
-                f"Source hash precompute failed for entry_id={entry_id} src={src_rel}",
+                f"Source hash precompute failed for entry_id={entry_id} src={src_rel}: {e}",
                 exc_info=True
             )
 
