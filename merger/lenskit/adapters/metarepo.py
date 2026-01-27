@@ -153,34 +153,18 @@ def sync_repo(
     target_filter: Optional[List[str]] = None,
     source_hashes: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
-    """
+        """
     Sync a single repository against the manifest.
 
-    Parameters
-    ----------
-    repo_root:
-        Root directory of the repository to synchronize.
-    metarepo_root:
-        Root directory of the metarepo containing the manifest and source files.
-    manifest:
-        Parsed manifest dictionary loaded from the metarepo.
-    mode:
-        Sync mode (for example, ``"apply"`` or ``"dry_run"``) controlling whether
-        changes are actually written.
-    target_filter:
-        Optional list of target identifiers used to limit which manifest entries
-        are processed. If ``None`` or empty, all entries are considered.
-    source_hashes:
-        Optional mapping used as a cache for source content hashes to avoid
-        recomputing them on every sync run. Keys are manifest entry identifiers
-        (typically the ``id`` field of each manifest entry), and values are
-        hex-encoded digest strings (for example, a SHA-256 hash of the source
-        content). When provided, existing entries may be reused by the sync
-        logic as an optimization.
+    Args:
+        repo_root: Root directory of the repository to synchronize.
+        metarepo_root: Root directory of the metarepo.
+        manifest: Parsed manifest dictionary loaded from the metarepo.
+        mode: Sync mode ("apply" or "dry_run").
+        target_filter: Optional list of target identifiers used to limit which manifest entries are processed.
+        source_hashes: Optional precomputed cache mapping entry_id -> sha256 hex digest (len==64).
 
-    Returns
-    -------
-    Dict[str, Any]
+    Returns:
         A structured report describing the outcome of the synchronization.
     """
 
@@ -354,20 +338,30 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     results = {}
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
-    # Pre-compute source hashes to avoid redundant I/O
-    source_hashes = {}
+      # Pre-compute source hashes to avoid redundant I/O (only for entries we will process)
+    source_hashes: Dict[str, str] = {}
     for entry in manifest.get("entries", []):
+        if not _should_process_entry(entry, targets):
+            continue
+
         entry_id = entry.get("id")
         src_rel = entry.get("source")
         if not entry_id or not src_rel:
+            logger.warning(f"Manifest entry missing id/source: id={entry_id!r} source={src_rel!r}")
             continue
+
         try:
             p = resolve_secure_path(metarepo_root, src_rel)
-            if p.exists():
-                hash_val = compute_file_hash(p)
-                # Only cache valid hashes, not error sentinels
-                if hash_val not in (HASH_FILE_NOT_FOUND, HASH_COMPUTATION_ERROR):
-                    source_hashes[entry_id] = hash_val
+            if not p.exists():
+                # sync_repo will emit the proper ERROR detail
+                continue
+
+            h = compute_file_hash(p)
+            # Only cache valid sha256 hex digests (avoid "" / "ERROR" / other sentinels)
+            if h and h != "ERROR" and len(h) == 64 and all(c in "0123456789abcdef" for c in h):
+                source_hashes[entry_id] = h
+            else:
+                logger.warning(f"Invalid hash computed for entry_id={entry_id} src={src_rel}: {h!r}")
         except Exception as e:
             logger.warning(
                 f"Source hash precompute failed for entry_id={entry_id} src={src_rel}: {e}",
@@ -421,13 +415,31 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                 }
 
     # Determine overall status based on errors
-    overall_status = "error" if aggregated_summary["error"] > 0 else "ok"
+    final_status = "ok"
+    if aggregated_summary["error"] > 0:
+        final_status = "error"
+    else:
+        # Defensive: in case a repo report signals error without incrementing summary
+        if any(r.get("status") == "error" for r in results.values()):
+            final_status = "error"
+
+    # Sort repos by name for deterministic output
+    sorted_results = dict(sorted(results.items()))
 
     return {
-        "status": overall_status,
+        "status": final_status,
         "mode": mode,
         "manifest_version": manifest.get("version"),
         "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
         "aggregate_summary": aggregated_summary,
-        "repos": results
+        "repos": sorted_results
+    }
+
+    return {
+        "status": final_status,
+        "mode": mode,
+        "manifest_version": manifest.get("version"),
+        "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
+        "aggregate_summary": aggregated_summary,
+        "repos": sorted_results
     }

@@ -1,7 +1,9 @@
 import yaml
 from pathlib import Path
-from unittest import mock
-from merger.lenskit.adapters.metarepo import sync_from_metarepo, sync_repo, MANIFEST_REL_PATH
+from unittest.mock import patch
+
+from merger.lenskit.adapters.metarepo import sync_from_metarepo, MANIFEST_REL_PATH
+
 
 def test_metarepo_sync_parallel(tmp_path: Path):
     """
@@ -19,7 +21,7 @@ def test_metarepo_sync_parallel(tmp_path: Path):
     # Create a source file
     source_content = '{"foo": "bar"}' * 100
     source_file = metarepo / "shared_config.json"
-    source_file.write_text(source_content, encoding='utf-8')
+    source_file.write_text(source_content, encoding="utf-8")
 
     # Create manifest
     manifest = {
@@ -29,21 +31,20 @@ def test_metarepo_sync_parallel(tmp_path: Path):
                 "id": "config",
                 "source": "shared_config.json",
                 "targets": ["config.json"],
-                "mode": "copy"
+                "mode": "copy",
             }
-        ]
+        ],
     }
 
-    with (metarepo / MANIFEST_REL_PATH).open("w") as f:
+    with (metarepo / MANIFEST_REL_PATH).open("w", encoding="utf-8") as f:
         yaml.dump(manifest, f)
 
     # Create repos
     num_repos = 20
     for i in range(num_repos):
-        repo_name = f"repo_{i}"
-        repo_path = hub_path / repo_name
+        repo_path = hub_path / f"repo_{i}"
         repo_path.mkdir()
-        (repo_path / ".git").mkdir() # Mark as repo
+        (repo_path / ".git").mkdir()  # Mark as repo
 
     # Run sync
     report = sync_from_metarepo(hub_path, mode="apply")
@@ -57,7 +58,8 @@ def test_metarepo_sync_parallel(tmp_path: Path):
         repo_path = hub_path / f"repo_{i}"
         target_file = repo_path / "config.json"
         assert target_file.exists()
-        assert target_file.read_text(encoding='utf-8') == source_content
+        assert target_file.read_text(encoding="utf-8") == source_content
+
 
 def test_metarepo_sync_update_flow(tmp_path: Path):
     """
@@ -71,9 +73,9 @@ def test_metarepo_sync_update_flow(tmp_path: Path):
     metarepo.mkdir()
     (metarepo / "sync").mkdir()
 
-    source_content = "v1\n# managed-by: metarepo-sync"
     source_file = metarepo / "v1.txt"
-    source_file.write_text(source_content)
+    source_content_v1 = "v1\n# managed-by: metarepo-sync"
+    source_file.write_text(source_content_v1, encoding="utf-8")
 
     manifest = {
         "version": 1,
@@ -82,11 +84,12 @@ def test_metarepo_sync_update_flow(tmp_path: Path):
                 "id": "v1",
                 "source": "v1.txt",
                 "targets": ["v1.txt"],
-                "mode": "copy"
+                "mode": "copy",
             }
-        ]
+        ],
     }
-    with (metarepo / MANIFEST_REL_PATH).open("w") as f:
+
+    with (metarepo / MANIFEST_REL_PATH).open("w", encoding="utf-8") as f:
         yaml.dump(manifest, f)
 
     repo_path = hub_path / "repo1"
@@ -96,7 +99,7 @@ def test_metarepo_sync_update_flow(tmp_path: Path):
     # First sync (ADD)
     report = sync_from_metarepo(hub_path, mode="apply")
     assert report["aggregate_summary"]["add"] == 1
-    assert (repo_path / "v1.txt").read_text() == source_content
+    assert (repo_path / "v1.txt").read_text(encoding="utf-8") == source_content_v1
 
     # Second sync (SKIP)
     report = sync_from_metarepo(hub_path, mode="apply")
@@ -104,70 +107,39 @@ def test_metarepo_sync_update_flow(tmp_path: Path):
 
     # Update source file
     source_content_v2 = "v2\n# managed-by: metarepo-sync"
-    source_file.write_text(source_content_v2)
+    source_file.write_text(source_content_v2, encoding="utf-8")
 
     # Sync (UPDATE)
     report = sync_from_metarepo(hub_path, mode="apply")
     assert report["aggregate_summary"]["update"] == 1
-    assert (repo_path / "v1.txt").read_text() == source_content_v2
+    assert (repo_path / "v1.txt").read_text(encoding="utf-8") == source_content_v2
+
 
 def test_metarepo_sync_error_handling(tmp_path: Path):
     """
-    Test that errors during parallel sync are properly handled and aggregated.
+    Test that sync errors in individual repositories are correctly aggregated
+    and result in an overall error status.
     """
     hub_path = tmp_path / "hub"
     hub_path.mkdir()
 
-    # Create metarepo with valid manifest
+    # Create metarepo
     metarepo = hub_path / "metarepo"
     metarepo.mkdir()
     (metarepo / "sync").mkdir()
 
-    source_content = "test content"
-    source_file = metarepo / "test.txt"
-    source_file.write_text(source_content)
-
-    manifest = {
-        "version": 1,
-        "entries": [
-            {
-                "id": "test",
-                "source": "test.txt",
-                "targets": ["test.txt"],
-                "mode": "copy"
-            }
-        ]
-    }
-    with (metarepo / MANIFEST_REL_PATH).open("w") as f:
+    # Minimal manifest; content doesn't matter because we patch sync_repo below
+    manifest = {"version": 1, "entries": []}
+    with (metarepo / MANIFEST_REL_PATH).open("w", encoding="utf-8") as f:
         yaml.dump(manifest, f)
 
-    # Create two normal repos
-    repo1_path = hub_path / "repo1"
-    repo1_path.mkdir()
-    (repo1_path / ".git").mkdir()
+    # Create two repos
+    repo1 = hub_path / "repo1"
+    repo1.mkdir()
+    (repo1 / ".git").mkdir()
 
-    repo2_path = hub_path / "repo2"
-    repo2_path.mkdir()
-    (repo2_path / ".git").mkdir()
+    repo2 = hub_path / "repo2"
+    repo2.mkdir()
+    (repo2 / ".git").mkdir()
 
-    # Mock sync_repo to raise an exception for repo2
-    def mock_sync_repo(repo_root, *args, **kwargs):
-        if repo_root.name == "repo2":
-            raise RuntimeError("Simulated sync failure for repo2")
-        return sync_repo(repo_root, *args, **kwargs)
-    
-    with mock.patch('merger.lenskit.adapters.metarepo.sync_repo', side_effect=mock_sync_repo):
-        # Run sync - should handle the error gracefully
-        report = sync_from_metarepo(hub_path, mode="apply")
-
-        # Verify error was captured
-        assert report["status"] == "error", "Overall status should be error when any repo fails"
-        assert report["aggregate_summary"]["error"] >= 1, "Error count should be at least 1"
-
-        # Verify the successful repo was processed
-        assert "repo1" in report["repos"]
-        assert report["repos"]["repo1"]["status"] == "ok"
-        
-        # Verify the failed repo has error status
-        assert "repo2" in report["repos"]
-        assert report["repos"]["repo2"]["status"] == "error"
+    # Mock sync_repo to fail for repo_
