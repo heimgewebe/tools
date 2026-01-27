@@ -366,7 +366,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
             if p.exists():
                 hash_val = compute_file_hash(p)
                 # Only cache valid hashes, not error sentinels
-                if hash_val and hash_val not in (HASH_FILE_NOT_FOUND, HASH_COMPUTATION_ERROR):
+                if hash_val not in (HASH_FILE_NOT_FOUND, HASH_COMPUTATION_ERROR):
                     source_hashes[entry_id] = hash_val
         except Exception as e:
             logger.warning(

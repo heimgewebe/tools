@@ -151,12 +151,10 @@ def test_metarepo_sync_error_handling(tmp_path: Path):
     (repo2_path / ".git").mkdir()
 
     # Mock sync_repo to raise an exception for repo2
-    original_sync_repo = sync_repo
-    
     def mock_sync_repo(repo_root, *args, **kwargs):
         if repo_root.name == "repo2":
             raise RuntimeError("Simulated sync failure for repo2")
-        return original_sync_repo(repo_root, *args, **kwargs)
+        return sync_repo(repo_root, *args, **kwargs)
     
     with mock.patch('merger.lenskit.adapters.metarepo.sync_repo', side_effect=mock_sync_repo):
         # Run sync - should handle the error gracefully
