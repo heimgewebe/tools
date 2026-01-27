@@ -151,6 +151,8 @@ def sync_repo(
 ) -> Dict[str, Any]:
     """
     Sync a single repository against the manifest.
+
+    :param source_hashes: Optional pre-computed map of entry_id -> sha256 hex string.
     """
 
     managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
@@ -333,9 +335,12 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
         try:
             p = resolve_secure_path(metarepo_root, src_rel)
             if p.exists():
-                source_hashes[entry_id] = compute_file_hash(p)
+                h = compute_file_hash(p)
+                # Only cache valid hex hashes, ignore errors or empty strings
+                if h and h != "ERROR" and len(h) == 64:
+                    source_hashes[entry_id] = h
         except Exception:
-            pass
+            logger.warning(f"Source hash precompute failed for entry_id={entry_id} src={src_rel}", exc_info=True)
 
     # Iterate over repos in hub
     valid_repos = []
@@ -383,11 +388,24 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                     "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 1}
                 }
 
+    final_status = "ok"
+    if aggregated_summary["error"] > 0:
+        final_status = "error"
+    else:
+        # Check individual repo statuses just in case
+        for r_rpt in results.values():
+            if r_rpt.get("status") == "error":
+                final_status = "error"
+                break
+
+    # Sort repos by name for deterministic output
+    sorted_results = dict(sorted(results.items()))
+
     return {
-        "status": "ok",
+        "status": final_status,
         "mode": mode,
         "manifest_version": manifest.get("version"),
         "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
         "aggregate_summary": aggregated_summary,
-        "repos": results
+        "repos": sorted_results
     }
