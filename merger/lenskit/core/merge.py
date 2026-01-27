@@ -2052,14 +2052,14 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             else:
                 rel_path_str = fn
 
-            abs_path = Path(dirpath) / fn
-            rel_path = Path(rel_path_str)
+            # Optimization: Defer Path object creation until we confirm the file should be processed
+            abs_path_str = os.path.join(dirpath, fn)
 
             # Security Guardrail (explicit containment check)
             # Despite os.walk providing containment, we explicitly assert it here
             # to prevent any future regression or traversal risks if logic changes.
             # Using root_guard (with trailing slash) prevents partial prefix matches.
-            if not str(abs_path).startswith(root_guard):
+            if not abs_path_str.startswith(root_guard):
                 continue
 
             # Filter Logic with Force Include
@@ -2067,7 +2067,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             inclusion_reason = "normal"
 
             if is_critical:
-                ext = abs_path.suffix.lower()
+                _, ext = os.path.splitext(fn)
+                ext = ext.lower()
                 inclusion_reason = "force_include"
             else:
                 # Include Paths Check (Whitelist)
@@ -2088,9 +2089,14 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 if path_filter and path_filter not in rel_path_str:
                     continue
 
-                ext = abs_path.suffix.lower()
+                _, ext = os.path.splitext(fn)
+                ext = ext.lower()
                 if ext_filter is not None and ext not in ext_filter:
                     continue
+
+            # Now create Path objects for further processing
+            abs_path = Path(abs_path_str)
+            rel_path = Path(rel_path_str)
 
             try:
                 st = abs_path.stat()
