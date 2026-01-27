@@ -151,6 +151,33 @@ def sync_repo(
 ) -> Dict[str, Any]:
     """
     Sync a single repository against the manifest.
+
+    Parameters
+    ----------
+    repo_root:
+        Root directory of the repository to synchronize.
+    metarepo_root:
+        Root directory of the metarepo containing the manifest and source files.
+    manifest:
+        Parsed manifest dictionary loaded from the metarepo.
+    mode:
+        Sync mode (for example, ``"apply"`` or ``"dry_run"``) controlling whether
+        changes are actually written.
+    target_filter:
+        Optional list of target identifiers used to limit which manifest entries
+        are processed. If ``None`` or empty, all entries are considered.
+    source_hashes:
+        Optional mapping used as a cache for source content hashes to avoid
+        recomputing them on every sync run. Keys are manifest entry identifiers
+        (typically the ``id`` field of each manifest entry), and values are
+        hex-encoded digest strings (for example, a SHA-256 hash of the source
+        content). When provided, existing entries may be reused by the sync
+        logic as an optimization.
+
+    Returns
+    -------
+    Dict[str, Any]
+        A structured report describing the outcome of the synchronization.
     """
 
     managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
@@ -333,9 +360,15 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
         try:
             p = resolve_secure_path(metarepo_root, src_rel)
             if p.exists():
-                source_hashes[entry_id] = compute_file_hash(p)
-        except Exception:
-            pass
+                hash_val = compute_file_hash(p)
+                # Only cache valid hashes, not error sentinels
+                if hash_val and hash_val not in ("", "ERROR"):
+                    source_hashes[entry_id] = hash_val
+        except Exception as e:
+            logger.warning(
+                f"Source hash precompute failed for entry_id={entry_id} src={src_rel}",
+                exc_info=True
+            )
 
     # Iterate over repos in hub
     valid_repos = []
@@ -383,8 +416,11 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                     "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 1}
                 }
 
+    # Determine overall status based on errors
+    overall_status = "error" if aggregated_summary["error"] > 0 else "ok"
+
     return {
-        "status": "ok",
+        "status": overall_status,
         "mode": mode,
         "manifest_version": manifest.get("version"),
         "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
