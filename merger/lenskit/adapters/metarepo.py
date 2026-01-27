@@ -27,7 +27,10 @@ except ImportError:
 SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
 MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
 MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
-HASH_ERROR_SENTINEL = "ERROR"
+
+# Hash computation sentinel values
+HASH_FILE_NOT_FOUND = ""
+HASH_COMPUTATION_ERROR = "ERROR"
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +70,6 @@ def assert_report_shape(report: Dict[str, Any]) -> None:
             report["summary"] = {k: 0 for k in required_keys}
 
         report["summary"]["error"] += len(issues)
-        # Log issues internally or attach to a debug field if needed
-        # For now, just logging
         for i in issues:
             logger.error(f"Report contract violation: {i}")
 
@@ -76,7 +77,7 @@ def assert_report_shape(report: Dict[str, Any]) -> None:
 def compute_file_hash(path: Path) -> str:
     """Compute SHA256 hash of a file."""
     if not path.exists():
-        return ""
+        return HASH_FILE_NOT_FOUND
     sha256 = hashlib.sha256()
     try:
         with path.open("rb") as f:
@@ -87,7 +88,7 @@ def compute_file_hash(path: Path) -> str:
                 sha256.update(chunk)
         return sha256.hexdigest()
     except OSError:
-        return HASH_ERROR_SENTINEL
+        return HASH_COMPUTATION_ERROR
 
 
 def has_managed_marker(path: Path, marker: str) -> bool:
@@ -100,8 +101,8 @@ def has_managed_marker(path: Path, marker: str) -> bool:
     try:
         # Read beginning of file (up to 8KB or 20 lines) to find marker
         with path.open("r", encoding="utf-8", errors="ignore") as f:
-            chunk = f.read(8192) # 8KB
-            lines = chunk.splitlines()[:20] # Check first 20 lines
+            chunk = f.read(8192)  # 8KB
+            lines = chunk.splitlines()[:20]  # Check first 20 lines
             for line in lines:
                 if marker in line:
                     return True
@@ -148,32 +149,34 @@ def sync_repo(
     manifest: Dict[str, Any],
     mode: str,
     target_filter: Optional[List[str]] = None,
-    source_hashes: Optional[Dict[str, str]] = None
+    source_hashes: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Sync a single repository against the manifest.
 
     Args:
-        repo_root: Path to the repository root.
-        metarepo_root: Path to the metarepo root.
-        manifest: Loaded manifest dictionary.
-        mode: Sync mode ('dry_run' or 'apply').
-        target_filter: Optional list of target IDs to filter.
-        source_hashes: Optional pre-computed hash cache (dict entry_id -> sha256 hex).
-    """
+        repo_root: Root directory of the repository to synchronize.
+        metarepo_root: Root directory of the metarepo.
+        manifest: Parsed manifest dictionary loaded from the metarepo.
+        mode: Sync mode ("apply" or "dry_run").
+        target_filter: Optional list of target identifiers used to limit which manifest entries are processed.
+        source_hashes: Optional precomputed cache mapping entry_id -> sha256 hex digest (len==64).
 
+    Returns:
+        A structured report describing the outcome of the synchronization.
+    """
     managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
 
-    report = {
+    report: Dict[str, Any] = {
         "version": 1,
         "source": "metarepo",
         "mode": mode,
-        "status": "ok", # Optimistic, set to error on failures
-        "generated_at": datetime.datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "status": "ok",  # Optimistic, set to error on failures
+        "generated_at": datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "metarepo_path": str(metarepo_root),
         "manifest_path": str(metarepo_root / MANIFEST_REL_PATH),
         "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0},
-        "details": []
+        "details": [],
     }
 
     entries = manifest.get("entries", [])
@@ -191,28 +194,21 @@ def sync_repo(
         try:
             src_path = resolve_secure_path(metarepo_root, src_rel)
         except ValueError as e:
-            report["details"].append({
-                "id": entry_id,
-                "target": src_rel,
-                "action": "ERROR",
-                "reason": f"Invalid source path: {e}"
-            })
+            report["details"].append(
+                {"id": entry_id, "target": src_rel, "action": "ERROR", "reason": f"Invalid source path: {e}"}
+            )
             report["summary"]["error"] += 1
             report["status"] = "error"
             continue
 
         if not src_path.exists():
-            report["details"].append({
-                "id": entry_id,
-                "target": src_rel,
-                "action": "ERROR",
-                "reason": f"Source not found: {src_rel}"
-            })
+            report["details"].append(
+                {"id": entry_id, "target": src_rel, "action": "ERROR", "reason": f"Source not found: {src_rel}"}
+            )
             report["summary"]["error"] += 1
             report["status"] = "error"
             continue
 
-        # Use pre-computed hash if available
         if source_hashes and entry_id in source_hashes:
             src_hash = source_hashes[entry_id]
         else:
@@ -222,24 +218,24 @@ def sync_repo(
             try:
                 tgt_path = resolve_secure_path(repo_root, tgt_rel)
             except ValueError as e:
-                report["details"].append({
-                    "id": entry_id,
-                    "target": tgt_rel,
-                    "action": "ERROR",
-                    "reason": f"Invalid target path (traversal): {e}"
-                })
+                report["details"].append(
+                    {
+                        "id": entry_id,
+                        "target": tgt_rel,
+                        "action": "ERROR",
+                        "reason": f"Invalid target path (traversal): {e}",
+                    }
+                )
                 report["summary"]["error"] += 1
                 report["status"] = "error"
                 continue
 
-            # Determine Action
             action = "SKIP"
             reason = ""
 
             if not tgt_path.exists():
                 action = "ADD"
             else:
-                # File exists
                 tgt_hash = compute_file_hash(tgt_path)
                 if tgt_hash == src_hash:
                     action = "SKIP"
@@ -249,7 +245,6 @@ def sync_repo(
                         action = "SKIP"
                         reason = "exists_preserve"
                     elif sync_mode == "copy":
-                        # Check marker
                         if has_managed_marker(tgt_path, managed_marker):
                             action = "UPDATE"
                         else:
@@ -259,18 +254,14 @@ def sync_repo(
                         action = "SKIP"
                         reason = f"unknown_mode_{sync_mode}"
 
-            # Execute (if apply)
             if mode == "apply" and action in ("ADD", "UPDATE"):
                 try:
-                    # Backup logic for UPDATE
                     if action == "UPDATE":
                         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
                         backup_path = tgt_path.with_suffix(tgt_path.suffix + f".bak.{timestamp}")
                         try:
                             shutil.copy2(tgt_path, backup_path)
                         except Exception as e:
-                            # Log warning but proceed? Or fail?
-                            # Usually safer to fail update if backup fails.
                             raise RuntimeError(f"Backup failed: {e}")
 
                     tgt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,30 +270,20 @@ def sync_repo(
                     action = "ERROR"
                     reason = str(e)
 
-            # Update stats (keys stay lowercase per request, values uppercase)
             key = action.lower()
             if key in report["summary"]:
                 report["summary"][key] += 1
             else:
-                # Should not happen if schema is strictly followed
                 report["summary"]["error"] += 1
                 report["status"] = "error"
 
             if action == "ERROR":
                 report["status"] = "error"
 
-            report["details"].append({
-                "id": entry_id,
-                "target": tgt_rel,
-                "action": action,
-                "reason": reason
-            })
+            report["details"].append({"id": entry_id, "target": tgt_rel, "action": action, "reason": reason})
 
-    # Validate report shape before returning/writing
     assert_report_shape(report)
 
-    # Write report to repo
-    # Always write report, even if empty (as per requirement 4)
     try:
         out_file = repo_root / SYNC_REPORT_REL_PATH
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -330,99 +311,90 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     if not manifest:
         return {"status": "error", "message": "Manifest not found or invalid (sync/metarepo-sync.yml)"}
 
-    # Pre-compute source hashes for optimization
-    source_hashes = {}
-    entries = manifest.get("entries", [])
-    for entry in entries:
+    results: Dict[str, Any] = {}
+    aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
+
+    # Pre-compute source hashes to avoid redundant I/O (only for entries we will process)
+    source_hashes: Dict[str, str] = {}
+    for entry in manifest.get("entries", []):
         if not _should_process_entry(entry, targets):
             continue
 
-        entry_id = entry.get("id", "unknown")
+        entry_id = entry.get("id")
         src_rel = entry.get("source")
-
-        if not src_rel:
-            logger.warning(f"manifest entry missing source: entry_id={entry_id}")
+        if not entry_id or not src_rel:
+            logger.warning(f"Manifest entry missing id/source: id={entry_id!r} source={src_rel!r}")
             continue
 
         try:
-            src_path = resolve_secure_path(metarepo_root, src_rel)
-            if src_path.exists():
-                h = compute_file_hash(src_path)
-                # Filter out invalid hashes (sentinels) to prevent semantic corruption
-                # Enforce length 64 (SHA256 hex digest)
-                if h and h != HASH_ERROR_SENTINEL and len(h) == 64:
-                    source_hashes[entry_id] = h
-                else:
-                    logger.warning(f"Invalid hash computed for entry_id={entry_id}: '{h}'")
-            # If path doesn't exist, sync_repo will handle it (reporting ERROR), so we just skip hash
-        except Exception:
-            logger.warning(f"source hash precompute failed for entry_id={entry_id} src={src_rel}", exc_info=True)
+            p = resolve_secure_path(metarepo_root, src_rel)
+            if not p.exists():
+                continue
 
-    results = {}
-    aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
+            h = compute_file_hash(p)
+            if h and h != HASH_COMPUTATION_ERROR and len(h) == 64 and all(c in "0123456789abcdef" for c in h):
+                source_hashes[entry_id] = h
+            else:
+                logger.warning(f"Invalid hash computed for entry_id={entry_id} src={src_rel}: {h!r}")
+        except Exception as e:
+            logger.warning(
+                f"Source hash precompute failed for entry_id={entry_id} src={src_rel}: {e}",
+                exc_info=True,
+            )
 
-    # Parallel Execution via ThreadPoolExecutor
+    # Repo discovery
+    valid_repos: List[Path] = []
+    for item in hub_path.iterdir():
+        if not item.is_dir():
+            continue
+        if item.name.startswith("."):
+            continue
+        if item.name in ("metarepo", "node_modules", "venv", "__pycache__"):
+            continue
+
+        has_git = (item / ".git").exists()
+        has_ai_context = (item / ".ai-context.yml").exists()
+        if has_git or has_ai_context:
+            valid_repos.append(item)
+
+    # Parallelize repo sync
     with ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_repo = {}
+        future_to_repo = {
+            executor.submit(sync_repo, repo, metarepo_root, manifest, mode, targets, source_hashes): repo.name
+            for repo in valid_repos
+        }
 
-        # Iterate over repos in hub
-        for item in hub_path.iterdir():
-            if not item.is_dir():
-                continue
-            # Skip hidden directories
-            if item.name.startswith("."):
-                continue
-            # Explicit skip for common non-repo directories (noise)
-            if item.name in ("metarepo", "node_modules", "venv", "__pycache__"):
-                continue
-
-            # Repo Detection Rule: .git/ or .ai-context.yml
-            # Only process if at least one exists.
-            has_git = (item / ".git").exists()
-            has_ai_context = (item / ".ai-context.yml").exists()
-
-            if not (has_git or has_ai_context):
-                continue
-
-            # Submit task
-            future = executor.submit(sync_repo, item, metarepo_root, manifest, mode, targets, source_hashes)
-            future_to_repo[future] = item.name
-
-        # Process Results
         for future in as_completed(future_to_repo):
             repo_name = future_to_repo[future]
             try:
                 repo_report = future.result()
                 results[repo_name] = repo_report
 
-                # Aggregate
-                summary = repo_report.get("summary", {})
                 for k in aggregated_summary:
-                    aggregated_summary[k] += summary.get(k, 0)
-            except Exception as e:
-                logger.error(f"Repo sync failed for {repo_name}", exc_info=True)
+                    aggregated_summary[k] += repo_report.get("summary", {}).get(k, 0)
+            except Exception as exc:
+                logger.error(f"Sync failed for {repo_name}: {exc}", exc_info=True)
+                aggregated_summary["error"] += 1
                 results[repo_name] = {
                     "status": "error",
-                    "summary": {"error": 1, "add": 0, "update": 0, "skip": 0, "blocked": 0},
-                    "details": [{"action": "ERROR", "reason": f"Execution failed: {e}"}]
+                    "details": [{"action": "ERROR", "reason": str(exc)}],
+                    "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 1},
                 }
-                aggregated_summary["error"] += 1
 
-    # Deterministic status calculation
-    global_status = "ok"
+    final_status = "ok"
     if aggregated_summary["error"] > 0:
-        global_status = "error"
-    if any(r.get("status") == "error" for r in results.values()):
-        global_status = "error"
+        final_status = "error"
+    else:
+        if any(r.get("status") == "error" for r in results.values()):
+            final_status = "error"
 
-    # Sort results for deterministic output ordering
     sorted_results = dict(sorted(results.items()))
 
     return {
-        "status": global_status,
+        "status": final_status,
         "mode": mode,
         "manifest_version": manifest.get("version"),
         "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
         "aggregate_summary": aggregated_summary,
-        "repos": sorted_results
+        "repos": sorted_results,
     }
