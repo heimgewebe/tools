@@ -10,6 +10,7 @@ import hashlib
 import datetime
 import shutil
 import logging
+import concurrent.futures
 from datetime import timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -145,10 +146,19 @@ def sync_repo(
     metarepo_root: Path,
     manifest: Dict[str, Any],
     mode: str,
-    target_filter: Optional[List[str]] = None
+    target_filter: Optional[List[str]] = None,
+    source_hashes: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Sync a single repository against the manifest.
+
+    Args:
+        repo_root: Path to the repository root.
+        metarepo_root: Path to the metarepo root.
+        manifest: Loaded manifest dictionary.
+        mode: Sync mode ('dry_run' or 'apply').
+        target_filter: Optional list of target IDs to filter.
+        source_hashes: Optional pre-computed hash cache (dict entry_id -> sha256 hex).
     """
 
     managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
@@ -201,7 +211,11 @@ def sync_repo(
             report["status"] = "error"
             continue
 
-        src_hash = compute_file_hash(src_path)
+        # Use pre-computed hash if available
+        if source_hashes and entry_id in source_hashes:
+            src_hash = source_hashes[entry_id]
+        else:
+            src_hash = compute_file_hash(src_path)
 
         for tgt_rel in target_rels:
             try:
@@ -315,40 +329,93 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     if not manifest:
         return {"status": "error", "message": "Manifest not found or invalid (sync/metarepo-sync.yml)"}
 
+    # Pre-compute source hashes for optimization
+    source_hashes = {}
+    entries = manifest.get("entries", [])
+    for entry in entries:
+        if not _should_process_entry(entry, targets):
+            continue
+
+        entry_id = entry.get("id", "unknown")
+        src_rel = entry.get("source")
+
+        try:
+            src_path = resolve_secure_path(metarepo_root, src_rel)
+            if src_path.exists():
+                h = compute_file_hash(src_path)
+                # Filter out invalid hashes (sentinels) to prevent semantic corruption
+                if h and h != "ERROR":
+                    source_hashes[entry_id] = h
+                else:
+                    logger.warning(f"Invalid hash computed for entry_id={entry_id}: '{h}'")
+            # If path doesn't exist, sync_repo will handle it (reporting ERROR), so we just skip hash
+        except Exception:
+            logger.warning(f"source hash precompute failed for entry_id={entry_id} src={src_rel}", exc_info=True)
+
     results = {}
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
-    # Iterate over repos in hub
-    for item in hub_path.iterdir():
-        if not item.is_dir():
-            continue
-        # Skip hidden directories
-        if item.name.startswith("."):
-            continue
-        # Explicit skip for common non-repo directories (noise)
-        if item.name in ("metarepo", "node_modules", "venv", "__pycache__"):
-            continue
+    # Parallel Execution via ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future_to_repo = {}
 
-        # Repo Detection Rule: .git/ or .ai-context.yml
-        # Only process if at least one exists.
-        has_git = (item / ".git").exists()
-        has_ai_context = (item / ".ai-context.yml").exists()
+        # Iterate over repos in hub
+        for item in hub_path.iterdir():
+            if not item.is_dir():
+                continue
+            # Skip hidden directories
+            if item.name.startswith("."):
+                continue
+            # Explicit skip for common non-repo directories (noise)
+            if item.name in ("metarepo", "node_modules", "venv", "__pycache__"):
+                continue
 
-        if not (has_git or has_ai_context):
-            continue
+            # Repo Detection Rule: .git/ or .ai-context.yml
+            # Only process if at least one exists.
+            has_git = (item / ".git").exists()
+            has_ai_context = (item / ".ai-context.yml").exists()
 
-        repo_report = sync_repo(item, metarepo_root, manifest, mode, targets)
-        results[item.name] = repo_report
+            if not (has_git or has_ai_context):
+                continue
 
-        # Aggregate
-        for k in aggregated_summary:
-            aggregated_summary[k] += repo_report["summary"].get(k, 0)
+            # Submit task
+            future = executor.submit(sync_repo, item, metarepo_root, manifest, mode, targets, source_hashes)
+            future_to_repo[future] = item.name
+
+        # Process Results
+        for future in concurrent.futures.as_completed(future_to_repo):
+            repo_name = future_to_repo[future]
+            try:
+                repo_report = future.result()
+                results[repo_name] = repo_report
+
+                # Aggregate
+                for k in aggregated_summary:
+                    aggregated_summary[k] += repo_report["summary"].get(k, 0)
+            except Exception as e:
+                logger.error(f"Repo sync failed for {repo_name}", exc_info=True)
+                results[repo_name] = {
+                    "status": "error",
+                    "summary": {"error": 1, "add": 0, "update": 0, "skip": 0, "blocked": 0},
+                    "details": [{"action": "ERROR", "reason": f"Execution failed: {e}"}]
+                }
+                aggregated_summary["error"] += 1
+
+    # Deterministic status calculation
+    global_status = "ok"
+    if aggregated_summary["error"] > 0:
+        global_status = "error"
+    if any(r.get("status") == "error" for r in results.values()):
+        global_status = "error"
+
+    # Sort results for deterministic output ordering
+    sorted_results = dict(sorted(results.items()))
 
     return {
-        "status": "ok",
+        "status": global_status,
         "mode": mode,
         "manifest_version": manifest.get("version"),
         "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
         "aggregate_summary": aggregated_summary,
-        "repos": results
+        "repos": sorted_results
     }
