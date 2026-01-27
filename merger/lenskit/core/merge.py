@@ -2046,17 +2046,17 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         try:
             is_dir_safe = os.path.commonpath([root_norm, dirpath_norm]) == root_norm
         except ValueError:
-             # Can happen on Windows if drives differ
+            # Can happen on Windows if drives differ
             is_dir_safe = False
 
         if not is_dir_safe:
-             # Skip entire directory if it breaks containment (e.g. symlink traversal out)
-             # Note: os.walk descends into dirs, so we should arguably clear dirnames to stop recursion,
-             # but here we just skip processing files.
-             # If safe recursion is desired, we should also clear dirnames[:] here.
-             # But strictly speaking, the check is for the files we are about to add.
-             dirnames[:] = []
-             continue
+            # Skip entire directory if it breaks containment (e.g. symlink traversal out)
+            # Note: os.walk descends into dirs, so we should arguably clear dirnames to stop recursion,
+            # but here we just skip processing files.
+            # If safe recursion is desired, we should also clear dirnames[:] here.
+            # But strictly speaking, the check is for the files we are about to add.
+            dirnames[:] = []
+            continue
 
         # Calculate relative directory once per folder
         if dirpath == root_str:
