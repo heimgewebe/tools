@@ -28,6 +28,10 @@ SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
 MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
 MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
 
+# Hash computation sentinel values
+HASH_FILE_NOT_FOUND = ""
+HASH_COMPUTATION_ERROR = "ERROR"
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,7 +79,7 @@ def assert_report_shape(report: Dict[str, Any]) -> None:
 def compute_file_hash(path: Path) -> str:
     """Compute SHA256 hash of a file."""
     if not path.exists():
-        return ""
+        return HASH_FILE_NOT_FOUND
     sha256 = hashlib.sha256()
     try:
         with path.open("rb") as f:
@@ -86,7 +90,7 @@ def compute_file_hash(path: Path) -> str:
                 sha256.update(chunk)
         return sha256.hexdigest()
     except OSError:
-        return "ERROR"
+        return HASH_COMPUTATION_ERROR
 
 
 def has_managed_marker(path: Path, marker: str) -> bool:
@@ -362,7 +366,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
             if p.exists():
                 hash_val = compute_file_hash(p)
                 # Only cache valid hashes, not error sentinels
-                if hash_val and hash_val not in ("", "ERROR"):
+                if hash_val and hash_val not in (HASH_FILE_NOT_FOUND, HASH_COMPUTATION_ERROR):
                     source_hashes[entry_id] = hash_val
         except Exception as e:
             logger.warning(
