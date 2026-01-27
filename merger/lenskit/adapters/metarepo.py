@@ -27,6 +27,7 @@ except ImportError:
 SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
 MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
 MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
+HASH_ERROR_SENTINEL = "ERROR"
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def compute_file_hash(path: Path) -> str:
                 sha256.update(chunk)
         return sha256.hexdigest()
     except OSError:
-        return "ERROR"
+        return HASH_ERROR_SENTINEL
 
 
 def has_managed_marker(path: Path, marker: str) -> bool:
@@ -349,7 +350,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                 h = compute_file_hash(src_path)
                 # Filter out invalid hashes (sentinels) to prevent semantic corruption
                 # Enforce length 64 (SHA256 hex digest)
-                if h and h != "ERROR" and len(h) == 64:
+                if h and h != HASH_ERROR_SENTINEL and len(h) == 64:
                     source_hashes[entry_id] = h
                 else:
                     logger.warning(f"Invalid hash computed for entry_id={entry_id}: '{h}'")
