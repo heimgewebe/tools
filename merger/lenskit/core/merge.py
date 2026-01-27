@@ -2059,7 +2059,9 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             # Despite os.walk providing containment, we explicitly assert it here
             # to prevent any future regression or traversal risks if logic changes.
             # Using root_guard (with trailing slash) prevents partial prefix matches.
-            if not abs_path_str.startswith(root_guard):
+            # We use os.path.normpath to ensure robustness against path anomalies (e.g. '..')
+            # while avoiding the full overhead of Path object instantiation.
+            if not os.path.normpath(abs_path_str).startswith(root_guard):
                 continue
 
             # Filter Logic with Force Include
