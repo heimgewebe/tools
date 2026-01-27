@@ -208,7 +208,7 @@ function materializeRawFromCompressed(treeNode, compressedSet) {
                 }
             }
         }
-        
+
         // Continue traversing for directory nodes that didn't match directly
         if (node.children) {
             node.children.forEach(visit);

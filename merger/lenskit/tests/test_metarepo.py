@@ -5,10 +5,10 @@ from unittest.mock import patch
 from merger.lenskit.adapters.metarepo import sync_from_metarepo, MANIFEST_REL_PATH
 
 
-def test_metarepo_sync_parallel(tmp_path: Path):
+def test_metarepo_sync_parallel(tmp_path: Path) -> None:
     """
     Test that sync_from_metarepo correctly synchronizes files across multiple repositories
-    using the optimized parallel implementation.
+    using the parallel implementation.
     """
     hub_path = tmp_path / "hub"
     hub_path.mkdir()
@@ -53,6 +53,10 @@ def test_metarepo_sync_parallel(tmp_path: Path):
     assert report["aggregate_summary"]["add"] == num_repos
     assert report["aggregate_summary"]["error"] == 0
 
+    # Verify deterministic ordering
+    repo_keys = list(report["repos"].keys())
+    assert repo_keys == sorted(repo_keys)
+
     # Verify files
     for i in range(num_repos):
         repo_path = hub_path / f"repo_{i}"
@@ -61,7 +65,7 @@ def test_metarepo_sync_parallel(tmp_path: Path):
         assert target_file.read_text(encoding="utf-8") == source_content
 
 
-def test_metarepo_sync_update_flow(tmp_path: Path):
+def test_metarepo_sync_update_flow(tmp_path: Path) -> None:
     """
     Test that updates work correctly with hash checks.
     """
@@ -98,11 +102,13 @@ def test_metarepo_sync_update_flow(tmp_path: Path):
 
     # First sync (ADD)
     report = sync_from_metarepo(hub_path, mode="apply")
+    assert report["status"] == "ok"
     assert report["aggregate_summary"]["add"] == 1
     assert (repo_path / "v1.txt").read_text(encoding="utf-8") == source_content_v1
 
     # Second sync (SKIP)
     report = sync_from_metarepo(hub_path, mode="apply")
+    assert report["status"] == "ok"
     assert report["aggregate_summary"]["skip"] == 1
 
     # Update source file
@@ -111,14 +117,15 @@ def test_metarepo_sync_update_flow(tmp_path: Path):
 
     # Sync (UPDATE)
     report = sync_from_metarepo(hub_path, mode="apply")
+    assert report["status"] == "ok"
     assert report["aggregate_summary"]["update"] == 1
     assert (repo_path / "v1.txt").read_text(encoding="utf-8") == source_content_v2
 
 
-def test_metarepo_sync_error_handling(tmp_path: Path):
+def test_metarepo_sync_error_handling(tmp_path: Path) -> None:
     """
     Test that sync errors in individual repositories are correctly aggregated
-    and result in an overall error status.
+    and result in an overall error status, while still producing deterministic output.
     """
     hub_path = tmp_path / "hub"
     hub_path.mkdir()
@@ -143,7 +150,7 @@ def test_metarepo_sync_error_handling(tmp_path: Path):
     (repo2 / ".git").mkdir()
 
     # Mock sync_repo to fail for repo1 and succeed for repo2
-    def side_effect(repo_root, *args, **kwargs):
+    def side_effect(repo_root: Path, *args: Any, **kwargs: Any) -> dict:
         if repo_root.name == "repo1":
             raise RuntimeError("Simulated sync failure")
         return {
@@ -157,8 +164,10 @@ def test_metarepo_sync_error_handling(tmp_path: Path):
 
     assert report["status"] == "error"
     assert report["aggregate_summary"]["error"] == 1
+
     assert report["repos"]["repo1"]["status"] == "error"
     assert "Simulated sync failure" in report["repos"]["repo1"]["details"][0]["reason"]
+
     assert report["repos"]["repo2"]["status"] == "ok"
 
     # Deterministic ordering
