@@ -28,6 +28,10 @@ SYNC_REPORT_REL_PATH = Path(".gewebe/out/sync.report.json")
 MANIFEST_REL_PATH = Path("sync/metarepo-sync.yml")
 MANAGED_MARKER_DEFAULT = "managed-by: metarepo-sync"
 
+# Hash computation sentinel values
+HASH_FILE_NOT_FOUND = ""
+HASH_COMPUTATION_ERROR = "ERROR"
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,7 +79,7 @@ def assert_report_shape(report: Dict[str, Any]) -> None:
 def compute_file_hash(path: Path) -> str:
     """Compute SHA256 hash of a file."""
     if not path.exists():
-        return ""
+        return HASH_FILE_NOT_FOUND
     sha256 = hashlib.sha256()
     try:
         with path.open("rb") as f:
@@ -86,7 +90,7 @@ def compute_file_hash(path: Path) -> str:
                 sha256.update(chunk)
         return sha256.hexdigest()
     except OSError:
-        return "ERROR"
+        return HASH_COMPUTATION_ERROR
 
 
 def has_managed_marker(path: Path, marker: str) -> bool:
@@ -152,7 +156,16 @@ def sync_repo(
     """
     Sync a single repository against the manifest.
 
-    :param source_hashes: Optional pre-computed map of entry_id -> sha256 hex string.
+    Args:
+        repo_root: Root directory of the repository to synchronize.
+        metarepo_root: Root directory of the metarepo.
+        manifest: Parsed manifest dictionary loaded from the metarepo.
+        mode: Sync mode ("apply" or "dry_run").
+        target_filter: Optional list of target identifiers used to limit which manifest entries are processed.
+        source_hashes: Optional precomputed cache mapping entry_id -> sha256 hex digest (len==64).
+
+    Returns:
+        A structured report describing the outcome of the synchronization.
     """
 
     managed_marker = manifest.get("managed_marker", MANAGED_MARKER_DEFAULT)
@@ -325,22 +338,35 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     results = {}
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
-    # Pre-compute source hashes to avoid redundant I/O
-    source_hashes = {}
+    # Pre-compute source hashes to avoid redundant I/O (only for entries we will process)
+    source_hashes: Dict[str, str] = {}
     for entry in manifest.get("entries", []):
+        if not _should_process_entry(entry, targets):
+            continue
+
         entry_id = entry.get("id")
         src_rel = entry.get("source")
         if not entry_id or not src_rel:
+            logger.warning(f"Manifest entry missing id/source: id={entry_id!r} source={src_rel!r}")
             continue
+
         try:
             p = resolve_secure_path(metarepo_root, src_rel)
-            if p.exists():
-                h = compute_file_hash(p)
-                # Only cache valid hex hashes, ignore errors or empty strings
-                if h and h != "ERROR" and len(h) == 64:
-                    source_hashes[entry_id] = h
-        except Exception:
-            logger.warning(f"Source hash precompute failed for entry_id={entry_id} src={src_rel}", exc_info=True)
+            if not p.exists():
+                # sync_repo will emit the proper ERROR detail
+                continue
+
+            h = compute_file_hash(p)
+            # Only cache valid sha256 hex digests (avoid "" / "ERROR" / other sentinels)
+            if h and h != HASH_COMPUTATION_ERROR and len(h) == 64 and all(c in "0123456789abcdef" for c in h):
+                source_hashes[entry_id] = h
+            else:
+                logger.warning(f"Invalid hash computed for entry_id={entry_id} src={src_rel}: {h!r}")
+        except Exception as e:
+            logger.warning(
+                f"Source hash precompute failed for entry_id={entry_id} src={src_rel}: {e}",
+                exc_info=True
+            )
 
     # Iterate over repos in hub
     valid_repos = []
@@ -388,15 +414,14 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                     "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 1}
                 }
 
+    # Determine overall status based on errors
     final_status = "ok"
     if aggregated_summary["error"] > 0:
         final_status = "error"
     else:
-        # Check individual repo statuses just in case
-        for r_rpt in results.values():
-            if r_rpt.get("status") == "error":
-                final_status = "error"
-                break
+        # Defensive: in case a repo report signals error without incrementing summary
+        if any(r.get("status") == "error" for r in results.values()):
+            final_status = "error"
 
     # Sort repos by name for deterministic output
     sorted_results = dict(sorted(results.items()))
