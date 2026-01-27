@@ -94,3 +94,7 @@ def test_sync_from_metarepo_parallel_failure_aggregation(tmp_path):
         assert report["repos"]["repo2"]["status"] == "error"
         # repo1 should be fine (mocked response)
         assert report["repos"]["repo1"]["status"] == "ok"
+
+        # Verify deterministic ordering
+        repo_keys = list(report["repos"].keys())
+        assert repo_keys == sorted(repo_keys)

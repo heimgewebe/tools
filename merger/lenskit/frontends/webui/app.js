@@ -174,78 +174,48 @@ function getAllPathsInTree(treeNode) {
 
 // Materialize raw file paths from tree using compressed rules
 // This reconstructs the UI truth from compressed backend rules
-// Optimized: Uses O(N) top-down state propagation instead of O(N*M) prefix checks.
-// Handles directory containment and explicit file selection efficiently.
+// TODO(perf): Prefix-matching over compressed paths is O(n*m) where n=files, m=compressed paths.
+// Consider optimizing via:
+// - sorted prefixes with early break
+// - prefix trie structure
+// - precomputed directory → files mapping
 function materializeRawFromCompressed(treeNode, compressedSet) {
     const paths = new Set();
     
-    // Defensive normalization: Ensure all rules are normalized to prevent subtle mismatches
-    // This costs O(M) where M is rule count, which is negligible compared to N files.
-    // This protects against callers passing un-normalized paths (e.g. "./foo").
-    const normalizedRules = new Set();
-    if (compressedSet) {
-        for (const rule of compressedSet) {
-            const n = normalizePath(rule);
-            if (n) normalizedRules.add(n);
-        }
-    }
-
-    // Check if any ancestor of the start node is in the compressed set.
-    // This handles cases where treeNode is a subtree of a selected directory.
-    const rootPath = normalizePath(treeNode.path);
-    let rootInherited = false;
-
-    if (rootPath) {
-        let current = rootPath;
-        while (current) {
-            if (normalizedRules.has(current)) {
-                rootInherited = true;
-                break;
-            }
-            // Stop at root
-            if (current === '.') break;
-
-            const lastSlash = current.lastIndexOf('/');
-            if (lastSlash >= 0) {
-                current = current.substring(0, lastSlash);
-            } else {
-                // Parent of a top-level file/dir is root "."
-                current = '.';
-            }
-        }
-    }
-
-    function visit(node, isInherited) {
+    function visit(node) {
         const normalizedPath = normalizePath(node.path);
         if (!normalizedPath) return;
         
-        let isSelected = isInherited;
-
-        // If not inherited, check if this specific node is in the set
-        if (!isSelected) {
-            if (normalizedRules.has(normalizedPath)) {
-                isSelected = true;
-            }
-        }
-        
-        if (isSelected) {
+        // Check if this path matches any compressed rule
+        if (compressedSet.has(normalizedPath)) {
+            // Direct match - if it's a file, add it; if it's a dir, add all files under it
             if (node.type === 'file') {
                 paths.add(normalizedPath);
+            } else if (node.children) {
+                // It's a directory - add all files under it
+                node.children.forEach(visit);
             }
-            // If selected (inherited or direct), all children are selected
-            if (node.children) {
-                node.children.forEach(child => visit(child, true));
-            }
+            // Already handled children for matched directories, so return early
             return;
         }
         
-        // Not selected, recurse to check children
+        if (node.type === 'file') {
+            // Check if any parent directory is in compressed set (prefix match)
+            for (const compressedPath of compressedSet) {
+                if (normalizedPath.startsWith(compressedPath + '/')) {
+                    paths.add(normalizedPath);
+                    break;
+                }
+            }
+        }
+
+        // Continue traversing for directory nodes that didn't match directly
         if (node.children) {
-            node.children.forEach(child => visit(child, false));
+            node.children.forEach(visit);
         }
     }
     
-    visit(treeNode, rootInherited);
+    visit(treeNode);
     return paths;
 }
 

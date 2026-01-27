@@ -339,6 +339,10 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
         entry_id = entry.get("id", "unknown")
         src_rel = entry.get("source")
 
+        if not src_rel:
+            logger.warning(f"manifest entry missing source: entry_id={entry_id}")
+            continue
+
         try:
             src_path = resolve_secure_path(metarepo_root, src_rel)
             if src_path.exists():
@@ -356,7 +360,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
     # Parallel Execution via ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_repo = {}
 
         # Iterate over repos in hub
@@ -390,8 +394,9 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
                 results[repo_name] = repo_report
 
                 # Aggregate
+                summary = repo_report.get("summary", {})
                 for k in aggregated_summary:
-                    aggregated_summary[k] += repo_report["summary"].get(k, 0)
+                    aggregated_summary[k] += summary.get(k, 0)
             except Exception as e:
                 logger.error(f"Repo sync failed for {repo_name}", exc_info=True)
                 results[repo_name] = {
