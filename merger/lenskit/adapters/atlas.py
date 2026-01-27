@@ -134,7 +134,7 @@ class AtlasScanner:
             return True # Should not happen if walking from root
 
         str_path = rel_path.as_posix()
-        if self._exclude_regex.match(str_path):
+        if self._exclude_regex.fullmatch(str_path):
             return True
         return False
 
