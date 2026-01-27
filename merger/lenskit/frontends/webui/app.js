@@ -179,27 +179,39 @@ function getAllPathsInTree(treeNode) {
 function materializeRawFromCompressed(treeNode, compressedSet) {
     const paths = new Set();
     
+    // Defensive normalization: Ensure all rules are normalized to prevent subtle mismatches
+    // This costs O(M) where M is rule count, which is negligible compared to N files.
+    // This protects against callers passing un-normalized paths (e.g. "./foo").
+    const normalizedRules = new Set();
+    if (compressedSet) {
+        for (const rule of compressedSet) {
+            const n = normalizePath(rule);
+            if (n) normalizedRules.add(n);
+        }
+    }
+
     // Check if any ancestor of the start node is in the compressed set.
     // This handles cases where treeNode is a subtree of a selected directory.
-    // For the root '.', this checks '.' itself.
     const rootPath = normalizePath(treeNode.path);
     let rootInherited = false;
 
     if (rootPath) {
         let current = rootPath;
-        while (true) {
-            if (compressedSet.has(current)) {
+        while (current) {
+            if (normalizedRules.has(current)) {
                 rootInherited = true;
                 break;
             }
+            // Stop at root
+            if (current === '.') break;
+
             const lastSlash = current.lastIndexOf('/');
-            if (lastSlash === -1) {
-                if (current !== '.' && compressedSet.has('.')) {
-                    rootInherited = true;
-                }
-                break;
+            if (lastSlash >= 0) {
+                current = current.substring(0, lastSlash);
+            } else {
+                // Parent of a top-level file/dir is root "."
+                current = '.';
             }
-            current = current.substring(0, lastSlash);
         }
     }
 
@@ -211,7 +223,7 @@ function materializeRawFromCompressed(treeNode, compressedSet) {
 
         // If not inherited, check if this specific node is in the set
         if (!isSelected) {
-            if (compressedSet.has(normalizedPath)) {
+            if (normalizedRules.has(normalizedPath)) {
                 isSelected = true;
             }
         }
