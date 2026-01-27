@@ -338,7 +338,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     results = {}
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
-      # Pre-compute source hashes to avoid redundant I/O (only for entries we will process)
+    # Pre-compute source hashes to avoid redundant I/O (only for entries we will process)
     source_hashes: Dict[str, str] = {}
     for entry in manifest.get("entries", []):
         if not _should_process_entry(entry, targets):
