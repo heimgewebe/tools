@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
 import unittest
-import sys
 import os
 import tempfile
 import shutil
 from pathlib import Path
 from unittest.mock import patch
 
-# Add merger/ to sys.path so lenskit is importable
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from lenskit.core.merge import scan_repo
+from merger.lenskit.core.merge import scan_repo
 
 class TestMergeSecurity(unittest.TestCase):
 
@@ -37,7 +33,8 @@ class TestMergeSecurity(unittest.TestCase):
 
         # Mock os.walk to yield the repo root AND an outside path
         # effectively simulating a traversal escape
-        with patch("os.walk") as mock_walk:
+        # Patch where it is used (in merger.lenskit.core.merge)
+        with patch("merger.lenskit.core.merge.os.walk") as mock_walk:
             mock_walk.return_value = [
                 (str(repo_root), [], ["safe.txt"]),
                 (str(outside_path), [], ["evil.txt"])
