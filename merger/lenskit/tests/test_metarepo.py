@@ -89,7 +89,7 @@ def test_sync_from_metarepo_parallel_failure_aggregation(tmp_path):
 
         # Verification
         assert report["status"] == "error"
-        assert report["aggregate_summary"]["error"] >= 1
+        assert report["aggregate_summary"]["error"] == 1
         assert "repo2" in report["repos"]
         assert report["repos"]["repo2"]["status"] == "error"
         # repo1 should be fine (mocked response)

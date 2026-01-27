@@ -10,7 +10,7 @@ import hashlib
 import datetime
 import shutil
 import logging
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -348,7 +348,8 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
             if src_path.exists():
                 h = compute_file_hash(src_path)
                 # Filter out invalid hashes (sentinels) to prevent semantic corruption
-                if h and h != "ERROR":
+                # Enforce length 64 (SHA256 hex digest)
+                if h and h != "ERROR" and len(h) == 64:
                     source_hashes[entry_id] = h
                 else:
                     logger.warning(f"Invalid hash computed for entry_id={entry_id}: '{h}'")
@@ -360,7 +361,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
     # Parallel Execution via ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         future_to_repo = {}
 
         # Iterate over repos in hub
@@ -387,7 +388,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
             future_to_repo[future] = item.name
 
         # Process Results
-        for future in concurrent.futures.as_completed(future_to_repo):
+        for future in as_completed(future_to_repo):
             repo_name = future_to_repo[future]
             try:
                 repo_report = future.result()
