@@ -3,9 +3,10 @@ import logging
 import time
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Pattern
 from datetime import datetime, timezone
 import fnmatch
+import re
 
 # Attempt to import is_probably_text from core to avoid duplication
 try:
@@ -51,6 +52,7 @@ class AtlasScanner:
 
         self.exclude_globs = exclude_globs if exclude_globs is not None else default_excludes
         self._exclude_patterns = self._build_exclude_patterns(self.exclude_globs)
+        self._exclude_regex = self._compile_exclude_regex(self._exclude_patterns)
         self.stats = {
             "total_files": 0,
             "total_dirs": 0,
@@ -101,6 +103,28 @@ class AtlasScanner:
                     patterns.append(candidate)
         return patterns
 
+    @staticmethod
+    def _compile_exclude_regex(patterns: List[str]) -> Pattern:
+        if not patterns:
+            return re.compile(r"(?!x)x") # Matches nothing
+
+        # Check if filesystem is case-insensitive to determine regex flags
+        is_case_insensitive = os.path.normcase("A") == os.path.normcase("a")
+        flags = re.IGNORECASE if is_case_insensitive else 0
+
+        regex_parts = []
+        for pat in patterns:
+            # Ensure pattern uses forward slashes (already done in _build_exclude_patterns, but explicitly safe)
+            if os.sep != "/":
+                pat = pat.replace(os.sep, "/")
+
+            # fnmatch.translate converts glob to regex (e.g., *.txt -> (?s:.*\.txt)\Z)
+            # We join them with OR
+            regex_parts.append(fnmatch.translate(pat))
+
+        combined = "|".join(regex_parts)
+        return re.compile(combined, flags)
+
     def _is_excluded(self, path: Path) -> bool:
         # Check against globs
         # We match relative path from root
@@ -110,9 +134,8 @@ class AtlasScanner:
             return True # Should not happen if walking from root
 
         str_path = rel_path.as_posix()
-        for pattern in self._exclude_patterns:
-            if fnmatch.fnmatch(str_path, pattern):
-                return True
+        if self._exclude_regex.match(str_path):
+            return True
         return False
 
     def scan(self, inventory_file: Optional[Path] = None, dirs_inventory_file: Optional[Path] = None) -> Dict[str, Any]:
