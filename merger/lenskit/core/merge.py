@@ -1899,11 +1899,11 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
                 continue
 
             try:
-                st = entry.stat()
+                st = entry.stat(follow_symlinks=False)
             except OSError:
                 continue
 
-            if entry.is_dir():
+            if entry.is_dir(follow_symlinks=False):
                  child_node = _walk(full, depth + 1)
                  node["children"].append(child_node)
             else:
