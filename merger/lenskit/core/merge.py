@@ -1878,11 +1878,13 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
 
         try:
             # Sort for deterministic output
-            entries = sorted(os.listdir(path))
+            with os.scandir(path) as it:
+                entries = sorted(it, key=lambda e: e.name)
         except OSError:
             return node
 
-        for name in entries:
+        for entry in entries:
+            name = entry.name
             full = path / name
 
             # Compute relpath for check
@@ -1893,15 +1895,15 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
                 continue
 
             # Symlink Check (Security/Recursion)
-            if full.is_symlink():
+            if entry.is_symlink():
                 continue
 
             try:
-                st = full.stat()
+                st = entry.stat()
             except OSError:
                 continue
 
-            if full.is_dir():
+            if entry.is_dir():
                  child_node = _walk(full, depth + 1)
                  node["children"].append(child_node)
             else:
