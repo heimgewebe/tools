@@ -2026,6 +2026,9 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
     limit_bytes: Optional[int] = max_bytes if max_bytes and max_bytes > 0 else None
 
+    # Pre-normalize root for robust containment checks
+    root_norm = os.path.normpath(os.path.abspath(root_str))
+
     for dirpath, dirnames, filenames in os.walk(root_str):
         # Filter directories
         keep_dirs = []
@@ -2034,6 +2037,26 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 continue
             keep_dirs.append(d)
         dirnames[:] = keep_dirs
+
+        # Security Guardrail (Directory Level)
+        # We check the directory once. If dirpath is safely inside root_norm,
+        # then all its files (which are simple names) are also safe.
+        # This avoids repeating expensive commonpath checks for every file.
+        dirpath_norm = os.path.normpath(os.path.abspath(dirpath))
+        try:
+            is_dir_safe = os.path.commonpath([root_norm, dirpath_norm]) == root_norm
+        except ValueError:
+            # Can happen on Windows if drives differ
+            is_dir_safe = False
+
+        if not is_dir_safe:
+            # Skip entire directory if it breaks containment (e.g. symlink traversal out)
+            # Note: os.walk descends into dirs, so we should arguably clear dirnames to stop recursion,
+            # but here we just skip processing files.
+            # If safe recursion is desired, we should also clear dirnames[:] here.
+            # But strictly speaking, the check is for the files we are about to add.
+            dirnames[:] = []
+            continue
 
         # Calculate relative directory once per folder
         if dirpath == root_str:
@@ -2052,22 +2075,16 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
             else:
                 rel_path_str = fn
 
-            abs_path = Path(dirpath) / fn
-            rel_path = Path(rel_path_str)
-
-            # Security Guardrail (explicit containment check)
-            # Despite os.walk providing containment, we explicitly assert it here
-            # to prevent any future regression or traversal risks if logic changes.
-            # Using root_guard (with trailing slash) prevents partial prefix matches.
-            if not str(abs_path).startswith(root_guard):
-                continue
+            # Optimization: Defer Path object creation until we confirm the file should be processed
+            abs_path_str = os.path.join(dirpath, fn)
 
             # Filter Logic with Force Include
             is_critical = is_critical_file(rel_path_str)
             inclusion_reason = "normal"
 
             if is_critical:
-                ext = abs_path.suffix.lower()
+                _, ext = os.path.splitext(fn)
+                ext = ext.lower()
                 inclusion_reason = "force_include"
             else:
                 # Include Paths Check (Whitelist)
@@ -2088,9 +2105,14 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
                 if path_filter and path_filter not in rel_path_str:
                     continue
 
-                ext = abs_path.suffix.lower()
+                _, ext = os.path.splitext(fn)
+                ext = ext.lower()
                 if ext_filter is not None and ext not in ext_filter:
                     continue
+
+            # Now create Path objects for further processing
+            abs_path = Path(abs_path_str)
+            rel_path = Path(rel_path_str)
 
             try:
                 st = abs_path.stat()
