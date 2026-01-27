@@ -153,7 +153,7 @@ def sync_repo(
     target_filter: Optional[List[str]] = None,
     source_hashes: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
-        """
+    """
     Sync a single repository against the manifest.
 
     Args:
@@ -358,7 +358,7 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
 
             h = compute_file_hash(p)
             # Only cache valid sha256 hex digests (avoid "" / "ERROR" / other sentinels)
-            if h and h != "ERROR" and len(h) == 64 and all(c in "0123456789abcdef" for c in h):
+            if h and h != HASH_COMPUTATION_ERROR and len(h) == 64 and all(c in "0123456789abcdef" for c in h):
                 source_hashes[entry_id] = h
             else:
                 logger.warning(f"Invalid hash computed for entry_id={entry_id} src={src_rel}: {h!r}")
@@ -425,15 +425,6 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
 
     # Sort repos by name for deterministic output
     sorted_results = dict(sorted(results.items()))
-
-    return {
-        "status": final_status,
-        "mode": mode,
-        "manifest_version": manifest.get("version"),
-        "timestamp": datetime.datetime.now(timezone.utc).isoformat(),
-        "aggregate_summary": aggregated_summary,
-        "repos": sorted_results
-    }
 
     return {
         "status": final_status,
