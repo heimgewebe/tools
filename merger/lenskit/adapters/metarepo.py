@@ -10,6 +10,7 @@ import hashlib
 import datetime
 import shutil
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -145,7 +146,8 @@ def sync_repo(
     metarepo_root: Path,
     manifest: Dict[str, Any],
     mode: str,
-    target_filter: Optional[List[str]] = None
+    target_filter: Optional[List[str]] = None,
+    source_hashes: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Sync a single repository against the manifest.
@@ -201,7 +203,10 @@ def sync_repo(
             report["status"] = "error"
             continue
 
-        src_hash = compute_file_hash(src_path)
+        if source_hashes and entry_id in source_hashes:
+            src_hash = source_hashes[entry_id]
+        else:
+            src_hash = compute_file_hash(src_path)
 
         for tgt_rel in target_rels:
             try:
@@ -318,7 +323,22 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
     results = {}
     aggregated_summary = {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 0}
 
+    # Pre-compute source hashes to avoid redundant I/O
+    source_hashes = {}
+    for entry in manifest.get("entries", []):
+        entry_id = entry.get("id")
+        src_rel = entry.get("source")
+        if not entry_id or not src_rel:
+            continue
+        try:
+            p = resolve_secure_path(metarepo_root, src_rel)
+            if p.exists():
+                source_hashes[entry_id] = compute_file_hash(p)
+        except Exception:
+            pass
+
     # Iterate over repos in hub
+    valid_repos = []
     for item in hub_path.iterdir():
         if not item.is_dir():
             continue
@@ -334,15 +354,34 @@ def sync_from_metarepo(hub_path: Path, mode: str = "dry_run", targets: Optional[
         has_git = (item / ".git").exists()
         has_ai_context = (item / ".ai-context.yml").exists()
 
-        if not (has_git or has_ai_context):
-            continue
+        if has_git or has_ai_context:
+            valid_repos.append(item)
 
-        repo_report = sync_repo(item, metarepo_root, manifest, mode, targets)
-        results[item.name] = repo_report
+    # Parallelize repo sync
+    # Use max_workers=8 to balance I/O overlap and context switching overhead
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_to_repo = {
+            executor.submit(sync_repo, repo, metarepo_root, manifest, mode, targets, source_hashes): repo.name
+            for repo in valid_repos
+        }
 
-        # Aggregate
-        for k in aggregated_summary:
-            aggregated_summary[k] += repo_report["summary"].get(k, 0)
+        for future in as_completed(future_to_repo):
+            repo_name = future_to_repo[future]
+            try:
+                repo_report = future.result()
+                results[repo_name] = repo_report
+
+                # Aggregate
+                for k in aggregated_summary:
+                    aggregated_summary[k] += repo_report["summary"].get(k, 0)
+            except Exception as exc:
+                logger.error(f"Sync failed for {repo_name}: {exc}")
+                aggregated_summary["error"] += 1
+                results[repo_name] = {
+                    "status": "error",
+                    "details": [{"action": "ERROR", "reason": str(exc)}],
+                    "summary": {"add": 0, "update": 0, "skip": 0, "blocked": 0, "error": 1}
+                }
 
     return {
         "status": "ok",
