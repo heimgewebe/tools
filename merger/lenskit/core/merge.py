@@ -86,13 +86,20 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    # Moved anchor INSIDE the header to ensure it travels with the block in strict renderers.
-    anchor = f'<a id="{token}"></a>'
+    # The anchor is placed on the line immediately before the heading (no blank line).
+    # This approach is compatible across CommonMark and GitHub-flavored Markdown renderers:
+    # - Placing the anchor inline within the heading can cause rendering issues (visible HTML,
+    #   broken TOC generation, or stripped anchors depending on the parser).
+    # - A blank line before the heading would cause some renderers to treat the anchor as
+    #   a separate paragraph, making the scroll target appear above the visible heading.
+    # - Placing it immediately before (zero blank lines) keeps the anchor associated with
+    #   the heading while maintaining broad parser compatibility.
+    lines.append(f'<a id="{token}"></a>')
 
     if title:
-        lines.append("#" * level + " " + anchor + " " + title)
+        lines.append("#" * level + " " + title)
     else:
-        lines.append("#" * level + " " + anchor + " " + token)
+        lines.append("#" * level + " " + token)
 
     lines.append("")
     return lines
