@@ -104,7 +104,6 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     safe_token = re.sub(r'[^a-zA-Z0-9._:-]', '-', token)
     if safe_token != token:
         # Log a warning in case unsanitized tokens slip through (should not happen in practice)
-        import sys
         print(f"WARNING: Token '{token}' contained unsafe characters, sanitized to '{safe_token}'", file=sys.stderr)
     
     lines.append(f'<a id="{safe_token}"></a>')

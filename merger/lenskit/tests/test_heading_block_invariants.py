@@ -89,9 +89,9 @@ def test_anchor_structure_without_title():
         if line.startswith("### ") and "manifest" in line:
             heading_idx = i
     
-    assert anchor_idx is not None
-    assert heading_idx is not None
-    assert heading_idx == anchor_idx + 1
+    assert anchor_idx is not None, "Anchor not found in output"
+    assert heading_idx is not None, "Heading not found in output"
+    assert heading_idx == anchor_idx + 1, "Heading must immediately follow anchor"
 
 
 def test_token_sanitization_for_html_id():
@@ -101,7 +101,7 @@ def test_token_sanitization_for_html_id():
     This is a defense-in-depth measure even though tokens should already
     be sanitized by _slug_token() before reaching _heading_block.
     """
-    # Test with various potentially unsafe characters
+    # Test with various potentially unsafe characters and expected sanitized output
     unsafe_tokens = [
         ('test"token', 'test-token'),  # Double quote
         ('test<script>', 'test-script-'),  # HTML tags
@@ -110,7 +110,7 @@ def test_token_sanitization_for_html_id():
         ('test/token', 'test-token'),  # Slash
     ]
     
-    for unsafe, expected_pattern in unsafe_tokens:
+    for unsafe, expected_sanitized in unsafe_tokens:
         result = merge._heading_block(2, unsafe, "Title")
         
         # Find the anchor line
@@ -127,6 +127,11 @@ def test_token_sanitization_for_html_id():
         assert match is not None, f"Could not parse anchor from: {anchor_line}"
         
         sanitized_id = match.group(1)
+        
+        # Verify the sanitized output matches expected
+        assert sanitized_id == expected_sanitized, (
+            f"Token '{unsafe}' should be sanitized to '{expected_sanitized}', got '{sanitized_id}'"
+        )
         
         # Verify no unsafe characters remain
         assert '"' not in sanitized_id, f"Double quote not sanitized in: {sanitized_id}"
