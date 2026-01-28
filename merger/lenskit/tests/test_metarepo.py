@@ -1,8 +1,13 @@
 import yaml
+from typing import Any
 from pathlib import Path
 from unittest.mock import patch
 
-from merger.lenskit.adapters.metarepo import sync_from_metarepo, MANIFEST_REL_PATH
+from merger.lenskit.adapters.metarepo import (
+    sync_from_metarepo,
+    MANIFEST_REL_PATH,
+    HASH_COMPUTATION_ERROR,
+)
 
 
 def test_metarepo_sync_parallel(tmp_path: Path) -> None:
@@ -173,3 +178,117 @@ def test_metarepo_sync_error_handling(tmp_path: Path) -> None:
     # Deterministic ordering
     repo_keys = list(report["repos"].keys())
     assert repo_keys == sorted(repo_keys)
+
+
+def test_source_hash_error(tmp_path: Path) -> None:
+    """
+    Test that a hash computation error on the source file results in an ERROR action
+    and error status for the repository.
+    """
+    hub_path = tmp_path / "hub"
+    hub_path.mkdir()
+
+    metarepo = hub_path / "metarepo"
+    metarepo.mkdir()
+    (metarepo / "sync").mkdir()
+
+    # Create source file
+    source_file = metarepo / "bad_hash.txt"
+    source_file.write_text("content", encoding="utf-8")
+
+    manifest = {
+        "version": 1,
+        "entries": [
+            {
+                "id": "bad_hash",
+                "source": "bad_hash.txt",
+                "targets": ["target.txt"],
+                "mode": "copy",
+            }
+        ],
+    }
+    with (metarepo / MANIFEST_REL_PATH).open("w", encoding="utf-8") as f:
+        yaml.dump(manifest, f)
+
+    repo_path = hub_path / "repo1"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+
+    # Patch compute_file_hash to return HASH_COMPUTATION_ERROR for source
+    with patch("merger.lenskit.adapters.metarepo.compute_file_hash") as mock_hash:
+        def side_effect(path: Path) -> str:
+            if path.name == "bad_hash.txt":
+                return HASH_COMPUTATION_ERROR
+            return "fakehash"
+
+        mock_hash.side_effect = side_effect
+        report = sync_from_metarepo(hub_path, mode="apply")
+
+    assert report["status"] == "error"
+    assert report["aggregate_summary"]["error"] == 1
+
+    repo_report = report["repos"]["repo1"]
+    assert repo_report["status"] == "error"
+    assert repo_report["summary"]["error"] == 1
+
+    details = repo_report["details"][0]
+    assert details["action"] == "ERROR"
+    assert details["reason"] == "source_hash_failed"
+
+
+def test_target_hash_error(tmp_path: Path) -> None:
+    """
+    Test that a hash computation error on the target file results in an ERROR action
+    and error status for the repository.
+    """
+    hub_path = tmp_path / "hub"
+    hub_path.mkdir()
+
+    metarepo = hub_path / "metarepo"
+    metarepo.mkdir()
+    (metarepo / "sync").mkdir()
+
+    source_file = metarepo / "good.txt"
+    source_file.write_text("content", encoding="utf-8")
+
+    manifest = {
+        "version": 1,
+        "entries": [
+            {
+                "id": "good",
+                "source": "good.txt",
+                "targets": ["target.txt"],
+                "mode": "copy",
+            }
+        ],
+    }
+    with (metarepo / MANIFEST_REL_PATH).open("w", encoding="utf-8") as f:
+        yaml.dump(manifest, f)
+
+    repo_path = hub_path / "repo1"
+    repo_path.mkdir()
+    (repo_path / ".git").mkdir()
+
+    # Create target file
+    target_file = repo_path / "target.txt"
+    target_file.write_text("existing content", encoding="utf-8")
+
+    # Patch compute_file_hash to return HASH_COMPUTATION_ERROR for target
+    with patch("merger.lenskit.adapters.metarepo.compute_file_hash") as mock_hash:
+        def side_effect(path: Path) -> str:
+            if path.name == "target.txt":
+                return HASH_COMPUTATION_ERROR
+            return "somehash"  # For source file
+
+        mock_hash.side_effect = side_effect
+        report = sync_from_metarepo(hub_path, mode="apply")
+
+    assert report["status"] == "error"
+    assert report["aggregate_summary"]["error"] == 1
+
+    repo_report = report["repos"]["repo1"]
+    assert repo_report["status"] == "error"
+
+    details = repo_report["details"][0]
+    assert details["action"] == "ERROR"
+    assert details["reason"] == "target_hash_failed"
