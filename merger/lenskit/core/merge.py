@@ -9,6 +9,7 @@ Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 import os
 import sys
 import json
+import html
 import hashlib
 import datetime
 import re
@@ -86,13 +87,12 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    # Moved anchor INSIDE the header to ensure it travels with the block in strict renderers.
-    anchor = f'<a id="{token}"></a>'
-
-    if title:
-        lines.append("#" * level + " " + anchor + " " + title)
-    else:
-        lines.append("#" * level + " " + anchor + " " + token)
+    # We use explicit HTML headings <hN id="..."> to ensure robust anchor attachment
+    # (travels with block) without embedding raw HTML <a> tags inside Markdown headers,
+    # which is risky/parser-dependent.
+    # Security: Escape title content to prevent broken HTML if title contains special chars.
+    display_text = html.escape(title if title else token)
+    lines.append(f'<h{level} id="{token}">{display_text}</h{level}>')
 
     lines.append("")
     return lines
@@ -2896,7 +2896,18 @@ class ReportValidator:
         if self.in_code_block:
             return
 
-        if not stripped.startswith("#"):
+        # Support both Markdown headings (#) and HTML headings (<hN>)
+        is_markdown_heading = stripped.startswith("#")
+        is_html_heading = False
+        html_level = 0
+
+        if stripped.startswith("<h"):
+            match = re.match(r"^<h([1-6])", stripped)
+            if match:
+                is_html_heading = True
+                html_level = int(match.group(1))
+
+        if not is_markdown_heading and not is_html_heading:
             return
 
         # Identify section
@@ -2907,7 +2918,7 @@ class ReportValidator:
 
         # Helper: only treat *level-2* headings ("## ") as report sections.
         # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
-        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
+        is_h2 = (stripped.startswith("## ") and not stripped.startswith("###")) or (is_html_heading and html_level == 2)
 
         if stripped.startswith("# repoLens Report"):
             current_step = "header"
