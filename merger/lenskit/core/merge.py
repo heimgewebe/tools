@@ -70,6 +70,9 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     `#manifest` or `#file-tools-...`, we emit an explicit HTML anchor before the
     tokenized heading. This keeps links working when either heading IDs *or*
     HTML anchors are supported by the renderer.
+
+    Contract: `token` must be a valid HTML id attribute value (alphanumeric + hyphens).
+    All dynamic tokens should be passed through _slug_token() before calling this function.
     """
 
     # NOTE:
@@ -94,7 +97,17 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     #   a separate paragraph, making the scroll target appear above the visible heading.
     # - Placing it immediately before (zero blank lines) keeps the anchor associated with
     #   the heading while maintaining broad parser compatibility.
-    lines.append(f'<a id="{token}"></a>')
+    
+    # Sanitize token for HTML id attribute: only allow alphanumeric, hyphens, underscores, colons, periods.
+    # While _slug_token() already sanitizes most inputs, we enforce this here as a defense-in-depth measure
+    # to prevent any potential HTML injection or invalid attributes from reaching the output.
+    safe_token = re.sub(r'[^a-zA-Z0-9._:-]', '-', token)
+    if safe_token != token:
+        # Log a warning in case unsanitized tokens slip through (should not happen in practice)
+        import sys
+        print(f"WARNING: Token '{token}' contained unsafe characters, sanitized to '{safe_token}'", file=sys.stderr)
+    
+    lines.append(f'<a id="{safe_token}"></a>')
 
     if title:
         lines.append("#" * level + " " + title)
