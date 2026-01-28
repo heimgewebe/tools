@@ -86,12 +86,13 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    lines.append(f'<a id="{token}"></a>')
+    # Moved anchor INSIDE the header to ensure it travels with the block in strict renderers.
+    anchor = f'<a id="{token}"></a>'
 
     if title:
-        lines.append("#" * level + " " + title)
+        lines.append("#" * level + " " + anchor + " " + title)
     else:
-        lines.append("#" * level + " " + token)
+        lines.append("#" * level + " " + anchor + " " + token)
 
     lines.append("")
     return lines
