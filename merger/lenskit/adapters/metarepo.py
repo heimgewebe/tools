@@ -214,6 +214,14 @@ def sync_repo(
         else:
             src_hash = compute_file_hash(src_path)
 
+        if src_hash == HASH_COMPUTATION_ERROR:
+            report["details"].append(
+                {"id": entry_id, "target": src_rel, "action": "ERROR", "reason": "source_hash_failed"}
+            )
+            report["summary"]["error"] += 1
+            report["status"] = "error"
+            continue
+
         for tgt_rel in target_rels:
             try:
                 tgt_path = resolve_secure_path(repo_root, tgt_rel)
@@ -237,7 +245,10 @@ def sync_repo(
                 action = "ADD"
             else:
                 tgt_hash = compute_file_hash(tgt_path)
-                if tgt_hash == src_hash:
+                if tgt_hash == HASH_COMPUTATION_ERROR:
+                    action = "ERROR"
+                    reason = "target_hash_failed"
+                elif tgt_hash == src_hash:
                     action = "SKIP"
                     reason = "identical"
                 else:
