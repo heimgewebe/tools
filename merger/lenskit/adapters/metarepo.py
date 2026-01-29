@@ -248,6 +248,7 @@ def sync_repo(
                 if tgt_hash == HASH_COMPUTATION_ERROR:
                     action = "ERROR"
                     reason = "target_hash_failed"
+                    report["status"] = "error"
                 elif tgt_hash == src_hash:
                     action = "SKIP"
                     reason = "identical"

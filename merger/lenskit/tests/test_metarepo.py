@@ -219,7 +219,7 @@ def test_source_hash_error(tmp_path: Path) -> None:
         def side_effect(path: Path) -> str:
             if path.name == "bad_hash.txt":
                 return HASH_COMPUTATION_ERROR
-            return "fakehash"
+            return "a" * 64
 
         mock_hash.side_effect = side_effect
         report = sync_from_metarepo(hub_path, mode="apply")
@@ -278,7 +278,7 @@ def test_target_hash_error(tmp_path: Path) -> None:
         def side_effect(path: Path) -> str:
             if path.name == "target.txt":
                 return HASH_COMPUTATION_ERROR
-            return "somehash"  # For source file
+            return "b" * 64  # For source file
 
         mock_hash.side_effect = side_effect
         report = sync_from_metarepo(hub_path, mode="apply")
