@@ -104,7 +104,7 @@ def test_token_sanitization_for_html_id():
     # Test with various potentially unsafe characters and expected sanitized output
     unsafe_tokens = [
         ('test"token', 'test-token'),  # Double quote
-        ('test<script>', 'test-script-'),  # HTML tags
+        ('test<script>', 'test-script'),  # HTML tags (trailing - stripped by _slug_token)
         ('test token', 'test-token'),  # Space
         ('test&token', 'test-token'),  # Ampersand
         ('test/token', 'test-token'),  # Slash

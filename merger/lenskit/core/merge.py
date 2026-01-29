@@ -9,7 +9,6 @@ Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 import os
 import sys
 import json
-import html
 import hashlib
 import datetime
 import re
