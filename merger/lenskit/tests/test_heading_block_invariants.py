@@ -14,12 +14,15 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         1. <a id="..."></a>
         2. ## Title (or Token)
         3. Blank line
+        
+        Note: Additional lines may appear before these (e.g., search markers),
+        so we check the last 3 lines to ensure robustness.
         """
         lines = merge._heading_block(2, "my-token", "My Title")
-        self.assertEqual(len(lines), 3)
-        self.assertRegex(lines[0], r'^<a id="[^"]+"></a>$')
-        self.assertRegex(lines[1], r'^## My Title$')
-        self.assertEqual(lines[2], "")
+        # Check the last 3 lines to handle optional search markers
+        self.assertRegex(lines[-3], r'^<a id="[^"]+"></a>$')
+        self.assertRegex(lines[-2], r'^## My Title$')
+        self.assertEqual(lines[-1], "")
 
     def test_sanitization_invariant_safe_token(self):
         """
@@ -46,8 +49,11 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         self.assertTrue(match, "Anchor tag with ID not found")
         generated_id = match.group(1)
 
-        # Invariant: ID must be safe HTML4/5 compatible (we use stricter slug logic)
-        # Should match ^[a-z0-9-]+$ based on _slug_token logic
+        # Invariant: ID must be safe for HTML IDs.
+        # When sanitized via _slug_token, it produces lowercase alphanumeric + hyphens.
+        # When safe tokens pass through, they can include [A-Za-z0-9._:-]
+        # Here we're testing an unsafe token, so it goes through _slug_token
+        # which produces [a-z0-9-]+ output.
         self.assertRegex(generated_id, r'^[a-z0-9-]+$')
 
         # Invariant: unsafe chars should be gone

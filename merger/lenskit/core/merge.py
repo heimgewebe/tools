@@ -91,7 +91,7 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     # Validation/Sanitization:
     # If token is safe (alphanumeric + . _ : -), use it directly.
     # Otherwise, fallback to _slug_token to ensure valid HTML ID.
-    if re.match(r"^[A-Za-z0-9._:-]+$", token):
+    if re.fullmatch(r"[A-Za-z0-9._:-]+", token):
         safe_token = token
     else:
         safe_token = _slug_token(token)
