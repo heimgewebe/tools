@@ -297,9 +297,11 @@ class TestMergeCore(unittest.TestCase):
         # We know md5 prefix is d41d8c
         full_anchor = f"{base_anchor}-d41d8c"
 
-        # Check for HTML heading tag (primary robustness mechanism)
-        # We now use <hN id="..."> instead of inline or separate anchors
-        self.assertIn(f'<h4 id="{full_anchor}">src/My File.txt</h4>', full_report)
+        # Check for HTML anchor tag (primary robustness mechanism)
+        self.assertIn(f'<a id="{full_anchor}"></a>', full_report)
+
+        # Check for visible heading (Option A style)
+        self.assertIn(f"#### src/My File.txt", full_report)
 
         # Check for alias anchor (legacy/backward compatibility)
         self.assertIn(f'<a id="{base_anchor}"></a>', full_report)
