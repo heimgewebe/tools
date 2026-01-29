@@ -62,7 +62,12 @@ class NavStyle:
     emit_search_markers: bool = False
 
 
-def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Optional[NavStyle] = None) -> List[str]:
+def _heading_block(
+    level: int,
+    token: str,
+    title: Optional[str] = None,
+    nav: Optional[NavStyle] = None,
+) -> List[str]:
     """
     Return heading lines with stable token-based ids and optional title.
 
@@ -71,6 +76,9 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     `#manifest` or `#file-tools-...`, we emit an explicit HTML anchor before the
     tokenized heading. This keeps links working when either heading IDs *or*
     HTML anchors are supported by the renderer.
+
+    Contract: `token` must be a valid HTML id attribute value (alphanumeric + hyphens).
+    All dynamic tokens should be passed through _slug_token() before calling this function.
     """
 
     # NOTE:
@@ -87,12 +95,26 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    # We use explicit HTML headings <hN id="..."> to ensure robust anchor attachment
-    # (travels with block) without embedding raw HTML <a> tags inside Markdown headers,
-    # which is risky/parser-dependent.
-    # Security: Escape title content to prevent broken HTML if title contains special chars.
-    display_text = html.escape(title if title else token)
-    lines.append(f'<h{level} id="{token}">{display_text}</h{level}>')
+    #
+    # Anchor strategy:
+    # - Anchor is placed on the line immediately before the heading (no blank line).
+    # - Inline anchors inside Markdown headings can break rendering / TOC generation depending on parser.
+    # - A blank line would turn the anchor into a separate paragraph in some renderers,
+    #   shifting the scroll target above the visible heading.
+    #
+    # Defense-in-depth: enforce a safe HTML id token even if a caller violates the contract.
+    # Keep the anchor id and the heading token consistent.
+    if re.fullmatch(r"[A-Za-z0-9._:-]+", token):
+        safe_token = token
+    else:
+        safe_token = _slug_token(token)
+
+    lines.append(f'<a id="{safe_token}"></a>')
+
+    if title:
+        lines.append("#" * level + " " + title)
+    else:
+        lines.append("#" * level + " " + safe_token)
 
     lines.append("")
     return lines
