@@ -9,6 +9,7 @@ Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 import os
 import sys
 import json
+import html
 import hashlib
 import datetime
 import re
@@ -61,7 +62,12 @@ class NavStyle:
     emit_search_markers: bool = False
 
 
-def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Optional[NavStyle] = None) -> List[str]:
+def _heading_block(
+    level: int,
+    token: str,
+    title: Optional[str] = None,
+    nav: Optional[NavStyle] = None,
+) -> List[str]:
     """
     Return heading lines with stable token-based ids and optional title.
 
@@ -89,29 +95,26 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    # The anchor is placed on the line immediately before the heading (no blank line).
-    # This approach is compatible across CommonMark and GitHub-flavored Markdown renderers:
-    # - Placing the anchor inline within the heading can cause rendering issues (visible HTML,
-    #   broken TOC generation, or stripped anchors depending on the parser).
-    # - A blank line before the heading would cause some renderers to treat the anchor as
-    #   a separate paragraph, making the scroll target appear above the visible heading.
-    # - Placing it immediately before (zero blank lines) keeps the anchor associated with
-    #   the heading while maintaining broad parser compatibility.
-    
-    # Sanitize token for HTML id attribute: only allow alphanumeric, hyphens, underscores, colons, periods.
-    # While _slug_token() already sanitizes most inputs, we enforce this here as a defense-in-depth measure
-    # to prevent any potential HTML injection or invalid attributes from reaching the output.
-    safe_token = re.sub(r'[^a-zA-Z0-9._:-]', '-', token)
-    if safe_token != token:
-        # Log a warning in case unsanitized tokens slip through (should not happen in practice)
-        print(f"WARNING: Token '{token}' contained unsafe characters, sanitized to '{safe_token}'", file=sys.stderr)
-    
+    #
+    # Anchor strategy:
+    # - Anchor is placed on the line immediately before the heading (no blank line).
+    # - Inline anchors inside Markdown headings can break rendering / TOC generation depending on parser.
+    # - A blank line would turn the anchor into a separate paragraph in some renderers,
+    #   shifting the scroll target above the visible heading.
+    #
+    # Defense-in-depth: enforce a safe HTML id token even if a caller violates the contract.
+    # Keep the anchor id and the heading token consistent.
+    if re.fullmatch(r"[A-Za-z0-9._:-]+", token):
+        safe_token = token
+    else:
+        safe_token = _slug_token(token)
+
     lines.append(f'<a id="{safe_token}"></a>')
 
     if title:
         lines.append("#" * level + " " + title)
     else:
-        lines.append("#" * level + " " + token)
+        lines.append("#" * level + " " + safe_token)
 
     lines.append("")
     return lines
@@ -2915,7 +2918,18 @@ class ReportValidator:
         if self.in_code_block:
             return
 
-        if not stripped.startswith("#"):
+        # Support both Markdown headings (#) and HTML headings (<hN>)
+        is_markdown_heading = stripped.startswith("#")
+        is_html_heading = False
+        html_level = 0
+
+        if stripped.startswith("<h"):
+            match = re.match(r"^<h([1-6])", stripped)
+            if match:
+                is_html_heading = True
+                html_level = int(match.group(1))
+
+        if not is_markdown_heading and not is_html_heading:
             return
 
         # Identify section
@@ -2926,7 +2940,7 @@ class ReportValidator:
 
         # Helper: only treat *level-2* headings ("## ") as report sections.
         # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
-        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
+        is_h2 = (stripped.startswith("## ") and not stripped.startswith("###")) or (is_html_heading and html_level == 2)
 
         if stripped.startswith("# repoLens Report"):
             current_step = "header"
