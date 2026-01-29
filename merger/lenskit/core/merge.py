@@ -101,6 +101,9 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
     if title:
         lines.append("#" * level + " " + title)
     else:
+        # Note: If no title is provided, we use safe_token (sanitized) as the visible text.
+        # This ensures the visible heading matches the anchor ID for consistency,
+        # even if the original token contained unsafe characters.
         lines.append("#" * level + " " + safe_token)
 
     lines.append("")

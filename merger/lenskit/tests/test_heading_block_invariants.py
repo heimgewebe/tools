@@ -26,10 +26,12 @@ class TestHeadingBlockInvariants(unittest.TestCase):
     def test_sanitization_invariant_safe_token(self):
         """
         Invariant: Safe tokens (alphanumeric + . _ : -) are preserved as-is.
+        We check the end of the list for robustness.
         """
         token = "safe-token.123_test"
         lines = merge._heading_block(2, token)
-        # Anchor should use token exactly (check last 3 lines for robustness)
+        self.assertGreaterEqual(len(lines), 3)
+        # Anchor should use token exactly
         self.assertIn(f'<a id="{token}"></a>', lines[-3])
         # Heading should use token if no title provided
         self.assertIn(f"## {token}", lines[-2])
@@ -63,11 +65,13 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         """
         Invariant: If title is provided, it is used in the Markdown heading.
         The token is still used for the anchor.
+        We check the end of the list for robustness.
         """
         token = "token-123"
         title = "Display Title"
         lines = merge._heading_block(2, token, title)
 
+        self.assertGreaterEqual(len(lines), 3)
         self.assertIn(f'<a id="{token}"></a>', lines[-3])
         self.assertIn(f"## {title}", lines[-2])
         self.assertNotIn(f"## {token}", lines[-2]) # Token should not be in heading if title exists
@@ -75,10 +79,12 @@ class TestHeadingBlockInvariants(unittest.TestCase):
     def test_no_inline_html_in_heading(self):
         """
         Invariant: The Markdown heading line MUST NOT contain the anchor tag.
+        We check the heading line (lines[-2]) for robustness.
         """
         token = "token"
         title = "Title"
         lines = merge._heading_block(2, token, title)
+        self.assertGreaterEqual(len(lines), 3)
         heading_line = lines[-2]
 
         self.assertNotIn("<a", heading_line)
