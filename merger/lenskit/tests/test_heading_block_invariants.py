@@ -30,10 +30,11 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         """
         token = "safe-token.123_test"
         lines = merge._heading_block(2, token)
+        # Use negative indices for robustness (handles optional search markers)
         # Anchor should use token exactly
-        self.assertIn(f'<a id="{token}"></a>', lines[0])
+        self.assertIn(f'<a id="{token}"></a>', lines[-3])
         # Heading should use token if no title provided
-        self.assertIn(f"## {token}", lines[1])
+        self.assertIn(f"## {token}", lines[-2])
 
     def test_sanitization_invariant_unsafe_token(self):
         """
@@ -44,8 +45,8 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         unsafe_token = "unsafe/token with spaces & symbols!"
         lines = merge._heading_block(2, unsafe_token)
 
-        # Extract the ID used
-        match = re.search(r'id="([^"]+)"', lines[0])
+        # Extract the ID used (use negative index for robustness)
+        match = re.search(r'id="([^"]+)"', lines[-3])
         self.assertTrue(match, "Anchor tag with ID not found")
         generated_id = match.group(1)
 
@@ -71,9 +72,10 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         title = "Display Title"
         lines = merge._heading_block(2, token, title)
 
-        self.assertIn(f'<a id="{token}"></a>', lines[0])
-        self.assertIn(f"## {title}", lines[1])
-        self.assertNotIn(f"## {token}", lines[1]) # Token should not be in heading if title exists
+        # Use negative indices for robustness (handles optional search markers)
+        self.assertIn(f'<a id="{token}"></a>', lines[-3])
+        self.assertIn(f"## {title}", lines[-2])
+        self.assertNotIn(f"## {token}", lines[-2]) # Token should not be in heading if title exists
 
     def test_no_inline_html_in_heading(self):
         """
@@ -82,7 +84,8 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         token = "token"
         title = "Title"
         lines = merge._heading_block(2, token, title)
-        heading_line = lines[1]
+        # Use negative index for robustness (handles optional search markers)
+        heading_line = lines[-2]
 
         self.assertNotIn("<a", heading_line)
         self.assertNotIn("</a>", heading_line)
