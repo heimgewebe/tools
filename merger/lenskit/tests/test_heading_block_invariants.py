@@ -14,12 +14,15 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         1. <a id="..."></a>
         2. ## Title (or Token)
         3. Blank line
+        
+        Note: Additional lines may appear before these (e.g., search markers),
+        so we check the last 3 lines to ensure robustness.
         """
         lines = merge._heading_block(2, "my-token", "My Title")
-        self.assertEqual(len(lines), 3)
-        self.assertRegex(lines[0], r'^<a id="[^"]+"></a>$')
-        self.assertRegex(lines[1], r'^## My Title$')
-        self.assertEqual(lines[2], "")
+        # Check the last 3 lines to handle optional search markers
+        self.assertRegex(lines[-3], r'^<a id="[^"]+"></a>$')
+        self.assertRegex(lines[-2], r'^## My Title$')
+        self.assertEqual(lines[-1], "")
 
     def test_sanitization_invariant_safe_token(self):
         """
@@ -27,10 +30,11 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         """
         token = "safe-token.123_test"
         lines = merge._heading_block(2, token)
+        # Use negative indices for robustness (handles optional search markers)
         # Anchor should use token exactly
-        self.assertIn(f'<a id="{token}"></a>', lines[0])
+        self.assertIn(f'<a id="{token}"></a>', lines[-3])
         # Heading should use token if no title provided
-        self.assertIn(f"## {token}", lines[1])
+        self.assertIn(f"## {token}", lines[-2])
 
     def test_sanitization_invariant_unsafe_token(self):
         """
@@ -41,13 +45,16 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         unsafe_token = "unsafe/token with spaces & symbols!"
         lines = merge._heading_block(2, unsafe_token)
 
-        # Extract the ID used
-        match = re.search(r'id="([^"]+)"', lines[0])
+        # Extract the ID used (use negative index for robustness)
+        match = re.search(r'id="([^"]+)"', lines[-3])
         self.assertTrue(match, "Anchor tag with ID not found")
         generated_id = match.group(1)
 
-        # Invariant: ID must be safe HTML4/5 compatible (we use stricter slug logic)
-        # Should match ^[a-z0-9-]+$ based on _slug_token logic
+        # Invariant: ID must be safe for HTML IDs.
+        # When sanitized via _slug_token, it produces lowercase alphanumeric + hyphens.
+        # When safe tokens pass through, they can include [A-Za-z0-9._:-]
+        # Here we're testing an unsafe token, so it goes through _slug_token
+        # which produces [a-z0-9-]+ output.
         self.assertRegex(generated_id, r'^[a-z0-9-]+$')
 
         # Invariant: unsafe chars should be gone
@@ -65,9 +72,10 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         title = "Display Title"
         lines = merge._heading_block(2, token, title)
 
-        self.assertIn(f'<a id="{token}"></a>', lines[0])
-        self.assertIn(f"## {title}", lines[1])
-        self.assertNotIn(f"## {token}", lines[1]) # Token should not be in heading if title exists
+        # Use negative indices for robustness (handles optional search markers)
+        self.assertIn(f'<a id="{token}"></a>', lines[-3])
+        self.assertIn(f"## {title}", lines[-2])
+        self.assertNotIn(f"## {token}", lines[-2]) # Token should not be in heading if title exists
 
     def test_no_inline_html_in_heading(self):
         """
@@ -76,7 +84,8 @@ class TestHeadingBlockInvariants(unittest.TestCase):
         token = "token"
         title = "Title"
         lines = merge._heading_block(2, token, title)
-        heading_line = lines[1]
+        # Use negative index for robustness (handles optional search markers)
+        heading_line = lines[-2]
 
         self.assertNotIn("<a", heading_line)
         self.assertNotIn("</a>", heading_line)
