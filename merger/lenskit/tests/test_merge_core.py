@@ -300,9 +300,7 @@ class TestMergeCore(unittest.TestCase):
         # Check for HTML anchor tag (primary robustness mechanism)
         self.assertIn(f'<a id="{full_anchor}"></a>', full_report)
 
-        # Check for Heading ID (implicit or tokenized)
-        # Spec v2.4: use readable title if available
-        # self.assertIn(f"#### {full_anchor}", full_report)
+        # Check for visible heading (Option A style)
         self.assertIn(f"#### src/My File.txt", full_report)
 
         # Check for alias anchor (legacy/backward compatibility)

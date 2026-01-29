@@ -86,12 +86,25 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    lines.append(f'<a id="{token}"></a>')
+    # Option A (Conservative): Separate anchor line + Markdown heading.
+
+    # Validation/Sanitization:
+    # If token is safe (alphanumeric + . _ : -), use it directly.
+    # Otherwise, fallback to _slug_token to ensure valid HTML ID.
+    if re.fullmatch(r"[A-Za-z0-9._:-]+", token):
+        safe_token = token
+    else:
+        safe_token = _slug_token(token)
+
+    lines.append(f'<a id="{safe_token}"></a>')
 
     if title:
         lines.append("#" * level + " " + title)
     else:
-        lines.append("#" * level + " " + token)
+        # Note: If no title is provided, we use safe_token (sanitized) as the visible text.
+        # This ensures the visible heading matches the anchor ID for consistency,
+        # even if the original token contained unsafe characters.
+        lines.append("#" * level + " " + safe_token)
 
     lines.append("")
     return lines
