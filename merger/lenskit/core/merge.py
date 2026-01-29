@@ -9,7 +9,6 @@ Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 import os
 import sys
 import json
-import html
 import hashlib
 import datetime
 import re
@@ -62,12 +61,7 @@ class NavStyle:
     emit_search_markers: bool = False
 
 
-def _heading_block(
-    level: int,
-    token: str,
-    title: Optional[str] = None,
-    nav: Optional[NavStyle] = None,
-) -> List[str]:
+def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Optional[NavStyle] = None) -> List[str]:
     """
     Return heading lines with stable token-based ids and optional title.
 
@@ -76,9 +70,6 @@ def _heading_block(
     `#manifest` or `#file-tools-...`, we emit an explicit HTML anchor before the
     tokenized heading. This keeps links working when either heading IDs *or*
     HTML anchors are supported by the renderer.
-
-    Contract: `token` must be a valid HTML id attribute value (alphanumeric + hyphens).
-    All dynamic tokens should be passed through _slug_token() before calling this function.
     """
 
     # NOTE:
@@ -95,16 +86,12 @@ def _heading_block(
 
     # Correction for readable headers (Spec v2.4):
     # Instead of "## token", we use "## Title" if available, keeping the anchor for linking.
-    #
-    # Anchor strategy:
-    # - Anchor is placed on the line immediately before the heading (no blank line).
-    # - Inline anchors inside Markdown headings can break rendering / TOC generation depending on parser.
-    # - A blank line would turn the anchor into a separate paragraph in some renderers,
-    #   shifting the scroll target above the visible heading.
-    #
-    # Defense-in-depth: enforce a safe HTML id token even if a caller violates the contract.
-    # Keep the anchor id and the heading token consistent.
-    if re.fullmatch(r"[A-Za-z0-9._:-]+", token):
+    # Option A (Conservative): Separate anchor line + Markdown heading.
+
+    # Validation/Sanitization:
+    # If token is safe (alphanumeric + . _ : -), use it directly.
+    # Otherwise, fallback to _slug_token to ensure valid HTML ID.
+    if re.match(r"^[A-Za-z0-9._:-]+$", token):
         safe_token = token
     else:
         safe_token = _slug_token(token)
@@ -2918,18 +2905,7 @@ class ReportValidator:
         if self.in_code_block:
             return
 
-        # Support both Markdown headings (#) and HTML headings (<hN>)
-        is_markdown_heading = stripped.startswith("#")
-        is_html_heading = False
-        html_level = 0
-
-        if stripped.startswith("<h"):
-            match = re.match(r"^<h([1-6])", stripped)
-            if match:
-                is_html_heading = True
-                html_level = int(match.group(1))
-
-        if not is_markdown_heading and not is_html_heading:
+        if not stripped.startswith("#"):
             return
 
         # Identify section
@@ -2940,7 +2916,7 @@ class ReportValidator:
 
         # Helper: only treat *level-2* headings ("## ") as report sections.
         # NOTE: "### ..." starts with "##" as a prefix, so we must exclude it explicitly.
-        is_h2 = (stripped.startswith("## ") and not stripped.startswith("###")) or (is_html_heading and html_level == 2)
+        is_h2 = stripped.startswith("## ") and not stripped.startswith("###")
 
         if stripped.startswith("# repoLens Report"):
             current_step = "header"

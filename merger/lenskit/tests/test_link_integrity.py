@@ -3,9 +3,8 @@ import re
 from pathlib import Path
 from merger.lenskit.core import merge
 
-# Regex to find <a id="..."> or <hN id="...">
-# We accept 'a' (anchor) or 'h1'-'h6' (heading) tags with an id attribute.
-ID_REGEX = re.compile(r'<(?:a|h[1-6])\s+[^>]*id="([^"]+)"')
+# Regex to find <a id="...">
+ID_REGEX = re.compile(r'<a\s+id="([^"]+)"></a>')
 # Regex to find href="#..."
 HREF_REGEX = re.compile(r'href="#([^"]+)"')
 # Regex to find [text](#fragment)
@@ -37,7 +36,7 @@ def sample_file_info():
 def test_link_integrity_all_fragments_resolve(sample_file_info, tmp_path):
     """
     Test that every internal link (#fragment) in the generated report
-    resolves to an explicit <a id="..."> or <hN id="..."> anchor.
+    resolves to an explicit <a id="..."> anchor.
     """
     files = [sample_file_info]
     # Create dummy source
