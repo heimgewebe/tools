@@ -288,6 +288,7 @@ def test_target_hash_error(tmp_path: Path) -> None:
 
     repo_report = report["repos"]["repo1"]
     assert repo_report["status"] == "error"
+    assert repo_report["summary"]["error"] == 1
 
     details = repo_report["details"][0]
     assert details["action"] == "ERROR"
