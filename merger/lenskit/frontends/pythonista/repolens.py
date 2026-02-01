@@ -42,6 +42,18 @@ from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
 from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
 
 
+def _flatten_meta(d: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Helper to flatten nested 'meta' dicts (legacy v1 compatibility).
+    Returns a new dict with top-level keys merged from d['meta'] if present.
+    """
+    if "meta" in d and isinstance(d["meta"], dict):
+        merged = dict(d)
+        merged.update(d["meta"])
+        return merged
+    return d
+
+
 DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
@@ -1579,10 +1591,8 @@ class MergerUI(object):
             meta = {}
             delta = {}
             try:
-                meta, _ = load_pr_schau_bundle(bdir, strict=False, verify_level="none")
-                # Normalize legacy access if needed (v1 nested 'meta')
-                if "meta" in meta and isinstance(meta["meta"], dict):
-                    meta.update(meta["meta"])
+                meta_raw, _ = load_pr_schau_bundle(bdir, strict=False, verify_level="none")
+                meta = _flatten_meta(meta_raw)
             except Exception:
                 pass
 
@@ -1702,9 +1712,8 @@ class MergerUI(object):
                         # Attempt fallback from bundle metadata if folder name is invalid
                         try:
                             # Use canonical loader even for fallback checks
-                            bj, _ = load_pr_schau_bundle(ts_dir, strict=False, verify_level="none")
-                            if "meta" in bj and isinstance(bj["meta"], dict):
-                                bj.update(bj["meta"])
+                            bj_raw, _ = load_pr_schau_bundle(ts_dir, strict=False, verify_level="none")
+                            bj = _flatten_meta(bj_raw)
 
                             if "created_at" in bj:
                                 # Normalize the JSON timestamp too
