@@ -42,6 +42,18 @@ from repolens_utils import normalize_path, normalize_repo_id, safe_script_path
 from repolens_helpers import deserialize_prescan_pool, resolve_pool_include_paths
 
 
+def _flatten_meta(d: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Helper to flatten nested 'meta' dicts (legacy v1 compatibility).
+    Returns a new dict with top-level keys merged from d['meta'] if present.
+    """
+    if "meta" in d and isinstance(d["meta"], dict):
+        merged = dict(d)
+        merged.update(d["meta"])
+        return merged
+    return d
+
+
 DEFAULT_LEVEL = "max"
 DEFAULT_MODE = "gesamt"  # combined
 DEFAULT_SPLIT_SIZE = "25MB"
@@ -178,6 +190,7 @@ try:
         ExtrasConfig,
         parse_human_size,
     )
+    from lenskit.core.pr_schau_bundle import load_pr_schau_bundle, PRSchauBundleError, BUNDLE_FILENAME
 except ImportError:
     sys.path.append(str(SCRIPT_DIR.parent.parent.parent))
     from lenskit.core.merge import (
@@ -192,6 +205,7 @@ except ImportError:
         ExtrasConfig,
         parse_human_size,
     )
+    from lenskit.core.pr_schau_bundle import load_pr_schau_bundle, PRSchauBundleError, BUNDLE_FILENAME
 
 PROFILE_DESCRIPTIONS = {
     # Kurzbeschreibung der Profile für den UI-Hint
@@ -1577,9 +1591,8 @@ class MergerUI(object):
             meta = {}
             delta = {}
             try:
-                p_bundle = bdir / "bundle.json"
-                if p_bundle.exists():
-                    meta = json.loads(p_bundle.read_text("utf-8"))
+                meta_raw, _ = load_pr_schau_bundle(bdir, strict=False, verify_level="none")
+                meta = _flatten_meta(meta_raw)
             except Exception:
                 pass
 
@@ -1696,14 +1709,15 @@ class MergerUI(object):
                     ts_sort = _normalize_ts(ts_raw)
 
                     if not ts_sort:
-                        # Attempt fallback from bundle.json if folder name is invalid
+                        # Attempt fallback from bundle metadata if folder name is invalid
                         try:
-                            bj_path = ts_dir / "bundle.json"
-                            if bj_path.exists():
-                                bj = json.loads(bj_path.read_text("utf-8"))
-                                if "created_at" in bj:
-                                    # Normalize the JSON timestamp too
-                                    ts_sort = _normalize_ts(bj["created_at"])
+                            # Use canonical loader even for fallback checks
+                            bj_raw, _ = load_pr_schau_bundle(ts_dir, strict=False, verify_level="none")
+                            bj = _flatten_meta(bj_raw)
+
+                            if "created_at" in bj:
+                                # Normalize the JSON timestamp too
+                                ts_sort = _normalize_ts(bj["created_at"])
                         except Exception:
                             pass
 
@@ -1716,7 +1730,7 @@ class MergerUI(object):
                         display_ts = ts_sort
 
                     review_md = ts_dir / "review.md"
-                    bundle_json = ts_dir / "bundle.json"
+                    bundle_json = ts_dir / BUNDLE_FILENAME
                     delta_json = ts_dir / "delta.json"
 
                     # Robustness: Include even if review.md missing, if metadata exists
@@ -1794,11 +1808,11 @@ class MergerUI(object):
                 _notify("Select a bundle to open", "info")
                 return
 
-            # Smart Open: Try review.md -> bundle.json -> delta.json
+            # Smart Open: Try review.md -> bundle metadata -> delta.json
             item = items[row]
             candidates = [
                 item.get("path"),                   # review.md
-                item.get("bundle_dir") / "bundle.json",
+                item.get("bundle_dir") / BUNDLE_FILENAME,
                 item.get("bundle_dir") / "delta.json"
             ]
 
